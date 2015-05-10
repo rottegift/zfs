@@ -453,7 +453,7 @@ zio_unique_parent(zio_t *cio)
 		{
 			zio_t *nio;
 			if ((nio = zio_walk_parents(cio)) != NULL) {
-				printf("ZFS: about to panic due to zio_unique_parent() not being NULL: pio %p -> nio %p\n", nio);
+				printf("ZFS: about to panic due to zio_unique_parent() not being NULL: pio %p -> nio %p\n", pio, nio);
 
 				while((nio = zio_walk_parents(cio)) != NULL)
 					printf("ZFS: nio %p\n", nio);
