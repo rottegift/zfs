@@ -3328,7 +3328,13 @@ arc_reclaim_needed(void)
     }
 #endif
 #endif
-	return (arc_available_memory() < 0);
+    int64_t a = arc_available_memory();
+    if(a < 0) {
+      printf("ZFS: %s, arc_available_memory was negative (%lld), returning 1\n", __func__, a);
+      return 1;
+    }
+
+    return 0;
 }
 
 static void
@@ -3418,7 +3424,14 @@ arc_reclaim_thread(void)
 
 		mutex_exit(&arc_reclaim_lock);
 
-		if (free_memory <= 0) {  // smd - otherwise we fall through
+		if(free_memory < 0) {
+		    printf("ZFS: %s free_memory negative, %lld, so we would  arc_kmem_reap_now()\n", __func__, free_memory);
+		} else if (free_memory == 0) {
+		  printf("ZFS: %s free_memory zero, setting to -4096\n", __func__);
+		  free_memory = -4096;
+		}
+
+		if (free_memory < 0) {  // smd - otherwise we fall through
 
 			arc_no_grow = B_TRUE;
 			arc_warm = B_TRUE;
@@ -3439,6 +3452,10 @@ arc_reclaim_thread(void)
 
 			int64_t to_free =
 			    (arc_c >> arc_shrink_shift) - free_memory;
+
+			printf("ZFS: %s, after arc reap, free_memory is %lld, to_free is %lld\n",
+			       __func__, free_memory, to_free);
+
 			if (to_free > 0) {
 #ifdef _KERNEL
 #ifdef sun
@@ -3448,6 +3465,7 @@ arc_reclaim_thread(void)
 				to_free = MAX(to_free, kmem_num_pages_wanted() * PAGESIZE);
 #endif
 #endif
+				printf("ZFS: %s, to_free == %lld, calling arc_shrink()\n", __func__, to_free);
 				arc_shrink(to_free);
 			}
 		} else if (free_memory < arc_c >> arc_no_grow_shift) {
