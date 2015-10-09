@@ -2665,7 +2665,6 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
     zfsvfs_t *zfsvfs = vfs_fsprivate(mp);
 	//kthread_t *td = (kthread_t *)curthread;
 	objset_t *os;
-	cred_t *cr =  (cred_t *)vfs_context_ucred(context);
 	int ret;
 
     dprintf("+unmount\n");
