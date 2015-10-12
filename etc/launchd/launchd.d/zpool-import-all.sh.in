@@ -37,80 +37,68 @@ if [ -f /etc/zfs/zpool.cache ]
 then
     # but this isn't a superb idea because import order is all over the map
     # and importing ssdpool last is [a] system-slowing and [b] leaves empty directories mounted
+    echo "zpool.cache file found!"
     #echo "Running zpool import -c /etc/zfs/zpool.cache -a"
     #"${ZPOOL}" import -c /etc/zfs/zpool.cache -a && ZPOOL_CACHE_DONE=1
-    echo "zpool.cache file found!"
 fi
 
 if ((!ZPOOL_CACHE_DONE))
 then
-    SSDPOOL_CACHE_DONE=0
-    TRINITY_CACHE_DONE=0
-    DONKEY_CACHE_DONE=0
-    CLATM_CACHE_DONE=0
+    HOMEPOOL_CACHE_DONE=0
+    DUAL_CACHE_DONE=0
     echo "ZPOOL_CACHE_DONE = 0, therefore trying individual caches"
-    if [ -f /etc/zfs/caches/ssdpool.cache ]
+    if [ -f /etc/zfs/caches/homepool.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache ssdpool && SSDPOOL_CACHE_DONE=1
-	if ((!SSDPOOL_CACHE_DONE))
+	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache homepool && HOMEPOOL_CACHE_DONE=1
+	if ((!HOMEPOOL_CACHE_DONE))
 	then
-	    echo "ssdpool cache import failed, this is critical. bye."
+	    echo "homepool cache import failed, this is critical. bye."
 	    exit 1
 	fi
     fi
-    if [ -f /etc/zfs/caches/Trinity.cache ]
+    if [ -f /etc/zfs/caches/Dual.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache Trinity  && TRINITY_CACHE_DONE=1
-    fi
-    if [ -f /etc/zfs/caches/Donkey.cache ]
-    then
-	"${ZPOOL}" import -c /etc/zfs/caches/Donkey.cache Donkey && DONKEY_CACHE_DONE=1
-    fi
-    if [ -f /etc/zfs/caches/CLATM.cache ]
-    then
-	"${ZPOOL}" import -c /etc/zfs/caches/CLATM.cache CLATM && CLATM_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache Dual  && DUAL_CACHE_DONE=1
     fi
 fi
 
 if((ZPOOL_CACHE_DONE)); then echo Everything imported via cache.; fi
-if((SSDPOOL_CACHE_DONE)); then echo ssdpool imported via cache.; fi
-if((TRINITY_CACHE_DONE)); then echo Trinity imported via cache.; fi
-if((CLATM_CACHE_DONE)); then echo CLATM imported via cache.; fi
-if((DONKEY_CACHE_DONE)); then echo Donkey imported via cache.; fi
+if((HOMEPOOL_CACHE_DONE)); then echo homepool imported via cache.; fi
+if((DUAL_CACHE_DONE)); then echo Dual imported via cache.; fi
 
-if ((!ZPOOL_IMPORT_CACHE && ((! ((SSDPOOL_CACHE_DONE || CLATM_CACHE_DONE || DONKEY_CACHE_DONE || TRINITY_CACHE_DONE))))))
+if ((!ZPOOL_IMPORT_CACHE && ((! ((HOMEPOOL_CACHE_DONE || DUAL_CACHE_DONE))))))
 then
     echo "Nothing imported via caches.  Running zpool import -d /etc/zfs/devices"
     "${ZPOOL}" import -d /etc/zfs/devices
     date
 
-    echo "Running zpool import -d /etc/zfs/devices ssdpool || exit 1"
-    "${ZPOOL}" import -d /etc/zfs/devices ssdpool || exit 1
+    echo "Running zpool import -d /etc/zfs/devices homepool || exit 1"
+    "${ZPOOL}" import -d /etc/zfs/devices homepool || exit 1
     date
 
     echo "Running zfs mount -a || exit 1"
     "${ZFS}" mount -a  || exit 1
     date
 
-    echo "Running zpool import -d /etc/zfs/devices Trinity || exit 1"
-    "${ZPOOL}" import -d /etc/zfs/devices Trinity || exit 1
+    echo "Running zpool import -d /etc/zfs/devices Dual || exit 1"
+    "${ZPOOL}" import -d /etc/zfs/devices Dual || exit 1
     date
 
-    echo "Running zpool import -d /etc/zfs/devices -a"
-    date
+#    echo "Running zpool import -d /etc/zfs/devices -a"
+#    date
 
-    "${ZPOOL}" import -d /etc/zfs/devices -a
+ #   "${ZPOOL}" import -d /etc/zfs/devices -a
     ret=$?
 
     date
-    echo "Finished running zpool import -a : ${ret}"
+    echo "Finished running zpool import : ${ret}"
 fi
 
 echo "Touching the file ${ZPOOL_IMPORT_ALL_COOKIE}"
 touch "${ZPOOL_IMPORT_ALL_COOKIE}"
 
 echo "Setting cachefile properties"
-for i in ssdpool Donkey Trinity CLATM
+for i in homepool Dual
 do
     "${ZPOOL}" set cachefile=/etc/zfs/caches/$i.cache $i
 done
