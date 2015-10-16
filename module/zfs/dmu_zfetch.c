@@ -56,12 +56,30 @@ typedef struct zfetch_stats {
 	kstat_named_t zfetchstat_hits;
 	kstat_named_t zfetchstat_misses;
 	kstat_named_t zfetchstat_max_streams;
+  kstat_named_t zfetchstat_miss_a;
+  kstat_named_t zfetchstat_miss_b;
+  kstat_named_t zfetchstat_miss_c;
+  kstat_named_t zfetchstat_hits_a;
+  kstat_named_t zfetchstat_not_max_streams;
+  kstat_named_t zfetchstat_blkid_changed;
+  kstat_named_t zfetchstat_break_taken;
+  kstat_named_t zfetchstat_break_not_taken;
+  kstat_named_t zfetchstat_stream_create;
 } zfetch_stats_t;
 
 static zfetch_stats_t zfetch_stats = {
 	{ "hits",			KSTAT_DATA_UINT64 },
 	{ "misses",			KSTAT_DATA_UINT64 },
 	{ "max_streams",		KSTAT_DATA_UINT64 },
+	{ "miss_a",			KSTAT_DATA_UINT64 },
+	{ "miss_b",			KSTAT_DATA_UINT64 },
+	{ "miss_c",			KSTAT_DATA_UINT64 },
+	{ "hits_a",			KSTAT_DATA_UINT64 },
+	{ "not_max_streams",			KSTAT_DATA_UINT64 },
+	{ "blkid_changed",			KSTAT_DATA_UINT64 },
+	{ "break_taken",			KSTAT_DATA_UINT64 },
+	{ "break_not_taken",			KSTAT_DATA_UINT64 },
+	{ "stream_create",		KSTAT_DATA_UINT64 },
 };
 
 #define	ZFETCHSTAT_BUMP(stat) \
@@ -154,6 +172,8 @@ dmu_zfetch_stream_create(zfetch_t *zf, uint64_t blkid)
 
 	ASSERT(RW_WRITE_HELD(&zf->zf_rwlock));
 
+	ZFETCHSTAT_BUMP(zfetchstat_stream_create);
+
 	/*
 	 * Clean up old streams.
 	 */
@@ -181,6 +201,8 @@ dmu_zfetch_stream_create(zfetch_t *zf, uint64_t blkid)
 	if (numstreams >= max_streams) {
 		ZFETCHSTAT_BUMP(zfetchstat_max_streams);
 		return;
+	} else {
+	  ZFETCHSTAT_BUMP(zfetchstat_not_max_streams);
 	}
 
 	zstream_t *zs = kmem_zalloc(sizeof (*zs), KM_SLEEP);
@@ -208,10 +230,16 @@ dmu_zfetch(zfetch_t *zf, uint64_t blkid, uint64_t nblks)
 	 * As a fast path for small (single-block) files, ignore access
 	 * to the first block.
 	 */
-	if (blkid == 0)
+	if (blkid == 0) {
+	  ZFETCHSTAT_BUMP(zfetchstat_miss_b);
 		return;
+	}
 
 	rw_enter(&zf->zf_rwlock, RW_READER);
+
+	if(list_head(&zf->zf_stream) == NULL) {
+	  ZFETCHSTAT_BUMP(zfetchstat_miss_c);
+	}
 
 	for (zs = list_head(&zf->zf_stream); zs != NULL;
 	    zs = list_next(&zf->zf_stream, zs)) {
@@ -223,10 +251,13 @@ dmu_zfetch(zfetch_t *zf, uint64_t blkid, uint64_t nblks)
 			 */
 			if (blkid != zs->zs_blkid) {
 				mutex_exit(&zs->zs_lock);
+				ZFETCHSTAT_BUMP(zfetchstat_blkid_changed);
 				continue;
 			}
+			ZFETCHSTAT_BUMP(zfetchstat_break_taken);
 			break;
 		}
+		ZFETCHSTAT_BUMP(zfetchstat_break_not_taken);
 	}
 
 	if (zs == NULL) {
@@ -234,13 +265,14 @@ dmu_zfetch(zfetch_t *zf, uint64_t blkid, uint64_t nblks)
 		 * This access is not part of any existing stream.  Create
 		 * a new stream for it.
 		 */
-		ZFETCHSTAT_BUMP(zfetchstat_misses);
+	  ZFETCHSTAT_BUMP(zfetchstat_misses); ZFETCHSTAT_BUMP(zfetchstat_miss_a);
 		if (rw_tryupgrade(&zf->zf_rwlock))
 			dmu_zfetch_stream_create(zf, blkid + nblks);
 		rw_exit(&zf->zf_rwlock);
 		return;
 	}
 
+	ZFETCHSTAT_BUMP(zfetchstat_hits_a);
 	/*
 	 * This access was to a block that we issued a prefetch for on
 	 * behalf of this stream. Issue further prefetches for this stream.
@@ -272,6 +304,7 @@ dmu_zfetch(zfetch_t *zf, uint64_t blkid, uint64_t nblks)
 	 * indirect block to be read from disk.  Therefore
 	 * we do not want to hold any locks while we call it.
 	 */
+
 	mutex_exit(&zs->zs_lock);
 	rw_exit(&zf->zf_rwlock);
 	for (int i = 0; i < pf_nblks; i++) {
