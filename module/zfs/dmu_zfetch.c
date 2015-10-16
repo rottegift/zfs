@@ -57,6 +57,7 @@ typedef struct zfetch_stats {
 	kstat_named_t zfetchstat_misses;
 	kstat_named_t zfetchstat_max_streams;
   kstat_named_t zfetchstat_miss_a;
+  kstat_named_t zfetchstat_miss_a_prime;
   kstat_named_t zfetchstat_miss_b;
   kstat_named_t zfetchstat_miss_c;
   kstat_named_t zfetchstat_hits_a;
@@ -72,6 +73,7 @@ static zfetch_stats_t zfetch_stats = {
 	{ "misses",			KSTAT_DATA_UINT64 },
 	{ "max_streams",		KSTAT_DATA_UINT64 },
 	{ "miss_a",			KSTAT_DATA_UINT64 },
+	{ "miss_a_prime",			KSTAT_DATA_UINT64 },
 	{ "miss_b",			KSTAT_DATA_UINT64 },
 	{ "miss_c",			KSTAT_DATA_UINT64 },
 	{ "hits_a",			KSTAT_DATA_UINT64 },
@@ -266,8 +268,10 @@ dmu_zfetch(zfetch_t *zf, uint64_t blkid, uint64_t nblks)
 		 * a new stream for it.
 		 */
 	  ZFETCHSTAT_BUMP(zfetchstat_misses); ZFETCHSTAT_BUMP(zfetchstat_miss_a);
-		if (rw_tryupgrade(&zf->zf_rwlock))
-			dmu_zfetch_stream_create(zf, blkid + nblks);
+	  if (rw_tryupgrade(&zf->zf_rwlock)) {
+	    ZFETCHSTAT_BUMP(zfetchstat_miss_a_prime);
+	    dmu_zfetch_stream_create(zf, blkid + nblks);
+	  }
 		rw_exit(&zf->zf_rwlock);
 		return;
 	}
