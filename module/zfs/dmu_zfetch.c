@@ -275,6 +275,9 @@ dmu_zfetch(zfetch_t *zf, uint64_t blkid, uint64_t nblks)
 	    dmu_zfetch_stream_create(zf, blkid + nblks);
 	  } else {
 	    ZFETCHSTAT_BUMP(zfetchstat_miss_a_prime_fail);
+	    rw_exit(&zf->zf_rwlock);
+	    rw_enter(&zf->zf_rwlock, RW_WRITER);
+	    dmu_zfetch_stream_create(zf, blkid + nblks);
 	  }
 		rw_exit(&zf->zf_rwlock);
 		return;
