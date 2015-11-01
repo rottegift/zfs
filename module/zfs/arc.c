@@ -3199,6 +3199,7 @@ int64_t arc_swapfs_reserve = 64;
  */
 
 extern int64_t kmem_avail(); // typecheck paranoia!
+extern int64_t spl_adjust_pressure(int64_t);
 
 static int64_t
 arc_available_memory(void)
@@ -3472,6 +3473,8 @@ arc_reclaim_thread(void)
 				  old_to_free = to_free;
 				}
 				arc_shrink(to_free);
+				printf("ZFS: %s, to_free: spl_adjust_pressure(%lld) returns %lld\n",
+				       __func__, to_free, spl_adjust_pressure(to_free));
 			} else if(old_to_free > 0) {
 			  printf("ZFS: %s, (old_)to_free has returned to zero from %lld\n",
 				 __func__, old_to_free);
@@ -3484,7 +3487,9 @@ arc_reclaim_thread(void)
 		}
 
 		evicted = arc_adjust();
-
+		printf("ZFS: %s, arc_adjust: spl_adjust_pressure(%lld) returns %lld\n",
+		       __func__, evicted, spl_adjust_pressure(evicted));
+		
 		mutex_enter(&arc_reclaim_lock);
 
 		/*
