@@ -3435,7 +3435,11 @@ arc_reclaim_thread(void)
 
 		if (free_memory < 0) {
 
+#ifdef __APPLE__
+#ifdef _KERNEL
 		  spl_adjust_pressure(free_memory);
+#endif
+#endif		  
 			arc_no_grow = B_TRUE;
 			arc_warm = B_TRUE;
 
