@@ -3481,8 +3481,9 @@ arc_reclaim_thread(void)
 #ifdef __APPLE__
 #ifdef _KERNEL				
 				if(to_free > 0) {
-				  printf("ZFS: %s, to_free: spl_adjust_pressure(%lld) returns %lld\n",
-					 __func__, to_free, spl_adjust_pressure(to_free));
+				  //printf("ZFS: %s, to_free: spl_adjust_pressure(%lld) returns %lld\n",
+				  //__func__, to_free, spl_adjust_pressure(to_free));
+				  (void)spl_adjust_pressure(to_free)
 				}
 #endif
 #endif				
@@ -3501,8 +3502,9 @@ arc_reclaim_thread(void)
 #ifdef __APPLE__
 #ifdef _KERNEL
 		if(evicted > 0) {
-		printf("ZFS: %s, arc_adjust: spl_adjust_pressure(%lld) returns %lld\n",
-		       __func__, evicted, spl_adjust_pressure(evicted));
+		  //printf("ZFS: %s, arc_adjust: spl_adjust_pressure(%lld) returns %lld\n",
+		  //   __func__, evicted, spl_adjust_pressure(evicted));
+		  (void)spl_adjust_pressure(evicted);
 		}
 #endif
 #endif
