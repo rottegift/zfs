@@ -3461,7 +3461,6 @@ arc_reclaim_thread(void)
 			int64_t to_free =
 			    (arc_c >> arc_shrink_shift) - free_memory;
 
-
 			if (to_free > 0) {
 #ifdef _KERNEL
 #ifdef sun
@@ -3469,29 +3468,38 @@ arc_reclaim_thread(void)
 #endif
 #ifdef __APPLE__
 				to_free = MAX(to_free, kmem_num_pages_wanted() * PAGESIZE);
-#endif
-#endif
+
 				if (to_free > old_to_free) {
 				  printf("ZFS: %s, to_free == %lld increased above %lld old_to_free (delta: %lld)\n",
 					 __func__, to_free, old_to_free, to_free - old_to_free);
 				  old_to_free = to_free;
 				}
 
+				int64_t pre_shrink_arc_c = arc_c;
+#endif // __APPLE__
+#endif // _KERNEL
 				arc_shrink(to_free);
-#ifdef __APPLE__
 #ifdef _KERNEL				
-				if(to_free > 0) {
-				  //printf("ZFS: %s, to_free: spl_adjust_pressure(%lld) returns %lld\n",
-				  //__func__, to_free, spl_adjust_pressure(to_free));
-				  (void)spl_adjust_pressure(to_free);
+#ifdef	__APPLE__
+				if(pre_shrink_arc_c > arc_c) {
+				  int64_t delta = pre_shrink_arc_c - arc_c;
+				  int64_t newpressure = spl_adjust_pressure(delta);
+				  printf("ZFS: %s, arc_c shrank by %lld, pressure_bytes_target now %llu\n",
+					 __func__, delta, newpressure);
 				}
-#endif
-#endif				
 			} else if(old_to_free > 0) {
 			  printf("ZFS: %s, (old_)to_free has returned to zero from %lld\n",
 				 __func__, old_to_free);
 			  old_to_free = 0;
 			}
+#endif // __APPLE__
+#ifdef sun
+			}
+#endif // sun
+#endif // _KERNEL
+#ifndef _KERNEL
+			}
+#endif // !_KERNEL
 		} else if (free_memory < arc_c >> arc_no_grow_shift) {
 			arc_no_grow = B_TRUE;
 		} else if (ddi_get_lbolt() >= growtime) {
