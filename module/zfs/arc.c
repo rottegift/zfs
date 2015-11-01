@@ -3330,7 +3330,8 @@ arc_reclaim_needed(void)
 
     int64_t a = arc_available_memory();
     if(a < 0) {
-#ifdef _KERNEL      
+#ifdef _KERNEL
+      (void)spl_adjust_pressure(a);
       dprintf("ZFS: %s, arc_available_memory was negative (%lld), returning 1\n", __func__, a);
 #endif      
       return 1;
@@ -3434,6 +3435,7 @@ arc_reclaim_thread(void)
 
 		if (free_memory < 0) {
 
+		  spl_adjust_pressure(free_memory);
 			arc_no_grow = B_TRUE;
 			arc_warm = B_TRUE;
 
@@ -4927,6 +4929,8 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 #endif
 #ifdef __APPLE__
 	int64_t available_memory = kmem_avail();
+	if(available_memory < 0)
+	  (void)spl_adjust_pressure(available_memory);
 	int64_t freemem = available_memory / PAGESIZE;
 #endif
 
