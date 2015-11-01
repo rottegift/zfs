@@ -3483,7 +3483,7 @@ arc_reclaim_thread(void)
 				if(to_free > 0) {
 				  //printf("ZFS: %s, to_free: spl_adjust_pressure(%lld) returns %lld\n",
 				  //__func__, to_free, spl_adjust_pressure(to_free));
-				  (void)spl_adjust_pressure(to_free)
+				  (void)spl_adjust_pressure(to_free);
 				}
 #endif
 #endif				
