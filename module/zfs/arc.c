@@ -3205,7 +3205,11 @@ arc_available_memory(void)
 	free_memory_reason_t r = FMR_UNKNOWN;
 
 #ifdef _KERNEL
-
+#ifdef __APPLE__
+	if(spl_free_manual_pressure_wrapper() != 0) {
+	  cv_signal(&arc_reclaim_thread_cv);
+	}
+#endif //__APPLE__
 #ifdef sun
 	int64_t n;
 	if (needfree > 0) {
