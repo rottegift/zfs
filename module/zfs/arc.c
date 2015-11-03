@@ -3539,6 +3539,7 @@ int64_t arc_swapfs_reserve = 64;
  * needed.  Positive if there is sufficient free memory, negative indicates
  * the amount of memory that needs to be freed up.
  */
+
 static int64_t
 arc_available_memory(void)
 {
@@ -3758,6 +3759,7 @@ arc_kmem_reap_now(void)
  * This possible deadlock is avoided by always acquiring a hash lock
  * using mutex_tryenter() from arc_reclaim_thread().
  */
+
 static void
 #ifdef __APPLE__
 arc_reclaim_thread(void *notused)
@@ -3777,7 +3779,15 @@ arc_reclaim_thread(void)
 
 		mutex_exit(&arc_reclaim_lock);
 
+#ifdef __APPLE
+#ifdef _KERNEL
+		if (free_memory < 0 || spl_free_manual_pressure_wrapper() != 0) {
+#else
+	        if (free_memory < 0) {
+#endif
+#else
 		if (free_memory < 0) {
+#endif
 
 			arc_no_grow = B_TRUE;
 			arc_warm = B_TRUE;
@@ -3850,7 +3860,7 @@ arc_reclaim_thread(void)
 
 		evicted = arc_adjust();
 
-		mutex_enter(&arc_reclaim_lock);
+               mutex_enter(&arc_reclaim_lock);
 
 		/*
 		 * If evicted is zero, we couldn't evict anything via
