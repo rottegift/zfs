@@ -3331,7 +3331,7 @@ arc_reclaim_needed(void)
 
 #ifdef __APPLE__
 #ifdef _KERNEL
-    if(spl_free_manual_pressure_wrapper() > 0) {
+    if(spl_free_manual_pressure_wrapper() != 0) {
       return 1;
     }
 #endif
@@ -3430,7 +3430,7 @@ arc_reclaim_thread(void)
 
 #ifdef __APPLE
 #ifdef _KERNEL
-		if (free_memory < 0 || spl_free_manual_pressure_wrapper() > 0) {
+		if (free_memory < 0 || spl_free_manual_pressure_wrapper() != 0) {
 #else
 	        if (free_memory < 0) {
 #endif
