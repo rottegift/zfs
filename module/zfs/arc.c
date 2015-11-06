@@ -3463,7 +3463,13 @@ arc_reclaim_thread(void)
 			int64_t to_free =
 			    (arc_c >> arc_shrink_shift) - free_memory;
 
+#ifndef _KERNEL			
 			if (to_free > 0) {
+#else
+#ifdef __APPLE__
+			if(to_free > 0 || spl_free_manual_pressure_wrapper() != 0) {
+#endif
+#endif			    
 #ifdef _KERNEL
 #ifdef sun
 				to_free = MAX(to_free, ptob(needfree));
