@@ -4978,7 +4978,11 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 #else // 0 - APPLE
 	// the return from here is used to block all writes, so we don't want to return 1
 	// except in exceptional cases - smd
-	if(!spl_minimal_physmem_p()) { // && arc_reclaim_needed()) {
+	if(spl_free_manual_pressure_wrapper() != 0) {
+	  cv_signal(&arc_reclaim_thread_cv);
+	  kpreempt(KPREEMPT_SYNC);
+	}
+	if(!spl_minimal_physmem_p() && arc_reclaim_needed()) {
 	  ARCSTAT_INCR(arcstat_memory_throttle_count, 1);
 	  cv_signal(&arc_reclaim_thread_cv);
 	  printf("ZFS: %s THROTTLED by SPL, reclaim signalled, txg = %llu, reserve = %llu\n",
