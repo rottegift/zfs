@@ -3208,6 +3208,7 @@ arc_available_memory(void)
 #ifdef __APPLE__
 	if(spl_free_manual_pressure_wrapper() != 0) {
 	  cv_signal(&arc_reclaim_thread_cv);
+	  kpreempt(KPREEMPT_SYNC);
 	}
 #endif //__APPLE__
 #ifdef sun
@@ -3304,6 +3305,9 @@ arc_available_memory(void)
 
 #ifdef __APPLE__
 	lowest = spl_free_wrapper();
+	if((lowest - spl_free_manual_pressure_wrapper()) < 0) {
+	  lowest -= spl_free_manual_pressure_wrapper();
+	}
 	// if (lowest < 0) printf("ZFS: %s: kmem_avail() negative, %lld\n", __func__, lowest);
 #endif
 
