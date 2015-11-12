@@ -55,6 +55,7 @@ Others' changes brought in:
 	Illumos 6295 metaslab_condense's dbgmsg should include vdev id
 	webrev 264 - spa_config_tryenter incorrectly handles the multiple lock case (diff 1)
 	             (NEX-2403)
+	lzc_receive: allow the caller to read the begin record
 
 O3X commits:
 
@@ -79,3 +80,4 @@ O3X commits:
 	get_history() should use zfs_ioctl() not ioctl() - ilovezfs
 	Force zed to run since KeepAlive=true is already set anyway - ilovezfs
 	Pick a better error code in zfs_space when its not FREESP
+	dir_is_empty() in zfs_mount() was always skipped
