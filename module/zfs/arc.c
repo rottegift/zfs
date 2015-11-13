@@ -1096,8 +1096,15 @@ typedef struct l2arc_log_ent_phys {
  * Maximum amount of data in an l2arc log block (used to terminate rebuilding
  * before we hit the write head and restore potentially corrupted blocks).
  */
-#define	L2ARC_LOG_BLK_MAX_PAYLOAD_SIZE	\
-	(SPA_MAXBLOCKSIZE * L2ARC_LOG_BLK_ENTRIES)
+//#define	L2ARC_LOG_BLK_MAX_PAYLOAD_SIZE		\
+//	(SPA_MAXBLOCKSIZE * L2ARC_LOG_BLK_ENTRIES)
+// per review discussion on reviews.csiden.org
+// this limit is not REALLY needed but sets a limit on the
+// minimum size of an l2arc device with respect to persistence
+// with SPA_MAXBLOCKSIZE at 16MiB, that's big (51GiB)
+// and there is no strong need for it to be limited per Saso
+#define	L2ARC_LOG_BLK_MAX_PAYLOAD_SIZE		\
+	(1024 * 1024 * L2ARC_LOG_BLK_ENTRIES)
 /*
  * For the persistence and rebuild algorithms to operate reliably we need
  * the L2ARC device to at least be able to hold 3 full log blocks (otherwise
