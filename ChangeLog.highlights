@@ -56,6 +56,7 @@ Others' changes brought in:
 	webrev 264 - spa_config_tryenter incorrectly handles the multiple lock case (diff 1)
 	             (NEX-2403)
 	lzc_receive: allow the caller to read the begin record
+	5778 nvpair_type_is_array() does not recognize DATA_TYPE_INT8_ARRAY
 
 O3X commits:
 
