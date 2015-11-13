@@ -83,7 +83,7 @@ then
     fi
     if [ -f /etc/zfs/caches/Dual.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache DUAL && DUAL_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache Dual && DUAL_CACHE_DONE=1
     fi
 fi
 
