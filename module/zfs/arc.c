@@ -7561,11 +7561,17 @@ l2arc_spa_rebuild_start(spa_t *spa)
 static void
 l2arc_dev_rebuild_start(l2arc_dev_t *dev)
 {
+  printf("ZFS: %s enter\n", __func__);
 	if (!dev->l2ad_rebuild_cancel) {
-		VERIFY(dev->l2ad_rebuild);
-		(void) l2arc_rebuild(dev);
-		dev->l2ad_rebuild = B_FALSE;
+	  printf("ZFS: %s not in cancel\n", __func__);
+	  VERIFY(dev->l2ad_rebuild);
+	  printf("ZFS: %s VERIFY done\n", __func__);		
+	  (void) l2arc_rebuild(dev);
+	  printf("ZFS: %s returned from l2arc_rebuild\n", __func__);
+	  dev->l2ad_rebuild = B_FALSE;
 	}
+	printf("ZFS: %s calling thread_exit()\n", __func__);
+	thread_exit();
 }
 
 /*
