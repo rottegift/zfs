@@ -55,6 +55,7 @@ Others' changes brought in:
 	Illumos 6295 metaslab_condense's dbgmsg should include vdev id
 	webrev 264 - spa_config_tryenter incorrectly handles the multiple lock case (diff 1)
 	             (NEX-2403)
+        3525  Persistent L2ARC 	https://reviews.csiden.org/r/267/diff/4#index_header
 
 O3X commits:
 
