@@ -84,3 +84,5 @@ O3X commits:
 	Hide trivial ACLs from OS X
 	Clearing of ACLs also needs to read trivials
 	Change default mode from discard to passthrough
+	Include notice that nobrowse disables Spotlight
+	chown is a noop with MNT_IGNORE_OWNERSHIP
