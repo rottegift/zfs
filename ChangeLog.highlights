@@ -80,3 +80,7 @@ O3X commits:
 	get_history() should use zfs_ioctl() not ioctl() - ilovezfs
 	Force zed to run since KeepAlive=true is already set anyway - ilovezfs
 	Pick a better error code in zfs_space when its not FREESP
+	Add missing .mk line to O3X's zpool.8
+	Hide trivial ACLs from OS X
+	Clearing of ACLs also needs to read trivials
+	Change default mode from discard to passthrough
