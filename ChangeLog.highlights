@@ -86,3 +86,4 @@ O3X commits:
 	Change default mode from discard to passthrough
 	Include notice that nobrowse disables Spotlight
 	chown is a noop with MNT_IGNORE_OWNERSHIP
+	More debug around zvol's readonly bug
