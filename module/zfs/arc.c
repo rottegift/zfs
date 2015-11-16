@@ -7669,6 +7669,11 @@ l2arc_rebuild(l2arc_dev_t *dev)
 	  if(spa_config_tryenter(spa, SCL_L2ARC, vd, RW_READER)) {
 	    lock_held = B_TRUE;
 	    break;
+	  } else if(dev->l2ad_rebuild_cancel) {
+	    printf("ZFS: %s: cancel detected (%d) for thread %p, aborting spa_config_tryenter_loop after %d seconds\n",
+		   __func__, dev->l2ad_rebuild_cancel, dev->l2ad_rebuild_did, i);
+	    err = SET_ERROR(ECANCELED);
+	    goto out;
 	  } else {
 	    printf("ZFS: %s: lock not held after %d seconds, retrying, thread=%p, cancel=%d\n",
 		   __func__, i, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
