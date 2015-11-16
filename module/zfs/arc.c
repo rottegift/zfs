@@ -7650,12 +7650,32 @@ l2arc_rebuild(l2arc_dev_t *dev)
 	 * safe, because the spa will signal us to stop before removing
 	 * our device and wait for us to stop.
 	 */
+
+#if 0	
 	printf("ZFS: %s calling spa_config_enter, thread %p, cancel = %d\n",
 	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 	spa_config_enter(spa, SCL_L2ARC, vd, RW_READER);
 	lock_held = B_TRUE;
 	printf("ZFS: %s spa_config_enter lock held, thread %p, cancel = %d\n",
 	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
+#else
+	printf("ZFS: %s starting spa_config_tryenter loop, thread %p, cancel = %d\n",
+	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
+
+	for(int i=0; ; i++) {
+	  if(spa_config_tryenter(spa, SCL_L2ARC, vd, RW_READER)) {
+	    lock_held = B_TRUE;
+	    break;
+	  } else {
+	    printf("ZFS: %s: lock not held after %d seconds, retrying, thread=%p, cancel=%d\n",
+		   __func__, i, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
+	    delay(1*hz);
+	  }
+	}
+
+	printf("ZFS: %s spa_config_tryenter: lock held, thread %p, cancel = %d\n",
+	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
+#endif	
 
 	load_guid = spa_load_guid(dev->l2ad_vdev->vdev_spa);
 	/*
