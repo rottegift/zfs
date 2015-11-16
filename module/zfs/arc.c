@@ -3806,7 +3806,11 @@ arc_reclaim_thread(void)
 			 */
 			free_memory = arc_available_memory();
 
+#ifdef _KERNEL
+#ifdef __APPLE__
 			static int64_t old_to_free = 0;
+#endif
+#endif
 			int64_t to_free =
 			    (arc_c >> arc_shrink_shift) - free_memory;
 
@@ -7428,6 +7432,8 @@ l2arc_remove_vdev(vdev_t *vd)
 	 * Cancel any ongoing or scheduled rebuild (race protection with
 	 * l2arc_spa_rebuild_start provided via l2arc_dev_mtx).
 	 */
+	printf("ZFS: %s setting rebuild_cancel to true for thread did %p\n",
+	       __func__, remdev->l2ad_rebuild_did);
 	remdev->l2ad_rebuild_cancel = B_TRUE;
 	if (remdev->l2ad_rebuild_did != 0) {
 		/*
@@ -7438,13 +7444,17 @@ l2arc_remove_vdev(vdev_t *vd)
 		 */
 	  mutex_enter(&remdev->l2ad_rebuild_mutex);
 	  do {
-	    printf("ZFS: %s: waiting on condvar for rebuild thread %p\n", __func__, remdev->l2ad_rebuild_did);
-	    cv_wait(&remdev->l2ad_rebuild_cv, &remdev->l2ad_rebuild_mutex);
+	    static int iter = 0;
+	    printf("ZFS: %s: waiting on condvar for rebuild thread %p, iter %d\n",
+		   __func__, remdev->l2ad_rebuild_did, ++iter);
+	    cv_timedwait(&remdev->l2ad_rebuild_cv, &remdev->l2ad_rebuild_mutex, ddi_get_lbolt()+(hz*5));
 	  } while(!remdev->l2ad_rebuild_thread_exiting);
 	  mutex_exit(&remdev->l2ad_rebuild_mutex);
-	  printf("ZFS: %s: thread done %p, destroying cv and mutex\n", __func__, remdev->l2ad_rebuild_did);
+	  printf("ZFS: %s: thread done %p, destroying cv and mutex, setting did to 0\n",
+		 __func__, remdev->l2ad_rebuild_did);
 	  cv_destroy(&remdev->l2ad_rebuild_cv);
 	  mutex_destroy(&remdev->l2ad_rebuild_mutex);
+	  remdev->l2ad_rebuild_did = 0;
 		//thread_join(remdev->l2ad_rebuild_did);
 	}
 
@@ -7574,7 +7584,9 @@ l2arc_spa_rebuild_start(spa_t *spa)
 static void
 l2arc_dev_rebuild_start(l2arc_dev_t *dev)
 {
-  printf("ZFS: %s enter\n", __func__);
+  kt_did_t thr = dev->l2ad_rebuild_did;
+  
+  printf("ZFS: %s enter, thread %p/%p\n", __func__, thr, dev->l2ad_rebuild_did);
   mutex_enter(&dev->l2ad_rebuild_mutex);
   dev->l2ad_rebuild_thread_exiting = FALSE;
 	if (!dev->l2ad_rebuild_cancel) {
@@ -7590,12 +7602,24 @@ l2arc_dev_rebuild_start(l2arc_dev_t *dev)
 	  mutex_exit(&dev->l2ad_rebuild_mutex);
 	  printf("ZFS: %s in cancel\n", __func__);
 	}
-	printf("ZFS: %s calling cv_signal(&%p);\n", __func__, &dev->l2ad_rebuild_cv);
+	printf("ZFS: %s calling cv_broadcast(&%p);, thread %p, l2ad_rebuild_cancel == %d\n",
+	       __func__, &dev->l2ad_rebuild_cv, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 	mutex_enter(&dev->l2ad_rebuild_mutex);
 	dev->l2ad_rebuild_thread_exiting = TRUE;
 	mutex_exit(&dev->l2ad_rebuild_mutex);
-	cv_signal(&dev->l2ad_rebuild_cv);
-	printf("ZFS: %s calling thread_exit()\n", __func__);
+	cv_broadcast(&dev->l2ad_rebuild_cv);
+	kpreempt(KPREEMPT_SYNC);
+	if(!dev->l2ad_rebuild_cancel) {
+	  printf("ZFS: %s thread %p/%p cancel is false, leaking cv & mutex!\n",
+		 __func__, thr, dev->l2ad_rebuild_did);
+	  // also should probably set did to 0
+	}
+	if(dev->l2ad_rebuild_did != thr) {
+	  printf("ZFS: %s thr (%p) != l2ad_rebuild_did (%p) (zero is probably OK)\n",
+		 __func__, thr, dev->l2ad_rebuild_did);
+	}
+	printf("ZFS: %s calling thread_exit(), thread %p, l2ad_rebuild_cancel == %d\n",
+	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 	thread_exit();
 }
 
@@ -7623,7 +7647,7 @@ l2arc_rebuild(l2arc_dev_t *dev)
 	uint8_t			*this_lb_buf, *next_lb_buf;
 	zio_t			*this_io = NULL, *next_io = NULL;
 	l2arc_log_blkptr_t	lb_ptrs[2];
-	boolean_t		first_pass, lock_held;
+	boolean_t		first_pass = B_FALSE, lock_held = B_FALSE;
 	uint64_t		load_guid;
 
 	this_lb = kmem_zalloc(sizeof (*this_lb), KM_SLEEP);
@@ -7638,8 +7662,12 @@ l2arc_rebuild(l2arc_dev_t *dev)
 	 * safe, because the spa will signal us to stop before removing
 	 * our device and wait for us to stop.
 	 */
+	printf("ZFS: %s calling spa_config_enter, thread %p, cancel = %d\n",
+	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 	spa_config_enter(spa, SCL_L2ARC, vd, RW_READER);
 	lock_held = B_TRUE;
+	printf("ZFS: %s spa_config_enter lock held, thread %p, cancel = %d\n",
+	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 
 	load_guid = spa_load_guid(dev->l2ad_vdev->vdev_spa);
 	/*
@@ -7662,6 +7690,8 @@ l2arc_rebuild(l2arc_dev_t *dev)
 	bcopy(dev->l2ad_dev_hdr->dh_start_lbps, lb_ptrs, sizeof (lb_ptrs));
 	first_pass = B_TRUE;
 
+	printf("ZFS: %s start rebuild process, thread %p, cancel = %d\n",
+	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 	/* Start the rebuild process */
 	for (;;) {
 		if (!l2arc_log_blkptr_valid(dev, &lb_ptrs[0]))
@@ -7673,8 +7703,12 @@ l2arc_rebuild(l2arc_dev_t *dev)
 		    this_io, &next_io)) != 0)
 			break;
 
+		printf("ZFS: %s calling spa_config_exit, thread %p, cancel = %d\n",
+		       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 		spa_config_exit(spa, SCL_L2ARC, vd);
 		lock_held = B_FALSE;
+		printf("ZFS: %s lock now not held, thread %p, cancel = %d\n",
+		       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 
 		/* Protection against infinite loops of log blocks. */
 		if (l2arc_range_check_overlap(lb_ptrs[1].lbp_daddr,
@@ -7741,6 +7775,7 @@ l2arc_rebuild(l2arc_dev_t *dev)
 				err = SET_ERROR(ECANCELED);
 				goto out;
 			}
+			printf("ZFS: %s calling spa_config_tryenter (cancel must be false)\n", __func__);
 			if (spa_config_tryenter(spa, SCL_L2ARC, vd,
 			    RW_READER)) {
 				lock_held = B_TRUE;
@@ -7753,22 +7788,32 @@ l2arc_rebuild(l2arc_dev_t *dev)
 			 * delay, we check l2ad_rebuild_cancel and retry
 			 * the lock again.
 			 */
-			delay(1);
+			delay(1*hz);
 		}
 	}
 out:
+	printf("ZFS: %s out, thread %p, cancel = %d\n",
+	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 	if (next_io != NULL)
 		l2arc_log_blk_prefetch_abort(next_io);
 	kmem_free(this_lb, sizeof (*this_lb));
 	kmem_free(next_lb, sizeof (*next_lb));
 	kmem_free(this_lb_buf, sizeof (l2arc_log_blk_phys_t));
 	kmem_free(next_lb_buf, sizeof (l2arc_log_blk_phys_t));
-	if (err == 0)
+	if (err == 0) {
+	        printf("ZFS: %s rebuild success, thread %p, cancel = %d\n",
+		       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 		ARCSTAT_BUMP(arcstat_l2_rebuild_successes);
+	}
 
-	if (lock_held)
+	if (lock_held) {
+	        printf("ZFS: %s out - lock held, thread %p, cancel = %d\n",
+		       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 		spa_config_exit(spa, SCL_L2ARC, vd);
+	}
 
+	printf("ZFS: %s returning %d, thread %p, cancel = %d\n",
+	       __func__, err, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 	return (err);
 }
 
