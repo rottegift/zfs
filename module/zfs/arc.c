@@ -1261,6 +1261,9 @@ struct l2arc_dev {
 	boolean_t		l2ad_rebuild;
 	boolean_t		l2ad_rebuild_cancel;
 	kt_did_t		l2ad_rebuild_did;
+        boolean_t		l2ad_rebuild_thread_exiting;
+        kmutex_t		l2ad_rebuild_mutex;
+        kcondvar_t		l2ad_rebuild_cv;
 };
 
 static uint64_t
@@ -7433,10 +7436,15 @@ l2arc_remove_vdev(vdev_t *vd)
 		 * accessed from anywhere in the l2arc rebuild code below
 		 * (except for l2arc_spa_rebuild_start, which is ok).
 		 */
-	  printf("ZFS: %s: ignoring thread join for %lld & doing delay(5) instead\n",
-		 __func__, remdev->l2ad_rebuild_did);
-
-	  delay(5); 
+	  mutex_enter(&remdev->l2ad_rebuild_mutex);
+	  do {
+	    printf("ZFS: %s: waiting on condvar for rebuild thread %p\n", __func__, remdev->l2ad_rebuild_did);
+	    cv_wait(&remdev->l2ad_rebuild_cv, &remdev->l2ad_rebuild_mutex);
+	  } while(!remdev->l2ad_rebuild_thread_exiting);
+	  mutex_exit(&remdev->l2ad_rebuild_mutex);
+	  printf("ZFS: %s: thread done %p, destroying cv and mutex\n", __func__, remdev->l2ad_rebuild_did);
+	  cv_destroy(&remdev->l2ad_rebuild_cv);
+	  mutex_destroy(&remdev->l2ad_rebuild_mutex);
 		//thread_join(remdev->l2ad_rebuild_did);
 	}
 
@@ -7544,11 +7552,16 @@ l2arc_spa_rebuild_start(spa_t *spa)
 		if (dev->l2ad_rebuild && !dev->l2ad_rebuild_cancel) {
 			VERIFY3U(dev->l2ad_rebuild_did, ==, 0);
 #ifdef	_KERNEL
+			mutex_init(&dev->l2ad_rebuild_mutex, NULL, MUTEX_DEFAULT, NULL);
+			cv_init(&dev->l2ad_rebuild_cv, NULL, CV_DEFAULT, NULL);
+			mutex_enter(&dev->l2ad_rebuild_mutex);
+			dev->l2ad_rebuild_thread_exiting = FALSE;
+			mutex_exit(&dev->l2ad_rebuild_mutex);
 			dev->l2ad_rebuild_did = thread_create(NULL, 0,
 							      (void *)l2arc_dev_rebuild_start,
 							      dev, 0, &p0, TS_RUN,
 							      minclsyspri);
-			printf("ZFS: %s, thread created %lld\n", __func__, dev->l2ad_rebuild_did);
+			printf("ZFS: %s, thread created %p\n", __func__, dev->l2ad_rebuild_did);
 #endif
 		}
 	}
@@ -7562,14 +7575,26 @@ static void
 l2arc_dev_rebuild_start(l2arc_dev_t *dev)
 {
   printf("ZFS: %s enter\n", __func__);
+  mutex_enter(&dev->l2ad_rebuild_mutex);
+  dev->l2ad_rebuild_thread_exiting = FALSE;
 	if (!dev->l2ad_rebuild_cancel) {
+	  mutex_exit(&dev->l2ad_rebuild_mutex);
 	  printf("ZFS: %s not in cancel\n", __func__);
 	  VERIFY(dev->l2ad_rebuild);
-	  printf("ZFS: %s VERIFY done\n", __func__);		
 	  (void) l2arc_rebuild(dev);
 	  printf("ZFS: %s returned from l2arc_rebuild\n", __func__);
+	  mutex_enter(&dev->l2ad_rebuild_mutex);
 	  dev->l2ad_rebuild = B_FALSE;
+	  mutex_exit(&dev->l2ad_rebuild_mutex);
+	} else {
+	  mutex_exit(&dev->l2ad_rebuild_mutex);
+	  printf("ZFS: %s in cancel\n", __func__);
 	}
+	printf("ZFS: %s calling cv_signal(&%p);\n", __func__, &dev->l2ad_rebuild_cv);
+	mutex_enter(&dev->l2ad_rebuild_mutex);
+	dev->l2ad_rebuild_thread_exiting = TRUE;
+	mutex_exit(&dev->l2ad_rebuild_mutex);
+	cv_signal(&dev->l2ad_rebuild_cv);
 	printf("ZFS: %s calling thread_exit()\n", __func__);
 	thread_exit();
 }
