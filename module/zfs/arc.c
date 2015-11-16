@@ -7609,17 +7609,20 @@ l2arc_dev_rebuild_start(l2arc_dev_t *dev)
 	mutex_exit(&dev->l2ad_rebuild_mutex);
 	cv_broadcast(&dev->l2ad_rebuild_cv);
 	kpreempt(KPREEMPT_SYNC);
-	if(!dev->l2ad_rebuild_cancel) {
-	  printf("ZFS: %s thread %p/%p cancel is false, leaking cv & mutex!\n",
+	if(!dev->l2ad_rebuild_cancel && dev->l2ad_rebuild_did == thr) {
+	  // we didn't get cleaned up in l2arc_remove_vdev
+	  printf("ZFS: %s thread %p/%p cancel is false, destroying cv & mutex!\n",
 		 __func__, thr, dev->l2ad_rebuild_did);
-	  // also should probably set did to 0
-	}
-	if(dev->l2ad_rebuild_did != thr) {
+	  cv_destroy(&dev->l2ad_rebuild_cv);
+	  mutex_destroy(&dev->l2ad_rebuild_mutex);
+	  dev->l2ad_rebuild_did = 0;
+	} else if(dev->l2ad_rebuild_did != thr) {
+	  // zero: we probably got cleaned up in l2arc_remove_vdev, nonzero: impossible?
 	  printf("ZFS: %s thr (%p) != l2ad_rebuild_did (%p) (zero is probably OK)\n",
 		 __func__, thr, dev->l2ad_rebuild_did);
 	}
-	printf("ZFS: %s calling thread_exit(), thread %p, l2ad_rebuild_cancel == %d\n",
-	       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
+	printf("ZFS: %s calling thread_exit(), thread %p/%p, l2ad_rebuild_cancel == %d\n",
+	       __func__, thr, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 	thread_exit();
 }
 
@@ -7723,12 +7726,8 @@ l2arc_rebuild(l2arc_dev_t *dev)
 		    this_io, &next_io)) != 0)
 			break;
 
-		printf("ZFS: %s calling spa_config_exit, thread %p, cancel = %d\n",
-		       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 		spa_config_exit(spa, SCL_L2ARC, vd);
 		lock_held = B_FALSE;
-		printf("ZFS: %s lock now not held, thread %p, cancel = %d\n",
-		       __func__, dev->l2ad_rebuild_did, dev->l2ad_rebuild_cancel);
 
 		/* Protection against infinite loops of log blocks. */
 		if (l2arc_range_check_overlap(lb_ptrs[1].lbp_daddr,
@@ -7795,7 +7794,6 @@ l2arc_rebuild(l2arc_dev_t *dev)
 				err = SET_ERROR(ECANCELED);
 				goto out;
 			}
-			printf("ZFS: %s calling spa_config_tryenter (cancel must be false)\n", __func__);
 			if (spa_config_tryenter(spa, SCL_L2ARC, vd,
 			    RW_READER)) {
 				lock_held = B_TRUE;
@@ -7808,7 +7806,7 @@ l2arc_rebuild(l2arc_dev_t *dev)
 			 * delay, we check l2ad_rebuild_cancel and retry
 			 * the lock again.
 			 */
-			delay(1*hz);
+			delay(1);
 		}
 	}
 out:
