@@ -56,7 +56,12 @@ Others' changes brought in:
 	webrev 264 - spa_config_tryenter incorrectly handles the multiple lock case (diff 1)
 	             (NEX-2403)
         3525  Persistent L2ARC 	https://reviews.csiden.org/r/267/diff/4#index_header
-
+	4185 add new cryptographic checkusm to ZFS: SHA-512, Skein, Edon-R (via lundman)
+	5960 zfs recv should prefetch indirect blocks (via lundman)
+	5925 zfs receive -o origin= (via lundman)
+	6370 ZFS send fails to transmit some holes
+	6393 zfs receive a full send as a clone
+	
 O3X commits:
 
 	Simple script to pull in upstream commits - lundman
