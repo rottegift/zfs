@@ -1694,7 +1694,7 @@ arc_cksum_verify(arc_buf_t *buf)
 		mutex_exit(&buf->b_hdr->b_l1hdr.b_freeze_lock);
 		return;
 	}
-	fletcher_2_native(buf->b_data, buf->b_hdr->b_size, &zc);
+	fletcher_2_native(buf->b_data, buf->b_hdr->b_size, NULL, &zc);
 	if (!ZIO_CHECKSUM_EQUAL(*buf->b_hdr->b_freeze_cksum, zc))
 		panic("buffer modified while frozen!");
 	mutex_exit(&buf->b_hdr->b_l1hdr.b_freeze_lock);
@@ -1707,7 +1707,7 @@ arc_cksum_equal(arc_buf_t *buf)
 	int equal;
 
 	mutex_enter(&buf->b_hdr->b_l1hdr.b_freeze_lock);
-	fletcher_2_native(buf->b_data, buf->b_hdr->b_size, &zc);
+	fletcher_2_native(buf->b_data, buf->b_hdr->b_size, NULL, &zc);
 	equal = ZIO_CHECKSUM_EQUAL(*buf->b_hdr->b_freeze_cksum, zc);
 	mutex_exit(&buf->b_hdr->b_l1hdr.b_freeze_lock);
 
@@ -1726,7 +1726,7 @@ arc_cksum_compute(arc_buf_t *buf, boolean_t force)
 		return;
 	}
 	buf->b_hdr->b_freeze_cksum = kmem_alloc(sizeof (zio_cksum_t), KM_SLEEP);
-	fletcher_2_native(buf->b_data, buf->b_hdr->b_size,
+	fletcher_2_native(buf->b_data, buf->b_hdr->b_size, NULL, 
 	    buf->b_hdr->b_freeze_cksum);
 	mutex_exit(&buf->b_hdr->b_l1hdr.b_freeze_lock);
 	arc_buf_watch(buf);
@@ -7962,7 +7962,7 @@ l2arc_log_blk_read(l2arc_dev_t *dev,
 	}
 
 	/* Make sure the buffer checks out */
-	fletcher_4_native(this_lb_buf, LBP_GET_PSIZE(this_lbp), &cksum);
+	fletcher_4_native(this_lb_buf, LBP_GET_PSIZE(this_lbp), NULL, &cksum);
 	if (!ZIO_CHECKSUM_EQUAL(cksum, this_lbp->lbp_cksum)) {
 		ARCSTAT_BUMP(arcstat_l2_rebuild_abort_cksum_errors);
 		err = SET_ERROR(EINVAL);
@@ -8229,7 +8229,7 @@ l2arc_log_blk_commit(l2arc_dev_t *dev, zio_t *pio,
 		    ZIO_COMPRESS_OFF);
 	}
 	/* checksum what we're about to write */
-	fletcher_4_native(lb_buf->lbb_log_blk, asize,
+	fletcher_4_native(lb_buf->lbb_log_blk, asize, NULL,
 	    &dev->l2ad_dev_hdr->dh_start_lbps[0].lbp_cksum);
 
 	/* perform the write itself */
@@ -8285,7 +8285,7 @@ l2arc_dev_hdr_checksum(const l2arc_dev_hdr_phys_t *hdr, zio_cksum_t *cksum)
 	fletcher_4_native((uint8_t *)hdr +
 	    offsetof(l2arc_dev_hdr_phys_t, dh_spa_guid),
 	    sizeof (*hdr) - offsetof(l2arc_dev_hdr_phys_t, dh_spa_guid),
-	    cksum);
+            NULL, cksum);
 }
 
 /*
