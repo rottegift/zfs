@@ -7950,7 +7950,7 @@ l2arc_log_blk_read(l2arc_dev_t *dev,
 	}
 
 	/* Make sure the buffer checks out */
-	fletcher_4_native(this_lb_buf, LBP_GET_PSIZE(this_lbp), &cksum);
+	fletcher_4_native(this_lb_buf, LBP_GET_PSIZE(this_lbp), NULL, &cksum);
 	if (!ZIO_CHECKSUM_EQUAL(cksum, this_lbp->lbp_cksum)) {
 		ARCSTAT_BUMP(arcstat_l2_rebuild_abort_cksum_errors);
 		err = SET_ERROR(EINVAL);
@@ -8217,7 +8217,7 @@ l2arc_log_blk_commit(l2arc_dev_t *dev, zio_t *pio,
 		    ZIO_COMPRESS_OFF);
 	}
 	/* checksum what we're about to write */
-	fletcher_4_native(lb_buf->lbb_log_blk, asize,
+	fletcher_4_native(lb_buf->lbb_log_blk, asize, NULL,
 	    &dev->l2ad_dev_hdr->dh_start_lbps[0].lbp_cksum);
 
 	/* perform the write itself */
@@ -8273,7 +8273,7 @@ l2arc_dev_hdr_checksum(const l2arc_dev_hdr_phys_t *hdr, zio_cksum_t *cksum)
 	fletcher_4_native((uint8_t *)hdr +
 	    offsetof(l2arc_dev_hdr_phys_t, dh_spa_guid),
 	    sizeof (*hdr) - offsetof(l2arc_dev_hdr_phys_t, dh_spa_guid),
-	    cksum);
+            NULL, cksum);
 }
 
 /*
