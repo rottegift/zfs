@@ -23,9 +23,7 @@
  * Copyright (c) 2011, 2015 by Delphix. All rights reserved.
  * Copyright (c) 2011 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2013 MacZFS team. All rights reserved.
- *
- * Changed taskq_ent_ API calls to OSX SPL versions.
- *  - lundman
+ * Copyright (c) 2015 OpenZFSonOSX team. All rights reserved.
  *
  */
 
@@ -679,18 +677,20 @@ zfs_blkptr_verify(spa_t *spa, const blkptr_t *bp)
 			zfs_panic_recover("blkptr at %p DVA %u has invalid "
 			    "VDEV %llu",
 			    bp, i, (longlong_t)vdevid);
+			continue;
 		}
 		vd = spa->spa_root_vdev->vdev_child[vdevid];
 		if (vd == NULL) {
 			zfs_panic_recover("blkptr at %p DVA %u has invalid "
 			    "VDEV %llu",
 			    bp, i, (longlong_t)vdevid);
+			continue;
 		}
 		if (vd->vdev_ops == &vdev_hole_ops) {
 			zfs_panic_recover("blkptr at %p DVA %u has hole "
 			    "VDEV %llu",
 			    bp, i, (longlong_t)vdevid);
-
+			continue;
 		}
 		if (vd->vdev_ops == &vdev_missing_ops) {
 			/*
@@ -960,7 +960,7 @@ zio_write_phys(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t size,
 
 	zio->io_prop.zp_checksum = checksum;
 
-	if (zio_checksum_table[checksum].ci_eck) {
+	if (zio_checksum_table[checksum].ci_flags & ZCHECKSUM_FLAG_EMBEDDED) {
 		/*
 		 * zec checksums are necessarily destructive -- they modify
 		 * the end of the write buffer to hold the verifier/checksum.
@@ -1156,8 +1156,8 @@ zio_write_bp_init(zio_t *zio)
 		if (BP_IS_HOLE(bp) || !zp->zp_dedup)
 			return (ZIO_PIPELINE_CONTINUE);
 
-		ASSERT(zio_checksum_table[zp->zp_checksum].ci_dedup ||
-		    zp->zp_dedup_verify);
+		ASSERT((zio_checksum_table[zp->zp_checksum].ci_flags &
+		    ZCHECKSUM_FLAG_DEDUP) || zp->zp_dedup_verify);
 
 		if (BP_GET_CHECKSUM(bp) == zp->zp_checksum) {
 			BP_SET_DEDUP(bp, 1);
@@ -1494,65 +1494,6 @@ __zio_execute(zio_t *zio)
  * Initiate I/O, either sync or async
  * ==========================================================================
  */
-#if 0
-int
-zio_wait(zio_t *zio)
-{
-	int error;
-    int booga;
-
-	ASSERT(zio->io_stage == ZIO_STAGE_OPEN);
-	ASSERT(zio->io_executor == NULL);
-
-	zio->io_waiter = curthread;
-
-	__zio_execute(zio);
-
-	mutex_enter(&zio->io_lock);
-
-    booga=0;
-	while (zio->io_executor != NULL) {
-		/*
-		 * Wake up periodically to prevent the kernel from complaining
-		 * about a blocked task.  However, check zio_delay_max to see
-		 * if the I/O has exceeded the timeout and post an ereport.
-		 */
-		cv_timedwait_sig(&zio->io_cv, &zio->io_lock,
-		    ddi_get_lbolt() + hz);
-
-#if _KERNEL
-        if (booga++ > 10) {
-            int i,j;
-            printf("Bastard hack\n");
-            for (i = 0; i < ZIO_TYPES; i++) {
-                for (j = 0; j < ZIO_TASKQ_TYPES; j++) {
-                    taskq_t *tq = zio->io_spa->spa_zio_taskq[i][j];
-                    if (!tq) continue;
-                    printf("tq[%d][%d] %p '%s' threads %d\n",
-                           i,j,tq,tq->tq_name, tq->tq_nthreads);
-                }
-            }
-            panic("time to die");
-            break;
-        }
-#endif
-
-		if (timeout && (ddi_get_lbolt() > timeout)) {
-			zio->io_delay = zio_delay_max;
-			zfs_ereport_post(FM_EREPORT_ZFS_DELAY,
-			    zio->io_spa, zio->io_vd, zio, 0, 0);
-			timeout = 0;
-		}
-	}
-	mutex_exit(&zio->io_lock);
-
-	error = zio->io_error;
-	zio_destroy(zio);
-
-	return (error);
-}
-#endif
-#if 1
 int
 zio_wait(zio_t *zio)
 {
@@ -1568,7 +1509,6 @@ zio_wait(zio_t *zio)
     mutex_enter(&zio->io_lock);
     while (zio->io_executor != NULL)
 		cv_wait_io(&zio->io_cv, &zio->io_lock);
-    //        cv_wait(&zio->io_cv, &zio->io_lock);
     mutex_exit(&zio->io_lock);
 
     error = zio->io_error;
@@ -1576,7 +1516,6 @@ zio_wait(zio_t *zio)
 
     return (error);
 }
-#endif
 
 void
 zio_nowait(zio_t *zio)
@@ -2164,7 +2103,8 @@ zio_nop_write(zio_t *zio)
 	 * allocate a new bp.
 	 */
 	if (BP_IS_HOLE(bp_orig) ||
-	    !zio_checksum_table[BP_GET_CHECKSUM(bp)].ci_dedup ||
+	    !(zio_checksum_table[BP_GET_CHECKSUM(bp)].ci_flags &
+	    ZCHECKSUM_FLAG_NOPWRITE) ||
 	    BP_GET_CHECKSUM(bp) != BP_GET_CHECKSUM(bp_orig) ||
 	    BP_GET_COMPRESS(bp) != BP_GET_COMPRESS(bp_orig) ||
 	    BP_GET_DEDUP(bp) != BP_GET_DEDUP(bp_orig) ||
@@ -2176,7 +2116,8 @@ zio_nop_write(zio_t *zio)
 	 * avoid allocating a new bp and issuing any I/O.
 	 */
 	if (ZIO_CHECKSUM_EQUAL(bp->blk_cksum, bp_orig->blk_cksum)) {
-		ASSERT(zio_checksum_table[zp->zp_checksum].ci_dedup);
+		ASSERT(zio_checksum_table[zp->zp_checksum].ci_flags &
+		    ZCHECKSUM_FLAG_NOPWRITE);
 		ASSERT3U(BP_GET_PSIZE(bp), ==, BP_GET_PSIZE(bp_orig));
 		ASSERT3U(BP_GET_LSIZE(bp), ==, BP_GET_LSIZE(bp_orig));
 		ASSERT(zp->zp_compress != ZIO_COMPRESS_OFF);
@@ -2459,7 +2400,8 @@ zio_ddt_write(zio_t *zio)
 		 * we can't resolve it, so just convert to an ordinary write.
 		 * (And automatically e-mail a paper to Nature?)
 		 */
-		if (!zio_checksum_table[zp->zp_checksum].ci_dedup) {
+		if (!(zio_checksum_table[zp->zp_checksum].ci_flags &
+		    ZCHECKSUM_FLAG_DEDUP)) {
 			zp->zp_checksum = spa_dedup_checksum(spa);
 			zio_pop_transforms(zio);
 			zio->io_stage = ZIO_STAGE_OPEN;
@@ -2662,8 +2604,8 @@ zio_dva_unallocate(zio_t *zio, zio_gang_node_t *gn, blkptr_t *bp)
  * Try to allocate an intent log block.  Return 0 on success, errno on failure.
  */
 int
-zio_alloc_zil(spa_t *spa, uint64_t txg, blkptr_t *new_bp, uint64_t size,
-    boolean_t use_slog)
+zio_alloc_zil(spa_t *spa, uint64_t txg, blkptr_t *new_bp, blkptr_t *old_bp,
+	uint64_t size, boolean_t use_slog)
 {
 	int error = 1;
 
@@ -2676,14 +2618,14 @@ zio_alloc_zil(spa_t *spa, uint64_t txg, blkptr_t *new_bp, uint64_t size,
 	 */
 	if (use_slog) {
 		error = metaslab_alloc(spa, spa_log_class(spa), size,
-		    new_bp, 1, txg, NULL,
-		    METASLAB_FASTWRITE | METASLAB_GANG_AVOID);
+		    new_bp, 1, txg, old_bp,
+		    METASLAB_HINTBP_AVOID | METASLAB_GANG_AVOID);
 	}
 
 	if (error) {
 		error = metaslab_alloc(spa, spa_normal_class(spa), size,
-		    new_bp, 1, txg, NULL,
-		    METASLAB_FASTWRITE);
+		    new_bp, 1, txg, old_bp,
+		    METASLAB_HINTBP_AVOID);
 	}
 
 	if (error == 0) {

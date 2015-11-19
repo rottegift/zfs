@@ -18,36 +18,15 @@
  *
  * CDDL HEADER END
  */
+
 /*
- * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#ifndef	_ZFS_FLETCHER_H
-#define	_ZFS_FLETCHER_H
+#ifndef _SHA2_H
+#define	_SHA2_H
 
-#include <sys/types.h>
-#include <sys/spa.h>
+#include <sys/sha2.h>
 
-#ifdef	__cplusplus
-extern "C" {
-#endif
-
-/*
- * fletcher checksum functions
- */
-
-void fletcher_2_native(const void *, uint64_t, const void *, zio_cksum_t *);
-void fletcher_2_byteswap(const void *, uint64_t, const void *, zio_cksum_t *);
-void fletcher_4_native(const void *, uint64_t, const void *, zio_cksum_t *);
-void fletcher_4_byteswap(const void *, uint64_t, const void *, zio_cksum_t *);
-void fletcher_4_incremental_native(const void *, uint64_t,
-    zio_cksum_t *);
-void fletcher_4_incremental_byteswap(const void *, uint64_t,
-    zio_cksum_t *);
-
-#ifdef	__cplusplus
-}
-#endif
-
-#endif	/* _ZFS_FLETCHER_H */
+#endif	/* _SHA2_H */

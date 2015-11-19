@@ -274,7 +274,8 @@ dump_write(dmu_sendarg_t *dsp, dmu_object_type_t type,
 		drrw->drr_checksumtype = ZIO_CHECKSUM_OFF;
 	} else {
 		drrw->drr_checksumtype = BP_GET_CHECKSUM(bp);
-		if (zio_checksum_table[drrw->drr_checksumtype].ci_dedup)
+		if (zio_checksum_table[drrw->drr_checksumtype].ci_flags &
+			ZCHECKSUM_FLAG_DEDUP)
 			drrw->drr_checksumflags |= DRR_CHECKSUM_DEDUP;
 		DDK_SET_LSIZE(&drrw->drr_key, BP_GET_LSIZE(bp));
 		DDK_SET_PSIZE(&drrw->drr_key, BP_GET_PSIZE(bp));
@@ -1534,8 +1535,8 @@ dmu_recv_resume_begin_check(void *arg, dmu_tx_t *tx)
 	 * fails) because it will be marked inconsistent.
 	 */
 	if (dsl_dataset_has_owner(ds)) {
-	  dsl_dataset_rele(ds, FTAG);
-	  return (SET_ERROR(EBUSY));
+		dsl_dataset_rele(ds, FTAG);
+		return (SET_ERROR(EBUSY));
 	}
 
 	/* There should not be any snapshots of this fs yet. */
@@ -2796,12 +2797,12 @@ dmu_recv_stream(dmu_recv_cookie_t *drc, vnode_t *vp, offset_t *voffp,
 	uint32_t payloadlen = drc->drc_drr_begin->drr_payloadlen;
 	void *payload = NULL;
 	if (payloadlen != 0)
-	    payload = kmem_alloc(payloadlen, KM_SLEEP);
+		payload = kmem_alloc(payloadlen, KM_SLEEP);
 
 	err = receive_read_payload_and_next_header(&ra, payloadlen, payload);
 	if (err != 0) {
-	  if (payloadlen != 0)
-	    kmem_free(payload, payloadlen);
+		if (payloadlen != 0)
+			kmem_free(payload, payloadlen);
 		goto out;
 	}
 	if (payloadlen != 0) {

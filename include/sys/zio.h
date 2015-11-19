@@ -80,6 +80,10 @@ enum zio_checksum {
 	ZIO_CHECKSUM_FLETCHER_4,
 	ZIO_CHECKSUM_SHA256,
 	ZIO_CHECKSUM_ZILOG2,
+	ZIO_CHECKSUM_NOPARITY,
+	ZIO_CHECKSUM_SHA512,
+	ZIO_CHECKSUM_SKEIN,
+	ZIO_CHECKSUM_EDONR,
 	ZIO_CHECKSUM_FUNCTIONS
 };
 
@@ -501,7 +505,7 @@ extern zio_t *zio_free_sync(zio_t *pio, spa_t *spa, uint64_t txg,
     const blkptr_t *bp, enum zio_flag flags);
 
 extern int zio_alloc_zil(spa_t *spa, uint64_t txg, blkptr_t *new_bp,
-    uint64_t size, boolean_t use_slog);
+    blkptr_t *, uint64_t size, boolean_t use_slog);
 extern void zio_free_zil(spa_t *spa, uint64_t txg, blkptr_t *bp);
 extern void zio_flush(zio_t *zio, vdev_t *vd);
 extern void zio_shrink(zio_t *zio, uint64_t size);

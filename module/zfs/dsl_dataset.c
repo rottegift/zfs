@@ -54,6 +54,7 @@
 #include <sys/zio_compress.h>
 #include <zfs_fletcher.h>
 #include <sys/dmu_send.h>
+#include <sys/zio_checksum.h>
 
 /*
  * The SPA supports block sizes up to 16MB.  However, very large blocks
@@ -130,8 +131,16 @@ dsl_dataset_block_born(dsl_dataset_t *ds, const blkptr_t *bp, dmu_tx_t *tx)
 	dsl_dataset_phys(ds)->ds_compressed_bytes += compressed;
 	dsl_dataset_phys(ds)->ds_uncompressed_bytes += uncompressed;
 	dsl_dataset_phys(ds)->ds_unique_bytes += used;
-	if (BP_GET_LSIZE(bp) > SPA_OLD_MAXBLOCKSIZE)
-		ds->ds_need_large_blocks = B_TRUE;
+
+	if (BP_GET_LSIZE(bp) > SPA_OLD_MAXBLOCKSIZE) {
+		ds->ds_feature_activation_needed[SPA_FEATURE_LARGE_BLOCKS] =
+			B_TRUE;
+	}
+
+	spa_feature_t f = zio_checksum_to_feature(BP_GET_CHECKSUM(bp));
+	if (f != SPA_FEATURE_NONE)
+		ds->ds_feature_activation_needed[f] = B_TRUE;
+
 	mutex_exit(&ds->ds_lock);
 	dsl_dir_diduse_space(ds->ds_dir, DD_USED_HEAD, delta,
 	    compressed, uncompressed, tx);
@@ -1708,7 +1717,7 @@ get_receive_resume_stats(dsl_dataset_t *ds, nvlist_t *nv)
 		    packed_size, packed_size, 6);
 
 		zio_cksum_t cksum;
-		fletcher_4_native(compressed, compressed_size, &cksum);
+		fletcher_4_native(compressed, compressed_size, NULL, &cksum);
 
 		str = kmem_alloc(compressed_size * 2 + 1, KM_SLEEP);
 		for (int i = 0; i < compressed_size; i++) {
