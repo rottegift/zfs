@@ -5329,25 +5329,43 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 #else // 0 - APPLE
 	// the return from here is used to block all writes, so we don't want to return 1
 	// except in exceptional cases - smd
+
 	if(spl_free_manual_pressure_wrapper() != 0) {
 	  cv_signal(&arc_reclaim_thread_cv);
 	  kpreempt(KPREEMPT_SYNC);
 	}
-	if(!spl_minimal_physmem_p() && arc_reclaim_needed()) {
+
+	if(!spl_minimal_physmem_p() && page_load > 0) {
 	  ARCSTAT_INCR(arcstat_memory_throttle_count, 1);
+	  printf("ZFS: %s: !spl_minimal_physmem_p(), available_memory == %lld, "
+		 "page_load = %llu, txg = %llu, reserve = %llu\n",
+		 __func__, available_memory, page_load, txg, reserve);
 	  cv_signal(&arc_reclaim_thread_cv);
-	  printf("ZFS: %s THROTTLED by SPL, reclaim signalled, txg = %llu, reserve = %llu\n",
-		 __func__, txg, reserve);
-	  kpreempt(KPREEMPT_SYNC);
 	  return (SET_ERROR(EAGAIN));
-	} else if(arc_reclaim_needed()) {
-	  // we already printfed in arc_reclaim_needed()
-	  // we don't want to throttle in this condition, just wake up arc_reclaim_thread
-	  dprintf("ZFS: %s arc_reclaim_needed, txg= %llu, reserve = %llu\n",
-		 __func__, txg, reserve);
+	}
+
+	if(arc_reclaim_needed() && page_load > 0) {
+	  ARCSTAT_INCR(arcstat_memory_throttle_count, 1);
+	  printf("ZFS: %s: arc_reclaim_needed(), available_memory == %lld, "
+		 "page_load = %llu, txg = %llu, reserve = %lld\n",
+		 __func__, available_memory, page_load, txg, reserve);
+	  cv_signal(&arc_reclaim_thread_cv);	  
+	  return (SET_ERROR(EAGAIN));
+	}
+
+	// as with sun, assume we are reclaiming
+	if(available_memory <= 0 || page_load > available_memory / 4) {
+	  return (SET_ERROR(ERESTART));
+	}
+	
+	if(!spl_minimal_physmem_p()) {
+	  page_load += reserve/8;
 	  cv_signal(&arc_reclaim_thread_cv);
 	  return (0);
 	}
+
+	page_load = 0;
+
 #endif // 0
 #endif // KERNEL
 	return (0);
