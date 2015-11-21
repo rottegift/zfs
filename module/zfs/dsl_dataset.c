@@ -726,39 +726,11 @@ dsl_dataset_tryown(dsl_dataset_t *ds, void *tag)
 boolean_t
 dsl_dataset_has_owner(dsl_dataset_t *ds)
 {
-	boolean_t rv;
-	mutex_enter(&ds->ds_lock);
-	rv = (ds->ds_owner != NULL);
-	mutex_exit(&ds->ds_lock);
-	return (rv);
-}
-
-static void
-dsl_dataset_activate_feature(uint64_t dsobj, spa_feature_t f, dmu_tx_t *tx)
-{
-	spa_t *spa = dmu_tx_pool(tx)->dp_spa;
-	objset_t *mos = dmu_tx_pool(tx)->dp_meta_objset;
-	uint64_t zero = 0;
-
-	VERIFY(spa_feature_table[f].fi_flags & ZFEATURE_FLAG_PER_DATASET);
-
-	spa_feature_incr(spa, f, tx);
-	dmu_object_zapify(mos, dsobj, DMU_OT_DSL_DATASET, tx);
-
-	VERIFY0(zap_add(mos, dsobj, spa_feature_table[f].fi_guid,
-	    sizeof (zero), 1, &zero, tx));
-}
-
-void
-dsl_dataset_deactivate_feature(uint64_t dsobj, spa_feature_t f, dmu_tx_t *tx)
-{
-	spa_t *spa = dmu_tx_pool(tx)->dp_spa;
-	objset_t *mos = dmu_tx_pool(tx)->dp_meta_objset;
-
-	VERIFY(spa_feature_table[f].fi_flags & ZFEATURE_FLAG_PER_DATASET);
-
-	VERIFY0(zap_remove(mos, dsobj, spa_feature_table[f].fi_guid, tx));
-	spa_feature_decr(spa, f, tx);
+  boolean_t rv;
+  mutex_enter(&ds->ds_lock);
+  rv = (ds->ds_owner != NULL);
+  mutex_exit(&ds->ds_lock);
+  return (rv);
 }
 
 uint64_t

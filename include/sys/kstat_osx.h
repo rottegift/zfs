@@ -7,6 +7,7 @@ typedef struct osx_kstat {
 
 	kstat_named_t darwin_active_vnodes;
 	kstat_named_t darwin_debug;
+        kstat_named_t darwin_reclaim_nodes;
 	kstat_named_t darwin_ignore_negatives;
 	kstat_named_t darwin_ignore_positives;
 	kstat_named_t darwin_create_negatives;
@@ -18,10 +19,11 @@ typedef struct osx_kstat {
 	kstat_named_t arc_zfs_arc_meta_limit;
 	kstat_named_t arc_zfs_arc_meta_min;
 	kstat_named_t arc_zfs_arc_grow_retry;
-	kstat_named_t arc_zfs_arc_shrink_shift;
 	kstat_named_t arc_zfs_arc_p_min_shift;
 	kstat_named_t arc_zfs_disable_dup_eviction;
 	kstat_named_t arc_zfs_arc_average_blocksize;
+  kstat_named_t arc_zfs_arc_shrink_shift;
+  kstat_named_t arc_zfs_arc_no_grow_shift;
 
 	kstat_named_t l2arc_write_max;
 	kstat_named_t l2arc_write_boost;
@@ -96,6 +98,7 @@ typedef struct osx_kstat {
 
 	kstat_named_t zfs_recover;
 
+  kstat_named_t zfs_free_max_blocks;
 
 } osx_kstat_t;
 
@@ -106,16 +109,18 @@ extern unsigned int zfs_vnop_ignore_positives;
 extern unsigned int zfs_vnop_create_negatives;
 extern unsigned int zfs_vnop_skip_unlinked_drain;
 extern uint64_t vnop_num_vnodes;
+extern uint64_t vnop_num_reclaims;
 
 extern uint64_t zfs_arc_max;
 extern uint64_t zfs_arc_min;
 extern uint64_t zfs_arc_meta_limit;
 extern uint64_t zfs_arc_meta_min;
 extern int zfs_arc_grow_retry;
-extern int zfs_arc_shrink_shift;
 extern int zfs_arc_p_min_shift;
 extern int zfs_disable_dup_eviction;
 extern int zfs_arc_average_blocksize;
+extern int zfs_arc_shrink_shift;
+extern int zfs_arc_no_grow_shift;
 
 extern uint64_t l2arc_write_max;
 extern uint64_t l2arc_write_boost;
@@ -169,6 +174,10 @@ extern int zfs_top_maxinflight;
 extern int zfs_resilver_delay;
 extern int zfs_scrub_delay;
 extern int zfs_scan_idle;
+
+extern uint32_t zfs_free_max_blocks;
+extern uint64_t zfs_l2arc_lowmem_algorithm;
+extern uint64_t zfs_l2arc_lowmem_force_permil;
 
 int        kstat_osx_init(void);
 void       kstat_osx_fini(void);

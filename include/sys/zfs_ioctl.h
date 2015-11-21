@@ -160,7 +160,7 @@ typedef enum dmu_send_resume_token_version {
 /*
  * This send stream, if it is a full send, includes the FREE and FREEOBJECT
  * records that are created by the sending process.  This means that the send
- * stream can be received as a clone, eveqn though it is not an incremental.
+ * stream can be received as a clone, even though it is not an incremental.
  * This is not implemented as a feature flag, because the receiving side does
  * not need to have implemented it to receive this stream; it is fully backwards
  * compatible.  We need a flag, though, because full send streams without it

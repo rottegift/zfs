@@ -1177,8 +1177,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 void
 zfs_get_done(zgd_t *zgd, int error)
 {
-	znode_t *zp = zgd->zgd_private;
-	objset_t *os = zp->z_zfsvfs->z_os;
+	//znode_t *zp = zgd->zgd_private;
+	//objset_t *os = zp->z_zfsvfs->z_os;
 
 	if (zgd->zgd_db)
 		dmu_buf_rele(zgd->zgd_db, zgd);
@@ -3117,6 +3117,17 @@ zfs_getattr(vnode_t *vp, vattr_t *vap, int flags, cred_t *cr,
 	mutex_exit(&zp->z_lock);
 
 #ifdef __APPLE__
+
+	/* If we are told to ignore owners, we scribble over the uid and gid here
+	 * unless root.
+	 */
+	if (((unsigned int)vfs_flags(zfsvfs->z_vfs)) & MNT_IGNORE_OWNERSHIP) {
+		if (kauth_cred_getuid(cr) != 0) {
+			vap->va_uid = UNKNOWNUID;
+			vap->va_gid = UNKNOWNGID;
+		}
+	}
+
 #else
     uint64_t blksize, nblocks;
 
@@ -3613,31 +3624,68 @@ top:
             ace_t	*aaclp;
             struct kauth_acl *kauth;
 
-            dprintf("Calling setacl\n");
-
             vsecattr.vsa_mask = VSA_ACE;
 
             kauth = vap->va_acl;
 
+#if HIDE_TRIVIAL_ACL
+			// We might have to add <up to> 3 trivial acls, depending on
+			// what was handed to us.
+            aclbsize = ( 3 + kauth->acl_entrycount ) * sizeof(ace_t);
+            dprintf("Given %d ACLs, adding 3\n", kauth->acl_entrycount);
+#else
             aclbsize = kauth->acl_entrycount * sizeof(ace_t);
-            vsecattr.vsa_aclentp = kmem_alloc(aclbsize, KM_SLEEP);
+            dprintf("Given %d ACLs\n", kauth->acl_entrycount);
+#endif
+
+			vsecattr.vsa_aclentp = kmem_zalloc(aclbsize, KM_SLEEP);
             aaclp = vsecattr.vsa_aclentp;
             vsecattr.vsa_aclentsz = aclbsize;
 
-            dprintf("aces_from_acl %d entries\n", kauth->acl_entrycount);
-            aces_from_acl(vsecattr.vsa_aclentp, &vsecattr.vsa_aclcnt, kauth);
+#if HIDE_TRIVIAL_ACL
+			// Add in the trivials, keep "seen_type" as a bit pattern of
+			// which trivials we have seen
+			int seen_type = 0;
 
-            err = zfs_setacl(zp, &vsecattr, B_TRUE, cr);
+            dprintf("aces_from_acl %d entries\n", kauth->acl_entrycount);
+            aces_from_acl(vsecattr.vsa_aclentp,
+						  &vsecattr.vsa_aclcnt, kauth, &seen_type);
+
+			// Add in trivials at end, based on the "seen_type".
+			zfs_addacl_trivial(zp, vsecattr.vsa_aclentp, &vsecattr.vsa_aclcnt,
+				seen_type);
+			dprintf("together at last: %d\n", vsecattr.vsa_aclcnt);
+#else
+            aces_from_acl(vsecattr.vsa_aclentp, &vsecattr.vsa_aclcnt, kauth);
+#endif
+
+			err = zfs_setacl(zp, &vsecattr, B_TRUE, cr);
             kmem_free(aaclp, aclbsize);
 
         } else {
-            struct kauth_acl blank_acl;
 
-            bzero(&blank_acl, sizeof blank_acl);
+			vsecattr_t blank_acl;
+			int seen_type = 0;
+            int		aclbsize;	/* size of acl list in bytes */
+			ace_t	*aaclp;
+
+            blank_acl.vsa_mask = VSA_ACE;
+			blank_acl.vsa_aclcnt = 0;
+            aclbsize = ( 3 ) * sizeof(ace_t);
+			blank_acl.vsa_aclentp = kmem_zalloc(aclbsize, KM_SLEEP);
+			aaclp = blank_acl.vsa_aclentp;
+            blank_acl.vsa_aclentsz = aclbsize;
+			// Clearing, we need to pass in the trivials only
+			zfs_addacl_trivial(zp, blank_acl.vsa_aclentp, &blank_acl.vsa_aclcnt,
+				seen_type);
+
             if ((err = zfs_setacl(zp, &blank_acl, B_TRUE, cr)))
                 dprintf("setattr: setacl failed: %d\n", err);
-        }
-        }
+
+            kmem_free(aaclp, aclbsize);
+
+        } // blank ACL?
+	} // ACL
 
 
 	if (mask & AT_MODE) {
@@ -4376,8 +4424,16 @@ top:
 				 * calling vnop_lookup first - it is easier to clear
 				 * it out and let getattr look it up if needed.
 				 */
-				if (tzp) tzp->z_name_cache[0] = 0;
-				if (szp) szp->z_name_cache[0] = 0;
+				if (tzp) {
+					mutex_enter(&tzp->z_lock);
+					tzp->z_name_cache[0] = 0;
+					mutex_exit(&tzp->z_lock);
+				}
+				if (szp) {
+					mutex_enter(&szp->z_lock);
+					szp->z_name_cache[0] = 0;
+					mutex_exit(&szp->z_lock);
+				}
 
 #endif
 
@@ -5556,7 +5612,7 @@ zfs_space(vnode_t *vp, int cmd, struct flock *bfp, int flag,
 
 	if (cmd != F_FREESP) {
 		ZFS_EXIT(zfsvfs);
-		return (SET_ERROR(EINVAL));
+		return (SET_ERROR(ENOTSUP));
 	}
 #ifndef __APPLE__
 	if (error = convoff(vp, bfp, 0, offset)) {

@@ -62,6 +62,7 @@ osx_kstat_t osx_kstat = {
 
 	{ "active_vnodes",				KSTAT_DATA_UINT64 },
 	{ "vnop_debug",					KSTAT_DATA_UINT64 },
+	{ "reclaim_nodes",				KSTAT_DATA_UINT64 },
 	{ "ignore_negatives",			KSTAT_DATA_UINT64 },
 	{ "ignore_positives",			KSTAT_DATA_UINT64 },
 	{ "create_negatives",			KSTAT_DATA_UINT64 },
@@ -73,10 +74,11 @@ osx_kstat_t osx_kstat = {
 	{ "zfs_arc_meta_limit",			KSTAT_DATA_UINT64 },
 	{ "zfs_arc_meta_min",			KSTAT_DATA_UINT64 },
 	{ "zfs_arc_grow_retry",			KSTAT_DATA_UINT64 },
-	{ "zfs_arc_shrink_shift",		KSTAT_DATA_UINT64 },
 	{ "zfs_arc_p_min_shift",		KSTAT_DATA_UINT64 },
 	{ "zfs_disable_dup_eviction",	KSTAT_DATA_UINT64 },
 	{ "zfs_arc_average_blocksize",	KSTAT_DATA_UINT64 },
+	{ "zfs_arc_shrink_shift",		KSTAT_DATA_UINT64 },
+	{ "zfs_arc_no_grow_shift",			KSTAT_DATA_UINT64 },
 
 	{ "l2arc_write_max",			KSTAT_DATA_UINT64 },
 	{ "l2arc_write_boost",			KSTAT_DATA_UINT64 },
@@ -150,9 +152,8 @@ osx_kstat_t osx_kstat = {
 	{"zfs_scan_idle",				KSTAT_DATA_INT64  },
 
 	{"zfs_recover",					KSTAT_DATA_INT64  },
+	{"zfs_free_max_blocks",			KSTAT_DATA_UINT64 },
 };
-
-
 
 
 static kstat_t		*osx_kstat_ksp;
@@ -306,6 +307,13 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 		zfs_recover =
 			ks->zfs_recover.value.i64;
 
+		if((uint32_t)ks->zfs_free_max_blocks.value.ui64 != zfs_free_max_blocks) {
+		  printf("ZFS: zfs_free_max_blocks = %u, becoming %u\n",
+			 zfs_free_max_blocks,
+			 (uint32_t)ks->zfs_free_max_blocks.value.ui64);
+		  zfs_free_max_blocks = (uint32_t)ks->zfs_free_max_blocks.value.ui64;
+		}
+
 	} else {
 
 		/* kstat READ */
@@ -314,6 +322,7 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 
 		/* Darwin */
 		ks->darwin_active_vnodes.value.ui64          = vnop_num_vnodes;
+		ks->darwin_reclaim_nodes.value.ui64          = vnop_num_reclaims;
 		ks->darwin_debug.value.ui64                  = debug_vnop_osx_printf;
 		ks->darwin_ignore_negatives.value.ui64       = zfs_vnop_ignore_negatives;
 		ks->darwin_ignore_positives.value.ui64       = zfs_vnop_ignore_positives;
@@ -452,6 +461,7 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 		ks->zfs_recover.value.i64 =
 			zfs_recover;
 
+		ks->zfs_free_max_blocks.value.ui64 = (uint64_t)zfs_free_max_blocks;
 	}
 
 	return 0;

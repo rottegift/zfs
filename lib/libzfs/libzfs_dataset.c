@@ -3414,8 +3414,6 @@ zfs_create(libzfs_handle_t *hdl, const char *path, zfs_type_t type,
 	/* check for failure */
 	if (ret != 0) {
 		char parent[ZFS_MAXNAMELEN];
-		char buf[64];
-
 		(void) parent_name(path, parent, sizeof (parent));
 
 		switch (errno) {
@@ -3430,10 +3428,9 @@ zfs_create(libzfs_handle_t *hdl, const char *path, zfs_type_t type,
 			return (zfs_error(hdl, EZFS_BADTYPE, errbuf));
 
 		case EDOM:
-			zfs_nicenum(SPA_MAXBLOCKSIZE, buf, sizeof (buf));
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "volume block size must be power of 2 from "
-			    "512B to %s"), buf);
+			    "512B to %uKB"), zfs_max_recordsize >> 10);
 
 			return (zfs_error(hdl, EZFS_BADPROP, errbuf));
 
