@@ -152,7 +152,7 @@ dsl_dir_evict(void *dbu)
 	 * The props callback list should have been cleaned up by
 	 * objset_evict().
 	 */
-	dsl_prop_fini(dd);
+	list_destroy(&dd->dd_prop_cbs);
 	mutex_destroy(&dd->dd_lock);
 	kmem_free(dd, sizeof (dsl_dir_t));
 }
@@ -188,7 +188,8 @@ dsl_dir_hold_obj(dsl_pool_t *dp, uint64_t ddobj,
 		dd->dd_pool = dp;
 		mutex_init(&dd->dd_lock, NULL, MUTEX_DEFAULT, NULL);
 
-		dsl_prop_init(dd);
+		list_create(&dd->dd_prop_cbs, sizeof (dsl_prop_cb_record_t),
+		    offsetof(dsl_prop_cb_record_t, cbr_node));
 
 		dsl_dir_snap_cmtime_update(dd);
 
@@ -244,7 +245,6 @@ dsl_dir_hold_obj(dsl_pool_t *dp, uint64_t ddobj,
 		if (winner != NULL) {
 			if (dd->dd_parent)
 				dsl_dir_rele(dd->dd_parent, dd);
-			dsl_prop_fini(dd);
 			mutex_destroy(&dd->dd_lock);
 			kmem_free(dd, sizeof (dsl_dir_t));
 			dd = winner;
@@ -273,7 +273,6 @@ dsl_dir_hold_obj(dsl_pool_t *dp, uint64_t ddobj,
 errout:
 	if (dd->dd_parent)
 		dsl_dir_rele(dd->dd_parent, dd);
-	dsl_prop_fini(dd);
 	mutex_destroy(&dd->dd_lock);
 	kmem_free(dd, sizeof (dsl_dir_t));
 	dmu_buf_rele(dbuf, tag);

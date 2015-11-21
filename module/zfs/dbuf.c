@@ -345,7 +345,10 @@ dbuf_evict_user(dmu_buf_impl_t *db)
 boolean_t
 dbuf_is_metadata(dmu_buf_impl_t *db)
 {
-	if (db->db_level > 0) {
+	/*
+	 * Consider indirect blocks and spill blocks to be meta data.
+	 */
+	if (db->db_level > 0 || db->db_blkid == DMU_SPILL_BLKID) {
 		return (B_TRUE);
 	} else {
 		boolean_t is_metadata;
@@ -1664,11 +1667,6 @@ dmu_buf_write_embedded(dmu_buf_t *dbuf, void *data,
 	dmu_buf_impl_t *db = (dmu_buf_impl_t *)dbuf;
 	struct dirty_leaf *dl;
 	dmu_object_type_t type;
-
-	if (etype == BP_EMBEDDED_TYPE_DATA) {
-		ASSERT(spa_feature_is_active(dmu_objset_spa(db->db_objset),
-									 SPA_FEATURE_EMBEDDED_DATA));
-	}
 
 	DB_DNODE_ENTER(db);
 	type = DB_DNODE(db)->dn_type;

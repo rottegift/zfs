@@ -563,6 +563,12 @@ traverse_impl(spa_t *spa, dsl_dataset_t *ds, uint64_t objset, blkptr_t *rootbp,
 	ASSERT(ds == NULL || objset == ds->ds_object);
 	ASSERT(!(flags & TRAVERSE_PRE) || !(flags & TRAVERSE_POST));
 
+	/*
+	 * The data prefetching mechanism (the prefetch thread) is incompatible
+	 * with resuming from a bookmark.
+	 */
+	ASSERT(resume == NULL || !(flags & TRAVERSE_PREFETCH_DATA));
+
 	td = kmem_alloc(sizeof (traverse_data_t), KM_SLEEP);
 	pd = kmem_zalloc(sizeof (prefetch_data_t), KM_SLEEP);
 	czb = kmem_alloc(sizeof (zbookmark_phys_t), KM_SLEEP);

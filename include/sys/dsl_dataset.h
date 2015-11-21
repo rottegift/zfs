@@ -208,9 +208,6 @@ typedef struct dsl_dataset {
 	uint64_t ds_resume_offset[TXG_SIZE];
 	uint64_t ds_resume_bytes[TXG_SIZE];
 
-	/* Protected by our dsl_dir's dd_lock */
-	list_t ds_prop_cbs;
-
 	/*
 	 * For ZFEATURE_FLAG_PER_DATASET features, set if this dataset
 	 * uses this feature.

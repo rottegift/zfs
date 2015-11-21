@@ -697,7 +697,7 @@ dmu_send_impl(void *tag, dsl_pool_t *dp, dsl_dataset_t *to_ds,
 	int err;
 	uint64_t fromtxg = 0;
 	uint64_t featureflags = 0;
-	struct send_thread_arg to_arg = { { { 0 } } };
+	struct send_thread_arg to_arg = { 0 };
 
 	err = dmu_objset_from_ds(to_ds, &os);
 	if (err != 0) {
@@ -1044,9 +1044,7 @@ dmu_adjust_send_estimate_for_indirects(dsl_dataset_t *ds, uint64_t size,
 int
 dmu_send_estimate(dsl_dataset_t *ds, dsl_dataset_t *fromds, uint64_t *sizep)
 {
-#ifdef DEBUG
 	dsl_pool_t *dp = ds->ds_dir->dd_pool;
-#endif
 	int err;
 	uint64_t size;
 
@@ -1107,9 +1105,7 @@ int
 dmu_send_estimate_from_txg(dsl_dataset_t *ds, uint64_t from_txg,
     uint64_t *sizep)
 {
-#ifdef DEBUG
 	dsl_pool_t *dp = ds->ds_dir->dd_pool;
-#endif
 	int err;
 	uint64_t size = 0;
 
@@ -1869,8 +1865,6 @@ byteswap_record(dmu_replay_record_t *drr)
 	case DRR_END:
 		DO64(drr_end.drr_toguid);
 		ZIO_CHECKSUM_BSWAP(&drr->drr_u.drr_end.drr_checksum);
-		break;
-	case DRR_NUMTYPES:
 		break;
 	}
 
@@ -3111,9 +3105,9 @@ static int
 dmu_recv_existing_end(dmu_recv_cookie_t *drc)
 {
 	int error;
+	char name[MAXNAMELEN];
 
 #ifdef _KERNEL
-	char name[MAXNAMELEN];
 	/*
 	 * We will be destroying the ds; make sure its origin is unmounted if
 	 * necessary.

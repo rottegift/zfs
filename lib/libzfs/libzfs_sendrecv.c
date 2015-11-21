@@ -73,7 +73,7 @@ static int zfs_receive_impl(libzfs_handle_t *, const char *, const char *,
 	recvflags_t *, int, const char *, nvlist_t *, avl_tree_t *, char **, int,
 	uint64_t *);
 static int guid_to_name(libzfs_handle_t *, const char *,
-    uint64_t, boolean_t, char *);
+	uint64_t, boolean_t, char *);
 
 static const zio_cksum_t zero_cksum = { { 0 } };
 
@@ -2230,6 +2230,8 @@ guid_to_name(libzfs_handle_t *hdl, const char *parent, uint64_t guid,
 	gtnd.bookmark_ok = bookmark_ok;
 	gtnd.name = name;
 	gtnd.skip = NULL;
+
+	(void) strlcpy(pname, parent, sizeof (pname));
 
 	/*
 	 * Search progressively larger portions of the hierarchy, starting

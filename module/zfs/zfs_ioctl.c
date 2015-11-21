@@ -178,7 +178,7 @@ history_str_get(zfs_cmd_t *zc)
 		return (NULL);
 
 	buf = kmem_alloc(HIS_MAX_RECORD_LEN, KM_SLEEP | KM_NODEBUG);
-	if (ddi_copyinstr((void *)(uintptr_t)zc->zc_history,
+	if (ddi_copyinstr((user_addr_t)(uintptr_t)zc->zc_history,
 				  buf, HIS_MAX_RECORD_LEN, &len) != 0) {
 		history_str_free(buf);
 		return (NULL);
@@ -4550,7 +4550,7 @@ zfs_ioc_userspace_many(zfs_cmd_t *zc)
 
 	if (error == 0) {
 		error = ddi_copyout(buf,
-						 (void *)(uintptr_t)zc->zc_nvlist_dst,
+						 (user_addr_t)(uintptr_t)zc->zc_nvlist_dst,
                          zc->zc_nvlist_dst_size, 0);
 	}
 	kmem_free(buf, bufsize);
@@ -5157,8 +5157,9 @@ zfs_ioc_send_new(const char *snapname, nvlist_t *innvl, nvlist_t *outnvl)
 #ifndef __APPLE__
 	off = fp->f_offset;
 #endif
-	error = dmu_send(snapname, fromname, embedok, largeblockok, fd,
-		resumeobj, resumeoff, fp->f_vnode, &off);
+
+	error = dmu_send(snapname, fromname, embedok, largeblockok,
+		fd, resumeobj, resumeoff, fp->f_vnode, &off);
 
 #ifndef __APPLE__
 	if (VOP_SEEK(fp->f_vnode, fp->f_offset, &off, NULL) == 0)
