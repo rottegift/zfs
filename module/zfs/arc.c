@@ -7607,7 +7607,9 @@ l2arc_dev_rebuild_start(l2arc_dev_t *dev)
   
   printf("ZFS: %s enter, thread %p/%p\n", __func__, thr, dev->l2ad_rebuild_did);
   mutex_enter(&dev->l2ad_rebuild_mutex);
-  dev->l2ad_rebuild_thread_exiting = FALSE;
+  //dev->l2ad_rebuild_thread_exiting = FALSE;
+  if(dev->l2ad_rebuild_thread_exiting)
+    printf("ZFS: %s WTF: error, thread_exiting is not false\n", __func__);
 	if (!dev->l2ad_rebuild_cancel) {
 	  mutex_exit(&dev->l2ad_rebuild_mutex);
 	  printf("ZFS: %s not in cancel\n", __func__);
