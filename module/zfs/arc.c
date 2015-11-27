@@ -7437,12 +7437,13 @@ l2arc_remove_vdev(vdev_t *vd)
 		   __func__, remdev->l2ad_rebuild_did, ++iter);
 	    cv_timedwait(&remdev->l2ad_rebuild_cv, &remdev->l2ad_rebuild_mutex, ddi_get_lbolt()+(hz*5));
 	  } while(!remdev->l2ad_rebuild_thread_exiting);
+	  kt_did_t othread = remdev->l2ad_rebuild_did;
+	  remdev->l2ad_rebuild_did = 0;
 	  mutex_exit(&remdev->l2ad_rebuild_mutex);
-	  printf("ZFS: %s: thread done %p, destroying cv and mutex, setting did to 0\n",
-		 __func__, remdev->l2ad_rebuild_did);
+	  printf("ZFS: %s: thread done %p/%p, destroying cv and mutex, setting did to 0\n",
+		 __func__, othread, remdev->l2ad_rebuild_did);
 	  cv_destroy(&remdev->l2ad_rebuild_cv);
 	  mutex_destroy(&remdev->l2ad_rebuild_mutex);
-	  remdev->l2ad_rebuild_did = 0;
 		//thread_join(remdev->l2ad_rebuild_did);
 	}
 
