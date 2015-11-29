@@ -7553,9 +7553,9 @@ l2arc_spa_rebuild_start(spa_t *spa)
 #ifdef	_KERNEL
 			mutex_init(&dev->l2ad_rebuild_mutex, NULL, MUTEX_DEFAULT, NULL);
 			cv_init(&dev->l2ad_rebuild_cv, NULL, CV_DEFAULT, NULL);
-			mutex_enter(&dev->l2ad_rebuild_mutex);
+			//mutex_enter(&dev->l2ad_rebuild_mutex);
 			dev->l2ad_rebuild_thread_exiting = FALSE;
-			mutex_exit(&dev->l2ad_rebuild_mutex);
+			//mutex_exit(&dev->l2ad_rebuild_mutex);
 			dev->l2ad_rebuild_did = thread_create(NULL, 0,
 							      (void *)l2arc_dev_rebuild_start,
 							      dev, 0, &p0, TS_RUN,
