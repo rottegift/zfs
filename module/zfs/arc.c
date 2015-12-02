@@ -7583,7 +7583,7 @@ l2arc_spa_rebuild_start(spa_t *spa)
 		l2arc_dev_t *dev =
 		    l2arc_vdev_get(spa->spa_l2cache.sav_vdevs[i]);
 		ASSERT(dev != NULL);
-		printf("ZFS: %s ASSERT passed, i==%d\n", __func__, i);
+		printf("ZFS: %s ASSERT passed, i==%d, dev == %p \n", __func__, i, dev);
 		printf("ZFS: %s dev->l2ad_rebuild == %d\n", __func__, dev->l2ad_rebuild);
 		printf("ZFS: %s dev->l2ad_rebuild_cancel == %d\n", __func__, dev->l2ad_rebuild_cancel);
 		if (dev->l2ad_rebuild && !dev->l2ad_rebuild_cancel) {
