@@ -7555,8 +7555,13 @@ l2arc_spa_rebuild_start(spa_t *spa)
 		ASSERT(dev != NULL);
 		printf("ZFS: %s ASSERT passed\n", __func__);
 		if (dev->l2ad_rebuild && !dev->l2ad_rebuild_cancel) {
-			VERIFY3U(dev->l2ad_rebuild_did, ==, 0);
-			printf("ZFS: %s: VERIFY3U passed\n", __func__);
+		  //VERIFY3U(dev->l2ad_rebuild_did, ==, 0);
+		  //printf("ZFS: %s: VERIFY3U passed\n", __func__);
+		  if(dev->l2ad_rebuild_did != 0) {
+		    printf("ZFS: %s: WTF, dev->l2ad_rebuild_did !=0 (%p), continuing\n",
+			   __func__, dev->l2ad_rebuild_did);
+		    continue;
+		  }
 #ifdef	_KERNEL
 			printf("ZFS: %s: creating mutex\n", __func__);
 			mutex_init(&dev->l2ad_rebuild_mutex, NULL, MUTEX_DEFAULT, NULL);
