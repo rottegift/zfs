@@ -7555,7 +7555,7 @@ l2arc_spa_rebuild_start(spa_t *spa)
 		ASSERT(dev != NULL);
 		printf("ZFS: %s ASSERT passed, i==%d, dev == %p \n", __func__, i, dev);
 		if(!dev) {
-		  printf("ZFS: WTF %s dev == %p, continuing\n", dev);
+		  printf("ZFS: WTF %s dev == %p, continuing\n", __func__, dev);
 		  continue;
 		}
 		printf("ZFS: %s dev->l2ad_rebuild == %d\n", __func__, dev->l2ad_rebuild);
