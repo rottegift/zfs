@@ -7659,8 +7659,13 @@ l2arc_dev_rebuild_start(l2arc_dev_t *dev)
 	  mutex_enter(&dev->l2ad_rebuild_mutex);
 	  dev->l2ad_rebuild_thread_exiting = TRUE;
 	  mutex_exit(&dev->l2ad_rebuild_mutex);
-	  while(dev->l2ad_rebuild_cv_waiting) {
-	    int iter = 0;
+	  kpreempt(KPREEMPT_SYNC);
+	  for(int iter = 1; dev->l2ad_rebuild_cv_waiting; iter++) {
+	    if(!dev->l2ad_rebuild_did) {
+	      printf("ZFS: %s: cv_waiting is true but did is %p/%p, assuming cv is gone (& %p), breaking loop\n",
+		     __func__, thr, dev->l2ad_rebuild_did, &dev->l2ad_rebuild_cv);
+	      break;
+	    }
 		cv_broadcast(&dev->l2ad_rebuild_cv);
 		kpreempt(KPREEMPT_SYNC);
 		printf("ZFS: %s: waiting for l2ad_rebuild_cv_waiting to go FALSE, thread %p/%p, iter %d\n",
