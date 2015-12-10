@@ -2347,13 +2347,10 @@ zfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 
 	ZFS_ENTER(zfsvfs);
 
-	/* If we've deleted something in the last second, allow Finder to get
-	 * the updated number */
-	if (gethrestime_sec() - zfsvfs->z_last_remove < 1) {
-	  // atomic_inc_64(&zfsvfs->z_last_remove); // smd XXX
-	  atomic_add_64(&zfsvfs->z_last_remove, zfs_txg_timeout); // smd
-		txg_wait_synced(dmu_objset_pool(zfsvfs->z_os), 0);
-	}
+	/* Finder will show the old/incorrect size, we can force a sync of the pool
+	 * to make it correct, but that has side effects which are undesirable.
+	 */
+	/* txg_wait_synced(dmu_objset_pool(zfsvfs->z_os), 0); */
 	dmu_objset_space(zfsvfs->z_os,
 	    &refdbytes, &availbytes, &usedobjs, &availobjs);
 
