@@ -247,7 +247,7 @@ zfs_findernotify_callback(mount_t mp, __unused void *arg)
 				// Fill in vap
 				vnode_getattr(vp, &vattr, kernelctx);
 				// Send event
-				vnode_notify(vp, VNODE_EVENT_ATTRIB, &vattr);
+				spl_vnode_notify(vp, VNODE_EVENT_ATTRIB, &vattr);
 
 				// Cleanup vp
 				vnode_put(vp);
