@@ -19,7 +19,7 @@
  * CDDL HEADER END
  */
 /*
- * Copyright 2014 Jorgen Lundman <lundman@lundman.net>
+ * Copyright 2014,2016 Jorgen Lundman <lundman@lundman.net>
  */
 
 #include <sys/spa.h>
@@ -152,7 +152,9 @@ osx_kstat_t osx_kstat = {
 	{"zfs_scan_idle",				KSTAT_DATA_INT64  },
 
 	{"zfs_recover",					KSTAT_DATA_INT64  },
-	{"zfs_free_max_blocks",			KSTAT_DATA_UINT64 },
+
+	{"zfs_free_max_blocks",				KSTAT_DATA_UINT64  },
+	{"zfs_free_bpobj_enabled",			KSTAT_DATA_INT64  },
 };
 
 
@@ -307,12 +309,10 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 		zfs_recover =
 			ks->zfs_recover.value.i64;
 
-		if((uint32_t)ks->zfs_free_max_blocks.value.ui64 != zfs_free_max_blocks) {
-		  printf("ZFS: zfs_free_max_blocks = %u, becoming %u\n",
-			 zfs_free_max_blocks,
-			 (uint32_t)ks->zfs_free_max_blocks.value.ui64);
-		  zfs_free_max_blocks = (uint32_t)ks->zfs_free_max_blocks.value.ui64;
-		}
+		zfs_free_max_blocks =
+			ks->zfs_free_max_blocks.value.ui64;
+		zfs_free_bpobj_enabled	 =
+			ks->zfs_free_bpobj_enabled.value.i64;
 
 	} else {
 
@@ -461,7 +461,10 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 		ks->zfs_recover.value.i64 =
 			zfs_recover;
 
-		ks->zfs_free_max_blocks.value.ui64 = (uint64_t)zfs_free_max_blocks;
+		ks->zfs_free_max_blocks.value.ui64 =
+			zfs_free_max_blocks;
+		ks->zfs_free_bpobj_enabled.value.i64 =
+			zfs_free_bpobj_enabled;
 	}
 
 	return 0;
