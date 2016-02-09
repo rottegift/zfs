@@ -101,6 +101,10 @@ typedef struct osx_kstat {
 	kstat_named_t zfs_free_max_blocks;
 	kstat_named_t zfs_free_bpobj_enabled;
 
+	kstat_named_t zfs_send_corrupt_data;
+	kstat_named_t zfs_send_queue_length;
+	kstat_named_t zfs_recv_queue_length;
+
 } osx_kstat_t;
 
 
@@ -179,6 +183,9 @@ extern int zfs_scan_idle;
 extern uint64_t zfs_free_max_blocks;
 extern int64_t zfs_free_bpobj_enabled;
 
+extern int zfs_send_corrupt_data;
+extern int zfs_send_queue_length;
+extern int zfs_recv_queue_length;
 
 extern uint64_t zfs_l2arc_lowmem_algorithm;
 extern uint64_t zfs_l2arc_lowmem_force_permil;
