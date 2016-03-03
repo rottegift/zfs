@@ -140,6 +140,7 @@
 #include <sys/callb.h>
 #include <sys/kstat.h>
 #include <zfs_fletcher.h>
+#include <sys/spa_impl.h>
 #include <sys/time.h>
 
 #ifdef __APPLE__
