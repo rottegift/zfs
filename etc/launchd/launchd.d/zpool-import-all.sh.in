@@ -53,8 +53,8 @@ then
     if [ -f /etc/zfs/caches/ssdpool.cache ]
     then
 	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|no.pools.avail' &&
-	    (echo "ssdpool cache import cannot proceed. aborting."; exit 1)
+	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
+	    (echo "ssdpool cache import cannot proceed. aborting."; exit 1) || exit $?
 	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache -a && SSDPOOL_CACHE_DONE=1
 	if ((!SSDPOOL_CACHE_DONE))
 	then
@@ -65,29 +65,29 @@ then
     if [ -f /etc/zfs/caches/Trinity.cache ]
     then
 	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|no.pools.avail' &&
-	    (echo "Trinity cache import cannot proceed. aborting."; exit 1)
+	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
+	    (echo "Trinity cache import cannot proceed. aborting."; exit 1) || exit $?
 	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache -a  && TRINITY_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Safety.cache ]
     then
 	"${ZPOOL}" import -c /etc/zfs/caches/Safety.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|no.pools.avail' &&
-	    (echo "Safety cache import cannot proceed. aborting."; exit 1)
+	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
+	    (echo "Safety cache import cannot proceed. aborting."; exit 1) || exit $?
 	"${ZPOOL}" import -c /etc/zfs/caches/Safety.cache -a && SAFETY_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Quarto.cache ]
     then
 	"${ZPOOL}" import -c /etc/zfs/caches/Quarto.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|no.pools.avail' &&
-	    (echo "Quarto cache import cannot proceed. aborting."; exit 1)
+	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
+	    (echo "Quarto cache import cannot proceed. aborting."; exit 1) || exit $?
 	"${ZPOOL}" import -c /etc/zfs/caches/Quarto.cache -a && QUARTO_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/homepool.cache ]
     then
 	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|no.pools.avail' &&
-	    (echo "homepool cache import cannot proceed. aborting."; exit 1)
+	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
+	    (echo "homepool cache import cannot proceed. aborting."; exit 1) || exit $?
 	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache -a && HOMEPOOL_CACHE_DONE=1
 	if ((!HOMEPOOL_CACHE_DONE))
 	then
@@ -98,15 +98,15 @@ then
     if [ -f /etc/zfs/caches/Dual.cache ]
     then
 	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|no.pools.avail' &&
-	    (echo "Dual cache import cannot proceed. aborting."; exit 1)
+	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
+	    (echo "Dual cache import cannot proceed. aborting."; exit 1) || exit $?
 	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache -a && DUAL_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Newmis.cache ]
     then
 	"${ZPOOL}" import -c /etc/zfs/caches/Newmis.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|no.pools.avail' &&
-	    (echo "Newmis cache import cannot proceed. aborting."; exit 1)
+	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
+	    (echo "Newmis cache import cannot proceed. aborting."; exit 1) || exit $?
 	"${ZPOOL}" import -c /etc/zfs/caches/Newmis.cache -a  && NEWMIS_CACHE_DONE=1
     fi
 fi
