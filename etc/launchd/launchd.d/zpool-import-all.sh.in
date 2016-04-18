@@ -52,7 +52,7 @@ then
     echo "ZPOOL_CACHE_DONE = 0, therefore trying individual caches"
     if [ -f /etc/zfs/caches/ssdpool.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache ssdpool && SSDPOOL_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache -a && SSDPOOL_CACHE_DONE=1
 	if ((!SSDPOOL_CACHE_DONE))
 	then
 	    echo "ssdpool cache import failed, this is critical. bye."
@@ -61,19 +61,19 @@ then
     fi
     if [ -f /etc/zfs/caches/Trinity.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache Trinity  && TRINITY_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache -a  && TRINITY_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Safety.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/Safety.cache Safety && SAFETY_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/Safety.cache -a && SAFETY_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Quarto.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/Quarto.cache Quarto && QUARTO_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/Quarto.cache -a && QUARTO_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/homepool.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache homepool && HOMEPOOL_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache -a && HOMEPOOL_CACHE_DONE=1
 	if ((!HOMEPOOL_CACHE_DONE))
 	then
 	    echo "homepool cache import failed, this is critical. bye."
@@ -82,11 +82,11 @@ then
     fi
     if [ -f /etc/zfs/caches/Dual.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache Dual && DUAL_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache -a && DUAL_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Newmis.cache ]
     then
-	"${ZPOOL}" import -c /etc/zfs/caches/Newmis.cache Newmis  && NEWMIS_CACHE_DONE=1
+	"${ZPOOL}" import -c /etc/zfs/caches/Newmis.cache -a  && NEWMIS_CACHE_DONE=1
     fi
 fi
 
