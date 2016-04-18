@@ -44,6 +44,7 @@ fi
 
 if ((!ZPOOL_CACHE_DONE))
 then
+    set -e
     SSDPOOL_CACHE_DONE=0
     TRINITY_CACHE_DONE=0
     SAFETY_CACHE_DONE=0
@@ -52,9 +53,9 @@ then
     echo "ZPOOL_CACHE_DONE = 0, therefore trying individual caches"
     if [ -f /etc/zfs/caches/ssdpool.cache ]
     then
+	echo "attempting to cache import ssdpool"
 	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
-	    (echo "ssdpool cache import cannot proceed. aborting."; exit 1) || exit $?
+	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
 	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache -a && SSDPOOL_CACHE_DONE=1
 	if ((!SSDPOOL_CACHE_DONE))
 	then
@@ -64,30 +65,30 @@ then
     fi
     if [ -f /etc/zfs/caches/Trinity.cache ]
     then
+	echo "attempting to cache import Trinity"
 	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
-	    (echo "Trinity cache import cannot proceed. aborting."; exit 1) || exit $?
+	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
 	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache -a  && TRINITY_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Safety.cache ]
     then
+	echo "attempting to cache import Safety"
 	"${ZPOOL}" import -c /etc/zfs/caches/Safety.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
-	    (echo "Safety cache import cannot proceed. aborting."; exit 1) || exit $?
+	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
 	"${ZPOOL}" import -c /etc/zfs/caches/Safety.cache -a && SAFETY_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Quarto.cache ]
     then
+	echo "attempting to cache import Quarto"
 	"${ZPOOL}" import -c /etc/zfs/caches/Quarto.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
-	    (echo "Quarto cache import cannot proceed. aborting."; exit 1) || exit $?
+	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
 	"${ZPOOL}" import -c /etc/zfs/caches/Quarto.cache -a && QUARTO_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/homepool.cache ]
     then
+	echo "attempting to cache import homepool"
 	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
-	    (echo "homepool cache import cannot proceed. aborting."; exit 1) || exit $?
+	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
 	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache -a && HOMEPOOL_CACHE_DONE=1
 	if ((!HOMEPOOL_CACHE_DONE))
 	then
@@ -97,20 +98,21 @@ then
     fi
     if [ -f /etc/zfs/caches/Dual.cache ]
     then
+	echo "attempting to cache import Dual"
 	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
-	    (echo "Dual cache import cannot proceed. aborting."; exit 1) || exit $?
+	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
 	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache -a && DUAL_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Newmis.cache ]
     then
+	echo "attempting to cache import Newmis"
 	"${ZPOOL}" import -c /etc/zfs/caches/Newmis.cache | \
-	    egrep -i 'cannot|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' && \
-	    (echo "Newmis cache import cannot proceed. aborting."; exit 1) || exit $?
+	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
 	"${ZPOOL}" import -c /etc/zfs/caches/Newmis.cache -a  && NEWMIS_CACHE_DONE=1
     fi
 fi
 
+set +e
 if((ZPOOL_CACHE_DONE)); then echo Everything imported via cache.; fi
 if((SSDPOOL_CACHE_DONE)); then echo ssdpool imported via cache.; fi
 if((TRINITY_CACHE_DONE)); then echo Trinity imported via cache.; fi
