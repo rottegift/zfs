@@ -42,6 +42,33 @@ then
     echo "zpool.cache file found!"
 fi
 
+function testcacheimport () (c=/etc/zfs/caches/$1.cache;
+			if [ -f $c ]
+			then
+			    echo testing importability using cachefile $c
+			    im=`zpool import -c $c 2>&1`; export im
+			    res=`echo $im | egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail'`
+			    if [ "x$res" = "x" ]
+			    then
+				echo OK;
+				return 0;
+			    else
+				echo BAD;
+				return -1;
+			    fi
+			else
+			    echo cannot import because no such file $c
+			    return -1
+			fi
+			    )
+
+function docacheimport () (c=/etc/zfs/caches/$1.cache
+			   echo testing importability of $1...
+			   testcacheimport $1 || return -1
+			   echo importing $1...
+			   zpool import -c $c -a
+			   return $?)
+
 if ((!ZPOOL_CACHE_DONE))
 then
     set -e
@@ -53,10 +80,7 @@ then
     echo "ZPOOL_CACHE_DONE = 0, therefore trying individual caches"
     if [ -f /etc/zfs/caches/ssdpool.cache ]
     then
-	echo "attempting to cache import ssdpool"
-	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache | \
-	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
-	"${ZPOOL}" import -c /etc/zfs/caches/ssdpool.cache -a && SSDPOOL_CACHE_DONE=1
+	docacheimport ssdpool && SSDPOOL_CACHE_DONE=1
 	if ((!SSDPOOL_CACHE_DONE))
 	then
 	    echo "ssdpool cache import failed, this is critical. bye."
@@ -65,31 +89,20 @@ then
     fi
     if [ -f /etc/zfs/caches/Trinity.cache ]
     then
-	echo "attempting to cache import Trinity"
-	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache | \
-	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
-	"${ZPOOL}" import -c /etc/zfs/caches/Trinity.cache -a  && TRINITY_CACHE_DONE=1
+	docacheimport Trinity && TRINITY_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Safety.cache ]
     then
-	echo "attempting to cache import Safety"
-	"${ZPOOL}" import -c /etc/zfs/caches/Safety.cache | \
-	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
-	"${ZPOOL}" import -c /etc/zfs/caches/Safety.cache -a && SAFETY_CACHE_DONE=1
+	docacheimport Safety && SAFETY_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Quarto.cache ]
     then
-	echo "attempting to cache import Quarto"
-	"${ZPOOL}" import -c /etc/zfs/caches/Quarto.cache | \
-	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
-	"${ZPOOL}" import -c /etc/zfs/caches/Quarto.cache -a && QUARTO_CACHE_DONE=1
+	docacheimport Quarto && QUARTO_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/homepool.cache ]
     then
 	echo "attempting to cache import homepool"
-	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache | \
-	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
-	"${ZPOOL}" import -c /etc/zfs/caches/homepool.cache -a && HOMEPOOL_CACHE_DONE=1
+	docacheimport homepool && HOMEPOOL_CACHE_DONE=1
 	if ((!HOMEPOOL_CACHE_DONE))
 	then
 	    echo "homepool cache import failed, this is critical. bye."
@@ -98,17 +111,11 @@ then
     fi
     if [ -f /etc/zfs/caches/Dual.cache ]
     then
-	echo "attempting to cache import Dual"
-	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache | \
-	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
-	"${ZPOOL}" import -c /etc/zfs/caches/Dual.cache -a && DUAL_CACHE_DONE=1
+	docacheimport Dual && DUAL_CACHE_DONE=1
     fi
     if [ -f /etc/zfs/caches/Newmis.cache ]
     then
-	echo "attempting to cache import Newmis"
-	"${ZPOOL}" import -c /etc/zfs/caches/Newmis.cache | \
-	    (egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail' || exit 1)
-	"${ZPOOL}" import -c /etc/zfs/caches/Newmis.cache -a  && NEWMIS_CACHE_DONE=1
+	docacheimport Newmis  && NEWMIS_CACHE_DONE=1
     fi
 fi
 
