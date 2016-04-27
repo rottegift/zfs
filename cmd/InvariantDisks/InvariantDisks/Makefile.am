@@ -29,8 +29,6 @@ InvariantDisks_SOURCES = \
 	IDException.hpp \
 	IDFileUtils.mm \
 	IDFileUtils.hpp \
-	IDImagePathLinker.cpp \
-	IDImagePathLinker.hpp \
 	IDMediaPathLinker.cpp \
 	IDMediaPathLinker.hpp \
 	IDSerialLinker.cpp \
