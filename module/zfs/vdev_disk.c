@@ -124,6 +124,7 @@ const char *devids[] = {
   "media-06B5C205-A171-4F40-06B5-C205A1714F40", // homepool log0
   "media-06B5C225-CA24-FAC0-06B5-C225CA24FAC0", // homepool log1
   "media-06B5C2F0-9123-5200-06B5-C2F091235200", // homepool l2
+  "C400-MTFDDAC256MAM-0000000012290910996E:1", // homepool alt vdev on 256 (wholedisk)
   "media-06B5C239-A7B9-3E80-06B5-C239A7B93E80", // Dual log0
   "media-06B5D8FA-B893-09C0-06B5-D8FAB89309C0", // Dual log1
   "media-06B5C2DE-CF65-F440-06B5-C2DECF65F440", // Dual cache0
