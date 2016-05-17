@@ -47,7 +47,7 @@ function testcacheimport () (c=/etc/zfs/caches/$1.cache;
 			then
 			    echo testing importability using cachefile $c
 			    im=`zpool import -c $c 2>&1`; export im
-			    res=`echo $im | egrep -i 'unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail'`
+			    res=`echo $im | egrep -i 'degrad|unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail'`
 			    if [ "x$res" = "x" ]
 			    then
 				echo OK;
