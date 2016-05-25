@@ -28,7 +28,7 @@ else
 fi
 
 if [ -d /etc/zfs/caches ]; then
-    for p in homepool Dual Newmis ssdpool Trinity Safety Quarto
+    for p in homepool Dual ssdpool Trinity Safety Quarto
     do
 	if [ -f /etc/zfs/caches/${p}.cache.tmp ]
 	then

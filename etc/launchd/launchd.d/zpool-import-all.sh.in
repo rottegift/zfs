@@ -113,10 +113,6 @@ then
     then
 	docacheimport Dual && DUAL_CACHE_DONE=1
     fi
-    if [ -f /etc/zfs/caches/Newmis.cache ]
-    then
-	docacheimport Newmis  && NEWMIS_CACHE_DONE=1
-    fi
 fi
 
 set +e
@@ -127,9 +123,8 @@ if((SAFETY_CACHE_DONE)); then echo Safety imported via cache.; fi
 if((QUARTO_CACHE_DONE)); then echo Quarto imported via cache.; fi
 if((HOMEPOOL_CACHE_DONE)); then echo homepool imported via cache.; fi
 if((DUAL_CACHE_DONE)); then echo Dual imported via cache.; fi
-if((NEWMIS_CACHE_DONE)); then echo Newmis imported via cache.; fi
 
-if ((!ZPOOL_IMPORT_CACHE && ((! ((SSDPOOL_CACHE_DONE || SAFETY_CACHE_DONE || QUARTO_CACHE_DONE || TRINITY_CACHE_DONE || HOMEPOOL_CACHE_DONE || DUAL_CACHE_DONE || NEWMIS_CACHE_DONE))))))
+if ((!ZPOOL_IMPORT_CACHE && ((! ((SSDPOOL_CACHE_DONE || SAFETY_CACHE_DONE || QUARTO_CACHE_DONE || TRINITY_CACHE_DONE || HOMEPOOL_CACHE_DONE || DUAL_CACHE_DONE ))))))
 then
     echo "Nothing imported via caches.  Running zpool import -d /etc/zfs/devices"
     "${ZPOOL}" import -d /etc/zfs/devices
@@ -162,7 +157,7 @@ echo "Touching the file ${ZPOOL_IMPORT_ALL_COOKIE}"
 touch "${ZPOOL_IMPORT_ALL_COOKIE}"
 
 echo "Setting cachefile properties"
-for i in ssdpool Safety Trinity Quarto homepool Dual Newmis 
+for i in ssdpool Safety Trinity Quarto homepool Dual
 do
     "${ZPOOL}" set cachefile=/etc/zfs/caches/$i.cache $i
 done
