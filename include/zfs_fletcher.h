@@ -42,14 +42,17 @@ extern "C" {
  */
 
 void fletcher_init(zio_cksum_t *);
+
 void fletcher_2_native(const void *, size_t, const void *, zio_cksum_t *);
 void fletcher_2_byteswap(const void *, size_t, const void *, zio_cksum_t *);
 int fletcher_2_incremental_native(void *, size_t, void *);
 int fletcher_2_incremental_byteswap(void *, size_t, void *);
 void fletcher_4_native(const void *, size_t, const void *, zio_cksum_t *);
 void fletcher_4_byteswap(const void *, size_t, const void *, zio_cksum_t *);
-int fletcher_4_incremental_native(void *, size_t, void *);
-int fletcher_4_incremental_byteswap(void *, size_t, void *);
+int fletcher_4_incremental_native(void *, size_t,
+    void *);
+int fletcher_4_incremental_byteswap(void *, size_t,
+    void *);
 
 #ifdef	__cplusplus
 }
