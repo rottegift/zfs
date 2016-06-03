@@ -46,14 +46,18 @@ function testcacheimport () (c=/etc/zfs/caches/$1.cache;
 			if [ -f $c ]
 			then
 			    echo testing importability using cachefile $c
-			    im=`zpool import -c $c 2>&1`; export im
-			    res=`echo $im | egrep -i 'degrad|unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail'`
-			    if [ "x$res" = "x" ]
+			    im=`${ZPOOL} import -c $c 2>&1`; export im
+			    res=`echo $im | egrep -i 'degrad|unavail|faulted|damaged|corrupted|missing|cannot.(discover|import)|no.pools.avail'`; export res
+			    if [ "x$res" == "x" ]
 			    then
 				echo OK;
+				echo res: $res
+				echo im: $im
 				return 0;
 			    else
 				echo BAD;
+				echo res: $res
+				echo im: $im
 				return -1;
 			    fi
 			else
@@ -65,8 +69,8 @@ function testcacheimport () (c=/etc/zfs/caches/$1.cache;
 function docacheimport () (c=/etc/zfs/caches/$1.cache
 			   echo testing importability of $1...
 			   testcacheimport $1 || return -1
-			   echo importing $1...
-			   "${ZPOOL}" import -c $c -a
+			   echo testcacheimport returned OK, importing $1...
+			   testcacheimport $1 && "${ZPOOL}" import -c $c -a
 			   return $?)
 
 if ((!ZPOOL_CACHE_DONE))
