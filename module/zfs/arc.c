@@ -7799,11 +7799,16 @@ l2arc_rebuild(l2arc_dev_t *dev)
 		 * less memory pressure).
 		 */
 		if (arc_reclaim_needed()) {
+		  if(arc_meta_used >= arc_meta_limit) {
 			ARCSTAT_BUMP(arcstat_l2_rebuild_abort_lowmem);
-			cmn_err(CE_NOTE, "System running low on memory, "
-			    "aborting L2ARC rebuild.");
+			//cmn_err(CE_NOTE, "System running low on memory, "
+			//    "aborting L2ARC rebuild.");
+			printf("ZFS: %s: system running low on memory, "
+			       "aborting L2ARC rebuild.\n",
+			       __func__);
 			err = SET_ERROR(ENOMEM);
 			break;
+		  }
 		}
 
 		/*
