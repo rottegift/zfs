@@ -3675,16 +3675,19 @@ arc_available_memory(void)
 static boolean_t
 arc_reclaim_needed(void)
 {
+    if(arc_available_memory() < 0) {
+      return 1;
+    }
 
 #ifdef __APPLE__
-#ifdef KERNEL
-    if (spl_vm_pool_low()) {
-		ARCSTAT_INCR(arcstat_memory_throttle_count, 1);
-		return 1;
-	}
+#ifdef _KERNEL
+    if(spl_free_manual_pressure_wrapper() != 0) {
+      return 1;
+    }
 #endif
 #endif
-	return (arc_available_memory() < 0);
+
+    return 0;
 }
 
 static void
