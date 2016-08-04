@@ -6803,6 +6803,37 @@ parse_mount_opts(char *optstring)
 	return (flags);
 }
 
+#ifdef __APPLE__
+int get_proxy_bsdname(const char *osname, char *bsdname, int len);
+#endif /* __APPLE__ */
+
+#if 0
+static int
+manual_proxy(const char *osname)
+{
+	libzfs_handle_t *hdl;
+	zfs_cmd_t zc;
+	int error;
+
+	if ((hdl = libzfs_init()) == NULL) {
+		(void) fprintf(stderr, "%s", libzfs_error_init(errno));
+		return (MOUNT_SYSERR);
+	}
+	bzero(&zc, sizeof (zc));
+
+	(void) strlcpy(zc.zc_name, osname, sizeof (zc.zc_name));
+printf("%s set zc osname %s\n", __func__, zc.zc_name);
+
+	if ((error = zfs_ioctl(hdl, ZFS_IOC_PROXY_DATASET, &zc)) != 0) {
+		printf("%s error %d\n", __func__, error);
+	}
+
+	libzfs_fini(hdl);
+
+	return (error);
+}
+#endif
+
 /*
  * Called when invoked as mount_zfs.  Do the mount if the mountpoint is
  * 'legacy'.  Otherwise, complain that user should be using 'zfs mount'.
@@ -6812,6 +6843,9 @@ manual_mount(int argc, char **argv)
 {
 	zfs_handle_t *zhp;
 	char mountpoint[ZFS_MAXPROPLEN];
+#if 0
+	char proxy[MAXNAMELEN];
+#endif
 	char mntopts[MNT_LINE_MAX] = { '\0' };
 	char *dataset, *path;
 	int ret = 0;
@@ -6820,6 +6854,7 @@ manual_mount(int argc, char **argv)
 	int new_flags = 0;
 #ifdef __APPLE__
 	uint64_t zfs_version = 0;
+	// int error = 0;
 #endif
 
 	return 0; // Fix this, if it is needed.
@@ -6890,19 +6925,40 @@ manual_mount(int argc, char **argv)
 	path = argv[1];
 
 	if (strncmp(dataset, "/dev/disk", 9) == 0) {
+#if 0
+		char proxy[MAXNAMELEN];
+
+		snprintf(proxy, MAXNAMELEN, "%s", dataset);
+
+		if (get_proxy_bsdname(dataset, proxy,
+		    sizeof (proxy)) != 0) {
+			syslog(LOG_NOTICE, "no dataset for disk %s\n",
+			    proxy);
+			return (ENOENT);
+		}
+
+		/* try to open the dataset */
+		if ((zhp = zfs_open(g_zfs, proxy,
+		    ZFS_TYPE_FILESYSTEM)) == NULL) {
+			return (1);
+		}
+#endif
+
 		syslog(LOG_NOTICE, "%s: mount with %s on %s\n",
 		    __func__, dataset, path);
 		if (path[0] == '/' && strlen(path) == 1) {
 			syslog(LOG_NOTICE, "mountroot\n");
-		} else {
-			syslog(LOG_NOTICE, "no automount\n");
-			return (1);
 		}
-// fixme
-//		ret = zmount(zhp, dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
-//		    NULL, 0, mntopts, sizeof (mntopts));
-		syslog(LOG_NOTICE, "%s: zmount %s on %s returned %d\n", __func__,
-		    dataset, path, ret);
+
+		ret = zmount(dataset, path, MS_OPTIONSTR | flags,
+		    MNTTYPE_ZFS, NULL, 0, mntopts, sizeof (mntopts));
+#if 0
+		//ret = zmount(proxy, path, MS_OPTIONSTR | flags,
+		//   MNTTYPE_ZFS, NULL, 0, mntopts, sizeof (mntopts));
+		zfs_close(zhp);
+#endif
+		syslog(LOG_NOTICE, "%s: zmount %s on %s returned %d\n",
+		    __func__, dataset, path, ret);
 		return (ret);
 	}
 	closelog();
@@ -6924,30 +6980,71 @@ manual_mount(int argc, char **argv)
 	if (zfs_version == 0) {
 		fprintf(stderr, gettext("unable to fetch "
 		    "ZFS version for filesystem '%s'\n"), dataset);
+		zfs_close(zhp);
 		return (1);
 	}
-#endif
+#endif /* __APPLE__ */
 
 	/* check for legacy mountpoint and complain appropriately */
 	ret = 0;
 	if (strcmp(mountpoint, ZFS_MOUNTPOINT_LEGACY) == 0) {
-		if (zmount(zhp, dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
+#if 0
+#ifdef __APPLE__
+		bzero(proxy, sizeof (proxy));
+		if (get_proxy_bsdname(dataset, proxy,
+		    sizeof (proxy)) != 0) {
+			(void) fprintf(stderr,
+			    gettext("no proxy available\n"));
+
+			if ((error = manual_proxy(dataset)) != 0) {
+				fprintf(stderr, "%s proxy error %d\n",
+				    __func__, error);
+				zfs_close(zhp);
+				return (1);
+			}
+
+			/* should wait for proxy to come online */
+			delay(hz);
+			if (get_proxy_bsdname(dataset, proxy,
+			    sizeof (proxy)) != 0) {
+			}
+		}
+
+		(void) fprintf(stderr, "got proxy %s\n", proxy);
+
+		if ((error = zmount(proxy, path, MS_OPTIONSTR | flags,
+		    MNTTYPE_ZFS, NULL, 0, mntopts,
+		    sizeof (mntopts))) != 0) {
+			fprintf(stderr, "%s mount error %d\n",
+			    __func__, error);
+			zfs_close(zhp);
+			return (1);
+		}
+
+		/* Mounted proxy */
+		zfs_close(zhp);
+		return (0);
+#endif /* __APPLE__ */
+#endif
+		if (zmount(dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
 		    NULL, 0, mntopts, sizeof (mntopts)) != 0) {
 #ifdef __APPLE__
-			if (errno == ENOTSUP && zfs_version > ZPL_VERSION) {
+
+			if (errno == ENOTSUP &&
+			    zfs_version > ZPL_VERSION) {
 				(void) fprintf(stderr,
 				    gettext("filesystem '%s' (v%d) is not "
 				    "supported by this implementation of "
 				    "ZFS (max v%d).\n"), dataset,
 				    (int) zfs_version, (int) ZPL_VERSION);
 			} else {
-#endif
+#endif /* __APPLE__ */
 				(void) fprintf(stderr,
 				    gettext("mount failed: %s\n"),
 				    strerror(errno));
 #ifdef __APPLE__
 			}
-#endif
+#endif /* __APPLE__ */
 			ret = 1;
 		}
 	} else {
@@ -6962,6 +7059,7 @@ manual_mount(int argc, char **argv)
 		ret = 1;
 	}
 
+	zfs_close(zhp);
 	return (ret);
 }
 

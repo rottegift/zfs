@@ -88,6 +88,9 @@ zmount(zfs_handle_t *zhp, const char *spec, const char *dir, int mflag,
 	 * do the same.
 	 */
 	rpath = realpath(dir, NULL);
+printf("%s calling mount with fstype %s, %s %s, fspec %s, mflag %d,"
+    " optptr %s, optlen %d\n", __func__, fstype, (rpath ? "rpath" : "dir"),
+    (rpath ? rpath : dir), spec, mflag, optptr, optlen);
 
 	rv = mount(fstype, rpath ? rpath : dir, 0, &mnt_args);
 

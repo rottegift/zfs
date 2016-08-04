@@ -103,7 +103,7 @@
 #include <sys/zfs_vnops.h>
 #include <sys/systeminfo.h>
 #include <sys/zfs_mount.h>
-#include <sys/ZFSDataset.h>
+#include <sys/ZFSDatasetScheme.h>
 #endif /* __APPLE__ */
 
 //#define dprintf kprintf
@@ -163,6 +163,161 @@ static int hardlinks_compare_linkid(const void *arg1, const void *arg2)
 }
 
 
+
+// move these structs to _osx once wrappers are updated
+
+/*
+ * ZFS file system features.
+ */
+const vol_capabilities_attr_t zfs_capabilities = {
+	{
+		/* Format capabilities we support: */
+		VOL_CAP_FMT_PERSISTENTOBJECTIDS |
+		VOL_CAP_FMT_SYMBOLICLINKS |
+		VOL_CAP_FMT_HARDLINKS |
+		VOL_CAP_FMT_JOURNAL |
+		VOL_CAP_FMT_JOURNAL_ACTIVE |
+		VOL_CAP_FMT_SPARSE_FILES |
+		VOL_CAP_FMT_ZERO_RUNS |
+		/*VOL_CAP_FMT_CASE_SENSITIVE*/ /* Moved down to vfs_getattr */
+		VOL_CAP_FMT_CASE_PRESERVING |
+		VOL_CAP_FMT_FAST_STATFS |
+		VOL_CAP_FMT_2TB_FILESIZE |
+		VOL_CAP_FMT_HIDDEN_FILES |
+		VOL_CAP_FMT_PATH_FROM_ID |
+		VOL_CAP_FMT_64BIT_OBJECT_IDS |
+        0,
+
+		/* Interface capabilities we support: */
+#ifdef WITH_SEARCHFS
+		VOL_CAP_INT_SEARCHFS |
+#endif
+		VOL_CAP_INT_ATTRLIST |
+		VOL_CAP_INT_NFSEXPORT |
+#ifdef WITH_READDIRATTR
+		VOL_CAP_INT_READDIRATTR |
+#endif
+		//VOL_CAP_INT_EXCHANGEDATA |
+		//VOL_CAP_INT_COPYFILE |
+		//VOL_CAP_INT_ALLOCATE | // **
+
+		VOL_CAP_INT_VOL_RENAME |
+		VOL_CAP_INT_ADVLOCK |
+		VOL_CAP_INT_FLOCK |
+		VOL_CAP_INT_EXTENDED_SECURITY |
+#if NAMEDSTREAMS
+		VOL_CAP_INT_NAMEDSTREAMS |
+#endif
+		/*VOL_CAP_INT_EXTENDED_ATTR ,*/
+
+		0 , 0
+	},
+	{
+		/* Format capabilities we know about: */
+		VOL_CAP_FMT_PERSISTENTOBJECTIDS |
+		VOL_CAP_FMT_SYMBOLICLINKS |
+		VOL_CAP_FMT_HARDLINKS |
+		VOL_CAP_FMT_JOURNAL |
+		VOL_CAP_FMT_JOURNAL_ACTIVE |
+		VOL_CAP_FMT_NO_ROOT_TIMES |
+		VOL_CAP_FMT_SPARSE_FILES |
+		VOL_CAP_FMT_ZERO_RUNS |
+		VOL_CAP_FMT_CASE_SENSITIVE |
+		VOL_CAP_FMT_CASE_PRESERVING |
+		VOL_CAP_FMT_FAST_STATFS |
+		VOL_CAP_FMT_2TB_FILESIZE |
+		VOL_CAP_FMT_OPENDENYMODES |
+		VOL_CAP_FMT_64BIT_OBJECT_IDS |
+		VOL_CAP_FMT_HIDDEN_FILES |
+		VOL_CAP_FMT_PATH_FROM_ID ,
+
+		/* Interface capabilities we know about: */
+		VOL_CAP_INT_SEARCHFS |
+		VOL_CAP_INT_ATTRLIST |
+		VOL_CAP_INT_NFSEXPORT |
+        //VOL_CAP_INT_READDIRATTR |
+        VOL_CAP_INT_EXCHANGEDATA |
+        VOL_CAP_INT_COPYFILE |
+        VOL_CAP_INT_ALLOCATE |
+		VOL_CAP_INT_VOL_RENAME |
+		VOL_CAP_INT_ADVLOCK |
+		VOL_CAP_INT_FLOCK |
+		VOL_CAP_INT_EXTENDED_SECURITY |
+		VOL_CAP_INT_USERACCESS |
+		VOL_CAP_INT_MANLOCK |
+		VOL_CAP_INT_NAMEDSTREAMS |
+		VOL_CAP_INT_EXTENDED_ATTR ,
+
+		0, 0
+	}
+};
+
+
+
+
+/*
+ * ZFS file system attributes (for getattrlist).
+ */
+const attribute_set_t zfs_attributes = {
+		ATTR_CMN_NAME	|
+		ATTR_CMN_DEVID	|
+		ATTR_CMN_FSID	|
+		ATTR_CMN_OBJTYPE |
+		ATTR_CMN_OBJTAG	|
+		ATTR_CMN_OBJID	|
+		ATTR_CMN_OBJPERMANENTID |
+		ATTR_CMN_PAROBJID |
+		ATTR_CMN_CRTIME |
+		ATTR_CMN_MODTIME |
+		ATTR_CMN_CHGTIME |
+		ATTR_CMN_ACCTIME |
+		ATTR_CMN_BKUPTIME |
+		ATTR_CMN_FNDRINFO |
+		ATTR_CMN_OWNERID |
+		ATTR_CMN_GRPID	|
+		ATTR_CMN_ACCESSMASK |
+		ATTR_CMN_FLAGS	|
+		ATTR_CMN_USERACCESS |
+		ATTR_CMN_EXTENDED_SECURITY |
+		ATTR_CMN_UUID |
+		ATTR_CMN_GRPUUID |
+		ATTR_CMN_PARENTID ,
+
+		ATTR_VOL_FSTYPE	|
+		ATTR_VOL_SIGNATURE |
+		ATTR_VOL_SIZE	|
+		ATTR_VOL_SPACEFREE |
+		ATTR_VOL_SPACEAVAIL |
+		ATTR_VOL_MINALLOCATION |
+		ATTR_VOL_ALLOCATIONCLUMP |
+		ATTR_VOL_IOBLOCKSIZE |
+		ATTR_VOL_OBJCOUNT |
+		ATTR_VOL_FILECOUNT |
+		ATTR_VOL_DIRCOUNT |
+		ATTR_VOL_MAXOBJCOUNT |
+		/* ATTR_VOL_MOUNTPOINT | */
+		ATTR_VOL_NAME	|
+		ATTR_VOL_MOUNTFLAGS |
+		/* ATTR_VOL_MOUNTEDDEVICE | */
+		ATTR_VOL_CAPABILITIES |
+		ATTR_VOL_ATTRIBUTES ,
+
+		ATTR_DIR_LINKCOUNT |
+		ATTR_DIR_ENTRYCOUNT |
+		ATTR_DIR_MOUNTSTATUS ,
+
+		ATTR_FILE_LINKCOUNT |
+		ATTR_FILE_TOTALSIZE |
+		ATTR_FILE_ALLOCSIZE |
+		/* ATTR_FILE_IOBLOCKSIZE */
+		ATTR_FILE_DEVTYPE |
+		ATTR_FILE_DATALENGTH |
+		ATTR_FILE_DATAALLOCSIZE |
+		ATTR_FILE_RSRCLENGTH |
+		ATTR_FILE_RSRCALLOCSIZE ,
+
+		0
+};
 
 
 /*
@@ -1401,6 +1556,10 @@ zfs_set_fuid_feature(zfsvfs_t *zfsvfs)
 	zfsvfs->z_use_sa = USE_SA(zfsvfs->z_version, zfsvfs->z_os);
 }
 
+#ifdef __APPLE__
+#include <sys/ZFSDataset.h>
+#endif
+
 static int
 zfs_domount(struct mount *vfsp, dev_t mount_dev, char *osname, vfs_context_t ctx)
 {
@@ -1411,6 +1570,7 @@ dprintf("%s\n", __func__);
 	uint64_t recordsize, fsid_guid;
 	vnode_t *vp;
 #else
+	//char *mountpoint = 0;
 	uint64_t mimic_hfs = 0;
 	struct timeval tv;
 #endif
@@ -1435,8 +1595,37 @@ dprintf("%s\n", __func__);
 	ASSERT(vfs_devismounted(mount_dev) == 0);
 #endif
 
-
 #ifdef __APPLE__
+#if 0
+	if (!mount_dev) {
+		/* XXX create a proxy device */
+		error = zfs_osx_proxy_create(osname);
+#if 0
+		/* Check to see if this is a legacy mountpoint */
+		if (error = (dsl_prop_get_string(osname, ZFS_MOUNTPOINT,
+		    &mountpoint) != 0)) {
+			error = ENODEV;
+			goto out;
+		}
+		if (strcmp(mountpoint, ZFS_MOUNTPOINT_LEGACY) == 0) {
+#endif
+
+
+			if (error == EAGAIN) {
+				/* Mask out EAGAIN, just in case */
+				error = ENODEV;
+			}
+			if (error == 0) {
+				/* Tell caller to get bsd name and remount */
+				error = EAGAIN;
+			}
+			goto out;
+#if 0
+		}
+#endif
+	}
+#endif
+
 	zfsvfs->z_rdev = mount_dev;
 
 	/* HFS sets this prior to mounting */
@@ -1570,6 +1759,34 @@ dprintf("%s\n", __func__);
 		//vfs_setflags(vfsp,
 		//    (uint64_t)((unsigned int)MNT_AUTOMOUNTED));
 	}
+
+#ifdef __APPLE__
+	{
+		char mntfromname[MNAMELEN];
+		int prefixlen = strlen("/dev/");
+
+		/* Set the mount from name to the proxy bsd name */
+		snprintf(mntfromname, prefixlen+1, "/dev/");
+		zfs_osx_proxy_get_bsdname(osname,
+		    mntfromname + prefixlen, MNAMELEN - prefixlen);
+		//snprintf(mntfromname, MAXPATHLEN,
+		//    "/dev/%s", proxy);
+
+		dprintf("%s setting mntfromname to %s\n", __func__,
+		    mntfromname);
+		snprintf(vfs_statfs(vfsp)->f_mntfromname,
+		    MNAMELEN, "%s", mntfromname);
+	}
+	//snprintf(vfs_statfs(vfsp)->f_mntfromname, MAXPATHLEN,
+	//    "/dev/%s", proxy);
+#endif
+
+#if 0
+	/* Set mountedfromname */
+	dprintf("%s setting mntfromname to %s\n", __func__, osname);
+	snprintf(vfs_statfs(vfsp)->f_mntfromname,
+	    MAXPATHLEN, "%s", osname);
+#endif
 
 #else
 	/* Grab extra reference. */
@@ -1796,11 +2013,13 @@ zfs_mount_label_policy(vfs_t *vfsp, char *osname)
 }
 #endif	/* SECLABEL */
 
+#if 0
 #ifdef ZFS_BOOT
 /* Used by mountroot */
 #define	ZFS_BOOT_MOUNT_DEV	1
 int zfs_boot_get_path(char *, int);
-#endif
+#endif	/* ZFS_BOOT */
+#endif	/* 0 */
 
 /*
  * zfs_vfs_mountroot
@@ -1829,7 +2048,9 @@ zfs_vfs_mountroot(struct mount *mp, struct vnode *devvp, vfs_context_t ctx)
 	//znode_t *zp = NULL;
 	spa_t *spa = 0;
 	char *zfs_bootfs = 0;
+#if 0
 	char *path = 0;
+#endif
 	dev_t dev = 0;
 	int error = EINVAL;
 	//int len = MAXPATHLEN;
@@ -1852,6 +2073,7 @@ printf("ZFS: %s\n", __func__);
 		return (ENOMEM);
 	}
 
+#if 0
 #ifdef ZFS_BOOT_MOUNT_DEV
 	path = kmem_alloc(MAXPATHLEN, KM_SLEEP);
 	if (!path) {
@@ -1860,6 +2082,8 @@ printf("ZFS: %s\n", __func__);
 		kmem_free(zfs_bootfs, MAXPATHLEN);
 		return (ENOMEM);
 	}
+	path[0] = '\0';
+#endif
 #endif
 
 	mutex_enter(&spa_namespace_lock);
@@ -1881,13 +2105,19 @@ printf("ZFS: %s\n", __func__);
 	}
 	mutex_exit(&spa_namespace_lock);
 
+#if 0
 #ifdef ZFS_BOOT_MOUNT_DEV
+#if 0
 	/* XXX Could also do IOKit lookup from dev_t to diskN */
 	error = zfs_boot_get_path(path, MAXPATHLEN);
+#else
+	error = zfs_osx_proxy_get_bsdname(osname, path, MAXPATHLEN);
+#endif
 	if (error != 0) {
 		cmn_err(CE_NOTE, "get_path: error %d", error);
 		goto out;
 	}
+#endif
 #endif
 
 	/*
@@ -1909,14 +2139,18 @@ printf("ZFS: %s\n", __func__);
 	}
 	// vfs_clearflags(mp, (u_int64_t)((unsigned int)MNT_AUTOMOUNTED));
 
+#if 0
 #ifdef ZFS_BOOT_MOUNT_DEV
 	// override the mount from field
 	if (strlen(path) > 0) {
-		vfs_mountedfrom(mp, path);
+		dprintf("%s setting mntfromname to %s\n", __func__, path);
+		snprintf(vfs_statfs(mp)->f_mntfromname,
+		    MNAMELEN, "%s", path);
 	} else {
-		printf("%s couldn't set vfs_mountedfrom\n", __func__);
+		printf("%s couldn't set vfs mntfromname\n", __func__);
 		//goto out;
 	}
+#endif
 #endif
 
 	zfsvfs = (zfsvfs_t *)vfs_fsprivate(mp);
@@ -1947,9 +2181,11 @@ printf("ZFS: %s\n", __func__);
 
 out:
 
+#if 0
 	if (path) {
 		kmem_free(path, MAXPATHLEN);
 	}
+#endif
 	if (zfs_bootfs) {
 		kmem_free(zfs_bootfs, MAXPATHLEN);
 	}
@@ -1994,6 +2230,7 @@ zfs_vfs_mount(struct mount *vfsp, vnode_t *mvp /*devvp*/,
 	char *dev_name = NULL;
 
 #ifdef __APPLE__
+	char		*proxy = NULL;
     struct zfs_mount_args mnt_args;
 	size_t		osnamelen = 0;
 	uint32_t	cmdflags = 0;
@@ -2052,27 +2289,52 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 			//cmn_err(CE_NOTE, "%s: error on osname copyin %d",
 			printf("%s: error on osname copyin %d\n",
 			__func__, error);
-			goto out;
+			if (!mvp)
+				goto out;
 		}
 	}
 
-	// Convert /dev/disk to real dataset name (or pass in options?)
-	if (strncmp(osname, "/dev/disk", 9) == 0) {
-
-		dev_name = osname;
-		osname = kmem_alloc(MAXPATHLEN, KM_SLEEP); //same size as osname
-
-		error = zfs_dataset_proxy_get_osname(dev_name,
-			osname, MAXPATHLEN);
-		if (error) strcpy(osname, "BOOM"); // FIXME
-		printf("%s: changed '%s' to '%s'\n", __func__, dev_name, osname);
-
+	proxy = kmem_alloc(MAXPATHLEN, KM_SLEEP);
+	if (!proxy) {
+		dprintf("%s proxy string alloc failed\n", __func__);
+		goto out;
 	}
 
-	// From here on, dev_name is /dev/disk (if any)
-	// and osname is dataset name
+	/* Only for non-root mounts */
+	if ((flags & MNT_ROOTFS) == 0) {
+		if (strncmp(osname, "/dev/disk", 9) == 0) {
+			error = zfs_osx_proxy_get_osname(osname,
+			    osname, MAXPATHLEN);
+			if (error != 0) {
+				printf("%s couldn't get dataset from %s\n",
+				    __func__, osname);
+				error = ENOENT;
+				goto out;
+			}
+			printf("%s got new osname %s\n", __func__, osname);
+		} else {
+			error = zfs_osx_proxy_create(osname);
+			/* Ignore EBUSY as this means the proxy exists */
+			if (error == EBUSY) error = 0;
 
-#endif
+			if (error) {
+				printf("%s error %d from proxy_create\n",
+				    __func__, error);
+				goto out;
+			}
+		}
+	}
+
+	if (strncmp(osname, "/dev/disk", 9) == 0) {
+		snprintf(proxy, MAXPATHLEN, "%s", osname);
+	} else {
+		error = zfs_osx_proxy_get_bsdname(osname,
+		    proxy, MAXPATHLEN);
+		if (error) {
+			dprintf("%s couldn't get proxy bsd name\n", __func__);
+			goto out;
+		}
+	}
 
 	if (mnt_args.struct_size == sizeof(mnt_args)) {
 
@@ -2083,8 +2345,9 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 		error = ddi_copyin((const void *)mnt_args.optptr, (caddr_t)options,
 						   mnt_args.optlen, 0);
 	//dprintf("vfs_mount: fspec '%s' : mflag %04llx : optptr %p : optlen %d :"
-	printf("%s: fspec '%s' : mflag %04x : optptr %p : optlen %d :"
+	printf("%s: fspec '%s' : osname '%s' : mflag %04x : optptr %p : optlen %d :"
 	    " options %s\n", __func__,
+	    mnt_args.fspec,
 	    osname,
 	    mnt_args.mflag,
 	    mnt_args.optptr,
@@ -2146,6 +2409,7 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 		return (EINVAL);
 #endif	/* ! illumos */
 
+#ifdef __FreeBSD__
 	/*
 	 * If full-owner-access is enabled and delegated administration is
 	 * turned on, we must set nosuid.
@@ -2208,6 +2472,7 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 		error = EPERM;
 		goto out;
 	}
+#endif /* __FreeBSD__ */
 
 #ifdef SECLABEL
 	error = zfs_mount_label_policy(vfsp, osname);
@@ -2310,7 +2575,6 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 #endif
 
 	error = zfs_domount(vfsp, 0, osname, context);
-
 	if (error) {
 		//cmn_err(CE_NOTE, "%s: zfs_domount returned %d\n",
 		printf("%s: zfs_domount returned %d\n",
@@ -2352,8 +2616,8 @@ out:
 	if (osname)
 		kmem_free(osname, MAXPATHLEN);
 
-	if (dev_name)
-		kmem_free(dev_name, MAXPATHLEN);
+	if (proxy)
+		kmem_free(proxy, MAXPATHLEN);
 
 	if (options)
 		kmem_free(options, mnt_args.optlen);
@@ -2579,11 +2843,11 @@ zfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 			ATTR_VOL_FILECOUNT |
 			ATTR_VOL_DIRCOUNT |
 			ATTR_VOL_MAXOBJCOUNT |
-			ATTR_VOL_MOUNTPOINT |
+			/* ATTR_VOL_MOUNTPOINT | */
 			ATTR_VOL_NAME	|
 			ATTR_VOL_MOUNTFLAGS |
-			ATTR_VOL_MOUNTEDDEVICE |
-			/* ATTR_VOL_ENCODINGSUSED */
+			/* ATTR_VOL_MOUNTEDDEVICE | */
+			/* ATTR_VOL_ENCODINGSUSED | */
 			ATTR_VOL_CAPABILITIES |
 			ATTR_VOL_ATTRIBUTES;
 		fsap->f_attributes.validattr.dirattr =
@@ -2641,10 +2905,10 @@ zfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 			ATTR_VOL_FILECOUNT |
 			ATTR_VOL_DIRCOUNT |
 			ATTR_VOL_MAXOBJCOUNT |
-			ATTR_VOL_MOUNTPOINT |
+			/* ATTR_VOL_MOUNTPOINT | */
 			ATTR_VOL_NAME	|
 			ATTR_VOL_MOUNTFLAGS |
-			ATTR_VOL_MOUNTEDDEVICE |
+			/* ATTR_VOL_MOUNTEDDEVICE | */
 			/* ATTR_VOL_ENCODINGSUSED */
 			ATTR_VOL_CAPABILITIES |
 			ATTR_VOL_ATTRIBUTES;
@@ -2754,7 +3018,8 @@ zfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
      * the following values need to be returned for it to be considered
      * by Apple's AFS.
      */
-	VFSATTR_RETURN(fsap, f_signature, 18475);  /*  */
+	//VFSATTR_RETURN(fsap, f_signature, 18475);  /*  */
+	VFSATTR_RETURN(fsap, f_signature, 0x482b);  /* "H+" in ascii */
 	VFSATTR_RETURN(fsap, f_carbon_fsid, 0);
     // Make up a UUID here, based on the name
 	if (VFSATTR_IS_ACTIVE(fsap, f_uuid)) {
@@ -2903,7 +3168,14 @@ zfs_vfs_root(struct mount *mp, vnode_t **vpp, __unused vfs_context_t context)
 	znode_t *rootzp;
 	int error;
 
-	if (!zfsvfs) return EIO;
+	if (!zfsvfs) {
+		struct vfsstatfs *stat = 0;
+		if (mp) stat = vfs_statfs(mp);
+		if (stat) printf("%s mp on %s from %s\n", __func__,
+		    stat->f_mntonname, stat->f_mntfromname);
+		printf("%s no zfsvfs yet for mp\n", __func__);
+		return (EINVAL);
+	}
 
 	ZFS_ENTER_NOERROR(zfsvfs);
 
@@ -3051,6 +3323,9 @@ dprintf("%s\n", __func__);
 #ifndef __APPLE__
 	cred_t *cr =  (cred_t *)vfs_context_ucred(context);
 #endif
+#ifdef __APPLE__
+	char osname[MAXNAMELEN];
+#endif
 	int ret;
 
     dprintf("+unmount\n");
@@ -3145,14 +3420,13 @@ dprintf("%s\n", __func__);
 	}
 
 #ifdef __APPLE__
-	char osname[MAXNAMELEN];
+	/* Save osname for later */
 	dmu_objset_name(zfsvfs->z_os, osname);
 
 	if (!vfs_isrdonly(zfsvfs->z_vfs) &&
 		spa_writeable(dmu_objset_spa(zfsvfs->z_os)) &&
 		!(mntflags & MNT_FORCE)) {
 			/* Update the last-unmount time for Spotlight's next mount */
-			char osname[MAXNAMELEN];
 			timestruc_t  now;
 			dmu_tx_t *tx;
 			int error;
@@ -3258,6 +3532,9 @@ dprintf("%s\n", __func__);
 
     dprintf("freevfs\n");
 	zfs_freevfs(zfsvfs->z_vfs);
+
+	dprintf("zfs_osx_proxy_remove");
+	zfs_osx_proxy_remove(osname);
 
     dprintf("-unmount\n");
 	return (0);

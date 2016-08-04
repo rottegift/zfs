@@ -96,6 +96,12 @@
 
 #ifdef __APPLE__
 #include <sys/kstat_osx.h>
+
+#define MNTTAB "/etc/mtab"
+
+#if 0
+static int mnttab_file_create(void);
+#endif
 #endif
 
 //#define dprintf printf
@@ -6284,6 +6290,30 @@ int zfs_bmajor=0;
 static void * zfs_devnode = NULL;
 
 #define ZFS_MAJOR  -24
+
+#if 0
+#ifdef __APPLE__
+static int
+mnttab_file_create(void)
+{
+	int error = 0;
+	vnode_t *vp;
+	int oflags = FCREAT;
+
+	if ((error = vn_open(MNTTAB, UIO_SYSSPACE,
+						 oflags, 0666, &vp, CRCREAT, 0)) == 0) {
+		if ((error =VOP_FSYNC(vp, FSYNC, kcred,
+							  NULL)) == 0) {
+			error = VOP_CLOSE(vp, oflags, 1, 0,
+							  kcred, NULL);
+		}
+	}
+	if (error)
+		printf("mnttab_file_create : error %d\n", error);
+	return error;
+}
+#endif /* __APPLE__ */
+#endif
 
 static int
 zfs_devfs_clone(__unused dev_t dev, int action)
