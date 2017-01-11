@@ -181,6 +181,9 @@ do
     "${ZPOOL}" set cachefile=/etc/zfs/caches/$i.cache $i
 done
 
+echo "Running zfs mount -a || exit 1"
+"${ZFS}" mount -a  || exit 1
+
 date
 echo "-zpool-import-all.sh"
 
