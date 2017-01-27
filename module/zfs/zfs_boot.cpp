@@ -81,6 +81,7 @@ extern "C" {
 #include <sys/zfs_vfsops.h>
 
 int dsl_dsobj_to_dsname(char *pname, uint64_t obj, char *buf);
+void (*old_mountroot_post_hook)(void) = NULL;
 
 } /* extern "C" */
 

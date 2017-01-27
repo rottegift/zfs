@@ -12,6 +12,9 @@ int zfs_boot_update_bootinfo(spa_t *spa);
 #ifdef ZFS_BOOT
 /* At boot time, get path from ZFSBootDevice */
 int zfs_boot_get_path(char *, int);
+
+extern void (*old_mountroot_post_hook)(void);
+
 #endif /* ZFS_BOOT */
 
 #ifdef __cplusplus

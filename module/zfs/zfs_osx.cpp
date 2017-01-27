@@ -191,8 +191,14 @@ bool net_lundman_zfs_zvol::start (IOService *provider)
 	/*
 	 * Initialize /dev/zfs, this calls spa_init->dmu_init->arc_init-> etc
 	 */
+#ifdef ZFS_BOOT
+	// Wait until /dev/ is mounted to create /dev/zfs
+	// We can't create /dev/zfs now, since /dev/ is not yet mounted
+	old_mountroot_post_hook = mountroot_post_hook;
+	mountroot_post_hook = (void (*)())zfs_ioctl_osx_init;
+#else
 	zfs_ioctl_osx_init();
-
+#endif
 	/* registerService() allows zconfigd to match against the service */
 	this->registerService();
 
