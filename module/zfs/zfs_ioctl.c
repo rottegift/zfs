@@ -101,8 +101,6 @@
 
 #ifndef ZFS_BOOT
 static int mnttab_file_create(void);
-#else
-#include "sys/zfs_boot.h"
 #endif
 #endif
 
@@ -6375,8 +6373,6 @@ zfs_ioctl_osx_init(void)
 #ifdef __APPLE__
 	if (zfs_ioctl_installed)
 		return (0);
-
-	mountroot_post_hook = NULL;
 #endif
 
 	if ((error = -zvol_init()) != 0)
@@ -6425,14 +6421,6 @@ zfs_ioctl_osx_init(void)
 	    "ZFS pool version %s, ZFS filesystem version %s\n",
 	    ZFS_META_VERSION, ZFS_META_RELEASE, ZFS_DEBUG_STR,
 	    SPA_VERSION_STRING, ZPL_VERSION_STRING);
-#ifdef ZFS_BOOT
-	// If mountroot_post_hook had a value before we changed it
-	// we should be nice, and call it.
-	if (old_mountroot_post_hook) {
-		mountroot_post_hook = old_mountroot_post_hook;
-		old_mountroot_post_hook();
-	}
-#endif
 
 	return (0);
 
