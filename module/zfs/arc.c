@@ -4415,36 +4415,48 @@ arc_adapt(int bytes, arc_state_t *state)
 	}
 	ASSERT((int64_t)arc_p >= 0);
 
+#if !(defined(__APPLE__) && defined(_KERNEL))
 	if (arc_reclaim_needed()) {
 		cv_signal(&arc_reclaim_thread_cv);
 		return;
 	}
 
-#ifdef __APPLE__
-#ifdef _KERNEL
-	if (arc_no_grow && arc_size >= arc_c_min)
-		return;
-#else
 	if (arc_no_grow)
 		return;
-#endif
-	if (arc_no_grow)
-		return;
-#else
-#endif
 
 	if (arc_c >= arc_c_max)
 		return;
 
-#ifdef __APPLE__
-#ifdef _KERNEL
-	// spl_arc_no_grow(bytes) is true when the relevant bucket is
-	// fragmemted or when xnu_alloc_throttled_bail() has been called
-	// in the last minute
+#else
 	boolean_t buf_is_metadata = B_FALSE;
 	if (type == ARC_BUFC_METADATA) {
 		buf_is_metadata = B_TRUE;
 	}
+
+	extern kmem_cache_t *zio_buf_cache[];
+	extern kmem_cache_t *zio_data_buf_cache[];
+	kmem_cache_t **z = zio_buf_cache;
+	if (buf_is_metadata) {
+		z = zio_data_buf_cache;
+	}
+
+	extern boolean_t spl_arc_reclaim_needed(size_t, kmem_cache_t **);
+	if (spl_arc_reclaim_needed((size_t)bytes, z)) {
+		cv_signal(&arc_reclaim_thread_cv);
+		return;
+	}
+
+	if (arc_no_grow && arc_size >= arc_c_min) {
+		return;
+	}
+
+	if (arc_c >= arc_c_max) {
+		return;
+	}
+
+	// spl_arc_no_grow(bytes) is true when the relevant bucket is
+	// fragmemted or when xnu_alloc_throttled_bail() has been called
+	// in the last minute
 	extern boolean_t spl_arc_no_grow(size_t, boolean_t);
 	if (spl_arc_no_grow((size_t)bytes, buf_is_metadata)) {
 		// if we are likely to have to wait in our
@@ -4460,7 +4472,6 @@ arc_adapt(int bytes, arc_state_t *state)
 			cv_signal(&arc_reclaim_thread_cv);
 		}
 	}
-#endif
 #endif
 	/*
 	 * If we're within (2 * maxblocksize) bytes of the target
