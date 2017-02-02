@@ -4214,14 +4214,21 @@ arc_reclaim_thread(void)
 		free_memory = post_adjust_free_memory;
 
 		if (free_memory < 0 || manual_pressure > 0) {
+
+			if (free_memory <= (arc_c >> arc_no_grow_shift) + SPA_MAXBLOCKSIZE) {
+				arc_no_grow = B_TRUE;
+			}
 #else
 	        if (free_memory < 0) {
+
+			arc_no_grow = B_TRUE;
 #endif
 #else
 		if (free_memory < 0) {
+
+			arc_no_grow = B_TRUE
 #endif
 
-			arc_no_grow = B_TRUE;
 			arc_warm = B_TRUE;
 
 			/*
