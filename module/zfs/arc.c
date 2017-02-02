@@ -4413,8 +4413,18 @@ arc_adapt(int bytes, arc_state_t *state)
 		return;
 	}
 
+#ifdef __APPLE__
+#ifdef _KERNEL
+	if (arc_no_grow && arc_size >= arc_c_min)
+		return;
+#else
 	if (arc_no_grow)
 		return;
+#endif
+	if (arc_no_grow)
+		return;
+#else
+#endif
 
 	if (arc_c >= arc_c_max)
 		return;
