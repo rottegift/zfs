@@ -4217,25 +4217,36 @@ arc_reclaim_thread(void)
 
 			if (free_memory <= (arc_c >> arc_no_grow_shift) + SPA_MAXBLOCKSIZE) {
 				arc_no_grow = B_TRUE;
+				/*
+				 * Wait at least zfs_grow_retry (default 60) seconds
+				 * before considering growing.
+				 */
+				growtime = gethrtime() + SEC2NSEC(arc_grow_retry);
 			}
 #else
 	        if (free_memory < 0) {
 
 			arc_no_grow = B_TRUE;
-#endif
-#else
-		if (free_memory < 0) {
-
-			arc_no_grow = B_TRUE
-#endif
-
-			arc_warm = B_TRUE;
 
 			/*
 			 * Wait at least zfs_grow_retry (default 60) seconds
 			 * before considering growing.
 			 */
 			growtime = gethrtime() + SEC2NSEC(arc_grow_retry);
+#endif
+#else
+		if (free_memory < 0) {
+
+			arc_no_grow = B_TRUE
+
+			/*
+			 * Wait at least zfs_grow_retry (default 60) seconds
+			 * before considering growing.
+			 */
+			growtime = gethrtime() + SEC2NSEC(arc_grow_retry);
+#endif
+
+			arc_warm = B_TRUE;
 
 			arc_kmem_reap_now();
 
