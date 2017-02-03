@@ -4187,8 +4187,8 @@ arc_reclaim_thread(void)
 		evicted = arc_adjust();
 
 		int64_t free_memory = arc_available_memory();
-#ifdef __APPLE__
-#ifdef _KERNEL
+
+#if defined(__APPLE__) && defined(_KERNEL)
 		int64_t post_adjust_manual_pressure = spl_free_manual_pressure_wrapper();
 		manual_pressure = MAX(manual_pressure,post_adjust_manual_pressure);
 		spl_free_set_pressure(0);
@@ -4227,17 +4227,6 @@ arc_reclaim_thread(void)
 	        if (free_memory < 0) {
 
 			arc_no_grow = B_TRUE;
-
-			/*
-			 * Wait at least zfs_grow_retry (default 60) seconds
-			 * before considering growing.
-			 */
-			growtime = gethrtime() + SEC2NSEC(arc_grow_retry);
-#endif
-#else
-		if (free_memory < 0) {
-
-			arc_no_grow = B_TRUE
 
 			/*
 			 * Wait at least zfs_grow_retry (default 60) seconds
