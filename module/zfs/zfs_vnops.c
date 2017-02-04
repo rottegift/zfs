@@ -1324,7 +1324,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 
 			error = dmu_sync(zio, lr->lr_common.lrc_txg,
 			    zfs_get_done, zgd);
-			ASSERT(error || lr->lr_length <= zp->z_blksz);
+			ASSERT(error || lr->lr_length <= size);
 
 			/*
 			 * On success, we need to wait for the write I/O
@@ -1440,7 +1440,9 @@ zfs_lookup(vnode_t *dvp, char *nm, vnode_t **vpp, struct componentname *cnp,
 				return (0);
 			}
 			return (error);
-		} else {
+		} else if (!zdp->z_zfsvfs->z_norm &&
+		    (zdp->z_zfsvfs->z_case == ZFS_CASE_SENSITIVE)) {
+
 			vnode_t *tvp = dnlc_lookup(dvp, nm);
 
 			if (tvp) {
@@ -5039,6 +5041,8 @@ zfs_putapage(vnode_t *vp, page_t **pp, u_offset_t *offp,
 		    &zp->z_pflags, 8);
 		zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
 		    B_TRUE);
+		err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
+		ASSERT0(err);
 		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, off, len, 0);
 	}
 	dmu_tx_commit(tx);

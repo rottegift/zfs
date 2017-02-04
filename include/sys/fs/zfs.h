@@ -628,7 +628,11 @@ typedef struct zpool_rewind_policy {
 #define	ZPOOL_CONFIG_CAN_RDONLY		"can_rdonly"	/* not stored on disk */
 #define	ZPOOL_CONFIG_FEATURES_FOR_READ	"features_for_read"
 #define	ZPOOL_CONFIG_FEATURE_STATS	"feature_stats"	/* not stored on disk */
+#define	ZPOOL_CONFIG_VDEV_TOP_ZAP	"com.delphix:vdev_zap_top"
+#define	ZPOOL_CONFIG_VDEV_LEAF_ZAP	"com.delphix:vdev_zap_leaf"
+#define	ZPOOL_CONFIG_HAS_PER_VDEV_ZAPS	"com.delphix:has_per_vdev_zaps"
 #define	ZPOOL_CONFIG_ERRATA		"errata"	/* not stored on disk */
+
 /*
  * The persistent vdev state is stored as separate values rather than a single
  * 'vdev_state' entry.  This is because a device can be in multiple states, such
@@ -944,7 +948,8 @@ typedef enum {
 	SPA_LOAD_IMPORT,	/* import in progress	*/
 	SPA_LOAD_TRYIMPORT,	/* tryimport in progress */
 	SPA_LOAD_RECOVER,	/* recovery requested	*/
-	SPA_LOAD_ERROR		/* load failed		*/
+	SPA_LOAD_ERROR,		/* load failed		*/
+	SPA_LOAD_CREATE		/* creation in progress */
 } spa_load_state_t;
 
 /*
