@@ -172,6 +172,8 @@ osx_kstat_t osx_kstat = {
 	{"zfs_send_holes_without_birth_time",KSTAT_DATA_UINT64  },
 
 	{"dbuf_cache_max_bytes",KSTAT_DATA_UINT64  },
+
+	{"zfs_vdev_queue_depth_pct",KSTAT_DATA_UINT64  },
 };
 
 
@@ -365,6 +367,9 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 		dbuf_cache_max_bytes =
 		    ks->dbuf_cache_max_bytes.value.ui64;
 
+		zfs_vdev_queue_depth_pct =
+		    ks->zfs_vdev_queue_depth_pct.value.ui64;
+
 	} else {
 
 		/* kstat READ */
@@ -547,6 +552,8 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 			send_holes_without_birth_time;
 
 		ks->dbuf_cache_max_bytes.value.ui64 = dbuf_cache_max_bytes;
+
+		ks->zfs_vdev_queue_depth_pct.value.ui64 = zfs_vdev_queue_depth_pct;
 	}
 
 	return 0;
