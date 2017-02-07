@@ -3706,12 +3706,12 @@ zio_done(zio_t *zio)
 		 * at the block level.  We ignore these errors if the
 		 * device is currently unavailable.
 		 */
-#ifndef __APPLE__
+//#ifndef __APPLE__
 		if (zio->io_error != ECKSUM && zio->io_vd != NULL &&
 			!vdev_is_dead(zio->io_vd))
 			zfs_ereport_post(FM_EREPORT_ZFS_IO, zio->io_spa,
 							 zio->io_vd, zio, 0, 0);
-#endif
+//#endif
 
 		if ((zio->io_error == EIO || !(zio->io_flags &
 		    (ZIO_FLAG_SPECULATIVE | ZIO_FLAG_DONT_PROPAGATE))) &&
