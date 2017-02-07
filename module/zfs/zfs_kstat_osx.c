@@ -174,6 +174,7 @@ osx_kstat_t osx_kstat = {
 	{"dbuf_cache_max_bytes",KSTAT_DATA_UINT64  },
 
 	{"zfs_vdev_queue_depth_pct",KSTAT_DATA_UINT64  },
+	{"zio_dva_throttle_enabled",KSTAT_DATA_UINT64  },
 };
 
 
@@ -370,6 +371,8 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 		zfs_vdev_queue_depth_pct =
 		    ks->zfs_vdev_queue_depth_pct.value.ui64;
 
+		zio_dva_throttle_enabled =
+		    (boolean_t) ks->zio_dva_throttle_enabled.value.ui64;
 	} else {
 
 		/* kstat READ */
@@ -554,6 +557,7 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 		ks->dbuf_cache_max_bytes.value.ui64 = dbuf_cache_max_bytes;
 
 		ks->zfs_vdev_queue_depth_pct.value.ui64 = zfs_vdev_queue_depth_pct;
+		ks->zio_dva_throttle_enabled.value.ui64 = (uint64_t) zio_dva_throttle_enabled;
 	}
 
 	return 0;
