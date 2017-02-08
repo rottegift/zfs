@@ -190,7 +190,8 @@ metaslab_class_create(spa_t *spa, metaslab_ops_t *ops)
 	mc->mc_rotor = NULL;
 	mc->mc_ops = ops;
 	mutex_init(&mc->mc_lock, NULL, MUTEX_DEFAULT, NULL);
-	refcount_create_tracked(&mc->mc_alloc_slots);
+	//refcount_create_tracked(&mc->mc_alloc_slots);
+	refcount_create(&mc->mc_alloc_slots);
 	mutex_init(&mc->mc_fastwrite_lock, NULL, MUTEX_DEFAULT, NULL);
 
 	return (mc);
@@ -518,7 +519,8 @@ metaslab_group_create(metaslab_class_t *mc, vdev_t *vd)
 	mg->mg_activation_count = 0;
 	mg->mg_initialized = B_FALSE;
 	mg->mg_no_free_space = B_TRUE;
-	refcount_create_tracked(&mg->mg_alloc_queue_depth);
+	//refcount_create_tracked(&mg->mg_alloc_queue_depth);
+	refcount_create(&mg->mg_alloc_queue_depth);
 
 	mg->mg_taskq = taskq_create("metaslab_group_taskq", metaslab_load_pct,
 	    maxclsyspri, 10, INT_MAX, TASKQ_THREADS_CPU_PCT | TASKQ_DYNAMIC);
