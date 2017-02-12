@@ -110,6 +110,7 @@ int zio_buf_debug_limit = 0;
 
 static void zio_taskq_dispatch(zio_t *, zio_taskq_type_t, boolean_t);
 static inline void __zio_execute(zio_t *zio);
+static inline void __zio_reexecute(zio_t *pio);
 
 void
 zio_init(void)
@@ -1486,7 +1487,7 @@ zio_taskq_dispatch(zio_t *zio, zio_taskq_type_t q, boolean_t cutinline)
 #ifdef __linux__
 	ASSERT(taskq_empty_ent(&zio->io_tqent));
 #endif
-	spa_taskq_dispatch_ent(spa, t, q, (task_func_t *)zio_execute, zio,
+	spa_taskq_dispatch_ent(spa, t, q, (task_func_t *)__zio_execute, zio,
 	    flags, &zio->io_tqent);
 }
 
@@ -1741,8 +1742,10 @@ zio_nowait(zio_t *zio)
  * ==========================================================================
  */
 
-static void
-zio_reexecute(zio_t *pio)
+
+__attribute__((always_inline))
+static inline void
+__zio_reexecute(zio_t *pio)
 {
 	zio_t *cio, *cio_next;
 	int c, w;
@@ -1781,7 +1784,7 @@ zio_reexecute(zio_t *pio)
 		for (w = 0; w < ZIO_WAIT_TYPES; w++)
 			pio->io_children[cio->io_child_type][w]++;
 		mutex_exit(&pio->io_lock);
-		zio_reexecute(cio);
+		__zio_reexecute(cio);
 	}
 
 	/*
@@ -1847,7 +1850,7 @@ zio_resume(spa_t *spa)
 	if (pio == NULL)
 		return (0);
 
-	zio_reexecute(pio);
+	__zio_reexecute(pio);
 
 	return (zio_wait(pio));
 }
@@ -3804,7 +3807,7 @@ zio_done(zio_t *zio)
 		 * does the same.  This percolates all the way up to the root.
 		 * The root i/o will reexecute or suspend the entire tree.
 		 *
-		 * This approach ensures that zio_reexecute() honors
+		 * This approach ensures that __zio_reexecute() honors
 		 * all the original i/o dependency relationships, e.g.
 		 * parents not executing until children are ready.
 		 */
@@ -3861,7 +3864,7 @@ zio_done(zio_t *zio)
 #endif
 			spa_taskq_dispatch_ent(zio->io_spa,
 			    ZIO_TYPE_CLAIM, ZIO_TASKQ_ISSUE,
-			    (task_func_t *)zio_reexecute, zio, 0,
+			    (task_func_t *)__zio_reexecute, zio, 0,
 			    &zio->io_tqent);
 		}
 		return (ZIO_PIPELINE_STOP);
