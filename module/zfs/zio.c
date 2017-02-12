@@ -1446,8 +1446,8 @@ zio_free_bp_init(zio_t *zio)
  * Execute the I/O pipeline
  * ==========================================================================
  */
-
-static void
+__attribute__((always_inline))
+static inline void
 zio_taskq_dispatch(zio_t *zio, zio_taskq_type_t q, boolean_t cutinline)
 {
 	spa_t *spa = zio->io_spa;
