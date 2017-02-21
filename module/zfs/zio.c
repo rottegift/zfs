@@ -126,9 +126,10 @@ zio_init(void)
 #endif
 
 	zio_cache = kmem_cache_create("zio_cache",
-	    sizeof (zio_t), 0, NULL, NULL, NULL, NULL, NULL, 0);
+				      sizeof (zio_t), 0, NULL, NULL, NULL, NULL, NULL, 0);
 	zio_link_cache = kmem_cache_create("zio_link_cache",
-	    sizeof (zio_link_t), 0, NULL, NULL, NULL, NULL, NULL, 0);
+					   sizeof (zio_link_t), 0, NULL, NULL, NULL, NULL, NULL, 0);
+
 
 	/*
 	 * For small buffers, we want a cache for each multiple of
@@ -136,11 +137,18 @@ zio_init(void)
 	 * for each sixteenth-power of 2 below 128k and each eighth
 	 * power-of-two above 128k.
 	 */
+#define KMF_AUDIT               0x00000001      /* transaction auditing */
+#define KMF_DEADBEEF    0x00000002      /* deadbeef checking */
+#define KMF_REDZONE             0x00000004      /* redzone checking */
+#define KMF_CONTENTS    0x00000008      /* freed-buffer content logging */
+#define KMF_BUFTAG      (KMF_DEADBEEF | KMF_REDZONE)
+
 	for (c = 0; c < SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT; c++) {
 		size_t size = (c + 1) << SPA_MINBLOCKSHIFT;
 		size_t p2 = size;
 		size_t align = 0;
-		size_t cflags = (size > zio_buf_debug_limit) ? KMC_NODEBUG : 0;
+		//size_t cflags = (size > zio_buf_debug_limit) ? KMC_NODEBUG : 0;
+		size_t cflags = KMF_AUDIT | KMF_BUFTAG;
 
 #ifdef _ILP32
 		/*
@@ -179,11 +187,17 @@ zio_init(void)
 			    align, NULL, NULL, NULL, NULL,
 			    metadata_alloc_arena, cflags);
 
+			extern kmem_cbrc_t zio_arc_buf_move(void *, void *, size_t, void *);
+
+		       kmem_cache_set_move(zio_buf_cache[c], zio_arc_buf_move);
+
 			(void) snprintf(name, sizeof(name), "zio_data_buf_%lu",
                             (ulong_t)size);
 			zio_data_buf_cache[c] = kmem_cache_create(name, size,
 			    align, NULL, NULL, NULL, NULL,
 			    data_alloc_arena, cflags);
+
+			kmem_cache_set_move(zio_data_buf_cache[c], zio_arc_buf_move);
 		}
 	}
 
@@ -304,6 +318,35 @@ zio_data_buf_alloc(size_t size)
 	return (kmem_cache_alloc(zio_data_buf_cache[c], KM_PUSHPAGE));
 #endif
 }
+
+#ifdef __APPLE__
+#ifdef _KERNEL
+extern size_t kmem_cache_bufsize(kmem_cache_t *cp);
+size_t
+zio_data_buf_alloc_size(size_t size)
+{
+	size_t c = (size - 1) >> SPA_MINBLOCKSHIFT;
+
+	VERIFY3U(c, <, SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT);
+
+	kmem_cache_t *cp = zio_data_buf_cache[c];
+
+	return(kmem_cache_bufsize(cp));
+}
+
+size_t
+zio_buf_alloc_size(size_t size)
+{
+	size_t c = (size - 1) >> SPA_MINBLOCKSHIFT;
+
+	VERIFY3U(c, <, SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT);
+
+	kmem_cache_t *cp = zio_buf_cache[c];
+
+	return(kmem_cache_bufsize(cp));
+}
+#endif
+#endif
 
 void
 zio_buf_free(void *buf, size_t size)

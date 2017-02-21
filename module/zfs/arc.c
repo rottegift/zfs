@@ -279,6 +279,7 @@
 
 #ifdef __APPLE__
 #include <sys/kstat_osx.h>
+#include <stdbool.h>
 #ifdef _KERNEL
 extern vmem_t *zio_arena;
 extern vmem_t *zio_metadata_arena;
@@ -286,6 +287,127 @@ extern vmem_t *heap_arena;
 static _Atomic int64_t reclaim_shrink_target = 0;
 void IOSleep(unsigned milliseconds);
 #endif
+
+/* mapping of arc_get_data_buf <-> arc_buf_t */
+
+static kmem_cache_t *mem_to_arc_buf_avl_node_cache = NULL;
+
+#include <sys/avl.h>
+
+typedef struct {
+	void *m;                 /* memory address from kmem_cache */
+	arc_buf_t *ab;
+	arc_buf_hdr_t *h;
+	uint64_t b_spa;
+	uint64_t b_dva0;
+	uint64_t b_dva1;
+	uint64_t b_birth;
+	size_t size;             /* amount wanted by caller of arc_get_data_buf */
+	size_t real_size;        /* (kmem_cache_t *)cp->cache_bufsize */
+	bool header;             /* true if h is valid, false if ab is valid */
+	hrtime_t insert_time;    /* used for tie-breaking and not killing too-recent allocs */
+	avl_node_t avl_link; } mem_to_arc_buf_t;
+
+static avl_tree_t mem_to_arc_buf_avl;
+static kmutex_t mem_to_arc_buf_avl_lock;
+
+static int
+mem_to_arc_buf_compare(const void *a, const void *b)
+{
+	const mem_to_arc_buf_t *ba = a;
+	const mem_to_arc_buf_t *bb = b;
+	const uintptr_t bamem = (const uintptr_t) ba->m;
+	const uintptr_t bbmem = (const uintptr_t) bb->m;
+
+	dprintf("%s: bamem %lu bbmem %lu\n", __func__, bamem, bbmem);
+
+	if (bamem < bbmem)
+		return (-1);
+	else if (bbmem > bamem)
+		return (+1);
+	else { /* bbmem == bamem */
+		if (ba->real_size < bb->real_size) {
+			return (-1);
+		} else if (ba->real_size > bb->real_size) {
+			return (+1);
+		} else {
+			return (0);
+		}
+	}
+}
+
+#ifdef _KERNEL
+static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *,
+    size_t *, bool *, hrtime_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *);
+#endif
+static void mem_to_arc_buf_remove(void *, size_t);
+static void mem_to_arc_buf_insert(void *, arc_buf_t *,
+    arc_buf_hdr_t *, size_t, bool);
+
+static void
+mem_to_arc_buf_remove(void *memptr, size_t size)
+{
+	mem_to_arc_buf_t *np;
+	mem_to_arc_buf_t tofind;
+
+#ifdef _KERNEL
+	extern size_t zio_buf_alloc_size(size_t), zio_data_buf_alloc_size(size_t);
+	size_t real_size = zio_data_buf_alloc_size(size);
+#else
+	size_t real_size = size;
+#endif
+
+	tofind.m = memptr;
+	tofind.real_size = real_size;
+
+	mutex_enter(&mem_to_arc_buf_avl_lock);
+	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
+	if (np != NULL) {
+		dprintf("ZFS: %s found %lu, %lu\n", __func__, (uintptr_t)memptr, real_size);
+		avl_remove(&mem_to_arc_buf_avl, np);
+		kmem_cache_free(mem_to_arc_buf_avl_node_cache, np);
+	} else {
+		dprintf("ZFS: %s not found %lu, %lu\n", __func__, (uintptr_t)memptr, real_size);
+        }
+	mutex_exit(&mem_to_arc_buf_avl_lock);
+}
+
+static int
+mem_to_arc_buf_node_cons(void *vbuf, void *unused, int kmflag)
+{
+	mem_to_arc_buf_t *node = vbuf;
+
+	node->m = NULL;
+	node->ab = NULL;
+	node->h = NULL;
+	node->header = false;
+	node->size = 0;
+	node->real_size = 0;
+	node->insert_time = 0;
+
+	return (0);
+}
+
+static void
+mem_to_arc_buf_node_dest(void *vbuf, void *unused)
+{
+	mem_to_arc_buf_t *node = vbuf;
+
+	node->m = NULL;
+	node->ab = NULL;
+	node->h = NULL;
+	node->header = NULL;
+	node->size = 0;
+	node->real_size = 0;
+	node->insert_time = 0;
+}
+
+static void
+mem_to_arc_buf_node_recl(void *unused)
+{
+	dprintf("ZFS: %s called\n", __func__);
+}
+
 #endif
 
 #ifndef _KERNEL
@@ -1384,6 +1506,11 @@ buf_dest(void *vbuf, void *unused)
 {
 	arc_buf_t *buf = vbuf;
 
+#if 0
+	// panic: destroying held lock
+	mutex_enter(&buf->b_evict_lock);
+	mutex_exit(&buf->b_evict_lock);
+#endif
 	mutex_destroy(&buf->b_evict_lock);
 	arc_space_return(sizeof (arc_buf_t), ARC_SPACE_HDRS);
 }
@@ -4262,7 +4389,7 @@ arc_reclaim_thread(void)
 				const int64_t huge_amount = 128LL * 1024LL * 1024LL;
 
 				if (to_free > large_amount || evicted > huge_amount)
-					printf("SPL: %s: post-reap %lld post-evict %lld adjusted %lld "
+					printf("ZFS: %s: post-reap %lld post-evict %lld adjusted %lld "
 					    "pre-adjust %lld to-free %lld pressure %lld\n",
 					    __func__, free_memory, d_adj, evicted,
 					    pre_adjust_free_memory, to_free, manual_pressure);
@@ -4601,6 +4728,10 @@ arc_get_data_buf(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
 		arc_space_consume(size, ARC_SPACE_DATA);
 	}
 
+#if defined(__APPLE__)
+	mem_to_arc_buf_insert(datap, NULL, hdr, size, true);
+#endif
+
 	/*
 	 * Update the state size.  Note that ghost states have a
 	 * "ghost size" and so don't need to be updated.
@@ -4654,6 +4785,10 @@ arc_free_data_buf(arc_buf_hdr_t *hdr, void *data, uint64_t size, void *tag)
 		    size, tag);
 	}
 	(void) refcount_remove_many(&state->arcs_size, size, tag);
+
+#ifdef __APPLE__
+	mem_to_arc_buf_remove(data, size);
+#endif
 
 	VERIFY3U(hdr->b_type, ==, type);
 	if (type == ARC_BUFC_METADATA) {
@@ -6477,6 +6612,17 @@ arc_init(void)
 		    zfs_dirty_data_max_max);
 	}
 	if (!zfs_dirty_data_max) printf("ZFS: ARC zfs_dirty_data_max is zero\n");
+
+#ifdef __APPLE__
+	mem_to_arc_buf_avl_node_cache = kmem_cache_create("mem_to_arc_buf_t",
+	    sizeof(mem_to_arc_buf_t), 0,
+	    mem_to_arc_buf_node_cons, mem_to_arc_buf_node_dest, mem_to_arc_buf_node_recl,
+	    NULL, NULL, 0);
+	avl_create(&mem_to_arc_buf_avl, mem_to_arc_buf_compare,
+	    sizeof(mem_to_arc_buf_t), offsetof(mem_to_arc_buf_t, avl_link));
+	mutex_init(&mem_to_arc_buf_avl_lock, NULL, MUTEX_DEFAULT, NULL);
+#endif
+
 }
 
 void
@@ -6512,6 +6658,17 @@ arc_fini(void)
 	buf_fini();
 
 	ASSERT0(arc_loaned_bytes);
+
+#ifdef __APPLE__
+	mutex_destroy(&mem_to_arc_buf_avl_lock);
+	void *cookie = NULL;
+	for (mem_to_arc_buf_t *m = NULL;
+	     (m = avl_destroy_nodes(&mem_to_arc_buf_avl, &cookie)) != NULL;
+	     kmem_cache_free(mem_to_arc_buf_avl_node_cache, m));
+
+	avl_destroy(&mem_to_arc_buf_avl);
+	kmem_cache_destroy(mem_to_arc_buf_avl_node_cache);
+#endif
 }
 
 /*
@@ -7634,3 +7791,447 @@ l2arc_stop(void)
 		cv_wait(&l2arc_feed_thr_cv, &l2arc_feed_thr_lock);
 	mutex_exit(&l2arc_feed_thr_lock);
 }
+
+#ifdef __APPLE__
+static void
+mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
+    arc_buf_hdr_t *archdrptr, size_t size, bool header)
+{
+	hrtime_t now = gethrtime();
+
+	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
+
+	mutex_enter(&mem_to_arc_buf_avl_lock);
+
+	node->m = memptr;
+	node->ab = arcbufptr;
+	node->h = archdrptr;
+	node->size = size;
+	node->header = header;
+	node->insert_time = now;
+#ifdef _KERNEL
+	extern size_t zio_buf_alloc_size(size_t), zio_data_buf_alloc_size(size_t);
+	node->real_size = zio_data_buf_alloc_size(size);
+#else
+	node->real_size = size;
+#endif
+	size_t real_size = node->real_size;
+
+	arc_buf_hdr_t *hdr = NULL;
+
+	if (header == true) {
+		VERIFY3P(archdrptr, !=, NULL);
+		VERIFY3P(arcbufptr, ==, NULL);
+		hdr = archdrptr;
+	} else {
+		VERIFY3P(archdrptr, ==, NULL);
+		VERIFY3P(arcbufptr, !=, NULL);
+		hdr = arcbufptr->b_hdr;
+		VERIFY3P(hdr, !=, NULL);
+	}
+
+	/* possbily racy : check if we hold hash lock above, and if not, grab it */
+	/*                 (cf. the HDR_EQUAL check below, also guarded in the _move function) */
+	node->b_spa = hdr->b_spa;
+	node->b_birth = hdr->b_birth;
+	node->b_dva0 = hdr->b_dva.dva_word[0];
+	node->b_dva1 = hdr->b_dva.dva_word[1];
+
+	for (int i = 0; ; i++) {
+		avl_index_t where;
+		mem_to_arc_buf_t tofind;
+
+		tofind.m = memptr;
+		tofind.real_size = real_size;
+
+		mem_to_arc_buf_t *preexist = avl_find(&mem_to_arc_buf_avl, &tofind, &where);
+
+		// has hdr mutated while we are looping?
+		if (i > 0) {
+			dva_t dva;
+			dva.dva_word[0] = node->b_dva0;
+			dva.dva_word[1] = node->b_dva1;
+			if (!HDR_EQUAL(node->b_spa, &dva, node->b_birth, hdr)) {
+				printf("ZFS: %s: header changed from "
+				    "(%llu, [%llu:%llu], %llu) to (%llu, [%llu:%llu], %llu)\n",
+				    __func__,
+				    node->b_spa, node->b_dva0, node->b_dva1, node->b_birth,
+				    hdr->b_spa, hdr->b_dva.dva_word[0],
+				    hdr->b_dva.dva_word[1], hdr->b_birth);
+				break;
+			}
+		}
+
+		if (preexist == NULL) {
+			// nothing in avl, insert me
+			avl_insert(&mem_to_arc_buf_avl, node, where);
+			break;
+		} else if (preexist == node) {
+			// this is me
+			break;
+		} else if (preexist->insert_time == node->insert_time &&
+		    preexist->b_spa == node->b_spa && preexist->b_birth == node->b_birth &&
+		    preexist->b_dva0 == node->b_dva0 && preexist->b_dva1 == node->b_dva1) {
+			// this is me
+			break;
+		} else if (node->b_birth > preexist->b_birth &&
+			node->b_spa == preexist->b_spa) {
+			dprintf("ZFS: %s: preexisting has lower birth time "
+			    "(%llu,[%llu:%llu],%llu) > (%llu,[%llu:%llu],%llu)\n",
+			    __func__,
+			    node->b_spa, node->b_dva0, node->b_dva1, node->b_birth,
+			    preexist->b_spa, preexist->b_dva0, preexist->b_dva1, preexist->b_birth);
+			avl_remove(&mem_to_arc_buf_avl, preexist);
+			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
+			continue;
+	        } else if (node->insert_time > preexist->insert_time) {
+			dprintf("ZFS: %s: preexisting removed (i = %d, s = %lu, rs = %lu "
+			    "now %lld preetime %lld delta %lld\n",
+			    __func__, i, preexist->size, preexist->size,
+			    now, preexist->insert_time,
+			    (node->insert_time - preexist->insert_time));
+			avl_remove(&mem_to_arc_buf_avl, preexist);
+			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
+			continue;
+		} else {
+			dprintf("ZFS: %s: preexisting NOT removed (i = %d, it_arg = %lld, it_pre = %lld)\n",
+			    __func__, i, node->insert_time, preexist->insert_time);
+		        break;
+		}
+	}
+	mutex_exit(&mem_to_arc_buf_avl_lock);
+}
+#endif
+
+
+#if defined(__APPLE__) && defined(_KERNEL)
+
+static bool
+mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
+    size_t *szp, size_t *real_sizep, bool *isheaderp, hrtime_t *insert_time,
+    uint64_t *spap, uint64_t *dva0p, uint64_t *dva1p, uint64_t *birthp)
+{
+	mem_to_arc_buf_t *np;
+	mem_to_arc_buf_t tofind;
+
+	tofind.m = memptr;
+	tofind.real_size = *real_sizep;
+
+	mutex_enter(&mem_to_arc_buf_avl_lock);
+	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
+	if (np != NULL) {
+		*bufp = np->ab;
+		*hdrp = np->h;
+		*isheaderp = np->header;
+		*szp = np->size;
+		*real_sizep = np->real_size;
+		*insert_time = np->insert_time;
+		*spap = np->b_spa;
+		*dva0p = np->b_dva0;
+		*dva1p = np->b_dva1;
+		*birthp = np->b_birth;
+		mutex_exit(&mem_to_arc_buf_avl_lock);
+		return (true);
+	}
+	mutex_exit(&mem_to_arc_buf_avl_lock);
+	return (false);
+}
+
+/* move and reclaim logic for zio caches
+ *
+ * if we have an entry in mem_to_arc_buf_avl for the kmem_cache buffer
+ * then we can sanity check the header and try to move the memory
+ *
+ * DONT_KNOW if we don't have an entry in the avl tree
+ * LATER if we have a reference but it's not zp inuse
+ * NO if the buffer is zp inuse
+ * YES if we swap the old buffer for the new (old will be freed)
+ *
+ * todo: can we evict?  DONT_NEED frees both old and new buffer; maybe set LATER?
+ */
+
+// (arc_hdr_t) b_l1hdr -> (l1arc_buf_hdr_t)  [ (arc_buf_t) b_buf | void *b_pdata ]
+// struct arc_buf { arc_buf_hdr_t *b_hdr; kmutex_t b_evict_lock; void b_data }
+
+// hdr->b_l1hdr.b_pdata vs hdr->b_l1hdr->b_buf->b_data
+
+// cf arc_buf_fill() ?
+
+kmem_cbrc_t
+zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
+{
+	bool has_header = false;
+	bool is_header = false;
+
+	size_t stored_size = 0, real_size = size;
+	arc_buf_t buf_l, *buf = &buf_l;
+	arc_buf_hdr_t hdr_l, *hdr = &hdr_l;
+	hrtime_t insert_time = 0;
+
+	uint64_t spa, dva0, dva1, birth;
+
+	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &real_size,
+		&is_header, &insert_time, &spa, &dva0, &dva1, &birth) == false) {
+		return (KMEM_CBRC_NO);
+	}
+
+	if (buf == NULL && hdr == NULL) {
+		/* this is a mess from the avl, but we can just return */
+		return (KMEM_CBRC_NO);
+	}
+
+	dva_t dva;
+	dva.dva_word[0] = dva0;
+	dva.dva_word[1] = dva1;
+
+	if (is_header == true) {
+		VERIFY3P(hdr, !=, NULL);
+		VERIFY3P(buf, ==, NULL);
+		if (!HDR_EQUAL(spa, &dva, birth, hdr)) {
+			printf("ZFS: %s: HDR_EQUAL(%llu, [%llu,%llu], %llu, hdr) false!\n",
+			    __func__, spa, dva0, dva1, birth);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+	} else {
+		VERIFY3P(buf, !=, NULL);
+		VERIFY3P(hdr, ==, NULL);
+		if (buf->b_hdr != NULL) {
+			arc_buf_hdr_t *thdr = buf->b_hdr;
+			VERIFY3P(thdr, !=, NULL);
+			if (!HDR_EQUAL(spa, &dva, birth, hdr)) {
+				printf("ZFS: %s: (note) HDR_EQUAL buf fail: "
+				    "(%llu, [%llu,%llu] %llu, buf->b_hdr) v "
+				    "(%llu, [%llu,%llu] %llu, from_avl)\n",
+				    __func__,
+				    hdr->b_spa, hdr->b_dva.dva_word[0], hdr->b_dva.dva_word[1], hdr->b_birth,
+				    spa, dva0, dva1, birth);
+				return (KMEM_CBRC_DONT_KNOW);
+			} else {
+				hdr = thdr;
+			}
+		}
+	}
+
+	/* hdr now points to a header for spa, dva, birth */
+	/* buf *MAY* be NULL or points to a buffer that points to hdr */
+	/* but both are subject to other threads until we lock */
+
+	hrtime_t now = gethrtime();
+	const hrtime_t hundred_msec = MSEC2NSEC(100);
+
+	if (now - insert_time < hundred_msec) {
+		// too young, it will probably be replaced shortly
+		// but watch out for KMEM_DISBELIEF here
+		return (KMEM_CBRC_LATER);
+	}
+
+	if (real_size != size) {
+		printf("ZFS: %s: (stored) real_size %lu does not match (arg) size %lu (is_header: %u, stored_size: %lu)\n",
+		    __func__, stored_size, size, is_header, stored_size);
+		return (KMEM_CBRC_NO);
+	}
+
+	/* remove from node from avl */
+	mem_to_arc_buf_remove(mem, stored_size);
+
+	if (HDR_EMPTY(hdr)) {
+                        dprintf("ZFS: %s: empty arc_buf_hdr!\n", __func__);
+                        return (KMEM_CBRC_DONT_KNOW);
+	}
+
+	kmutex_t *hash_lock = HDR_LOCK(hdr);
+
+	if (!mutex_tryenter(hash_lock)) {
+		printf("ZFS: %s could not get hash_lock\n", __func__);
+		return (KMEM_CBRC_LATER);
+	}
+
+	// under the lock, now check header sanity
+
+	if (!HDR_EQUAL(spa, &dva, birth,hdr)) {
+		printf("ZFS: %s: (under lock) HDR_EQUAL buf fail: "
+		    "(%llu, [%llu,%llu] %llu, buf->b_hdr) v "
+		    "(%llu, [%llu,%llu] %llu, from_avl)\n",
+		    __func__,
+		    hdr->b_spa, hdr->b_dva.dva_word[0], hdr->b_dva.dva_word[1], hdr->b_birth,
+		    spa, dva0, dva1, birth);
+		mutex_exit(hash_lock);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+	if (!HDR_HAS_L1HDR(hdr)) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: no l1hdr!\n", __func__);
+		return (KMEM_CBRC_LATER);
+	}
+	if (HDR_IO_IN_PROGRESS(hdr)) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: io in progress (hdr)\n", __func__);
+		return (KMEM_CBRC_LATER);
+	}
+
+	// now check states
+	if (hdr->b_l1hdr.b_state == arc_l2c_only) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: l2c only!\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+	if (hdr->b_l1hdr.b_state == arc_anon) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: anonymous buffer\n", __func__);
+		return (KMEM_CBRC_NO);
+	}
+	if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
+	    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
+		mutex_exit(hash_lock);
+		dprintf("ZFS: %s: ghost buffer\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+
+	has_header = true;
+
+	if (!HDR_COMPRESSION_ENABLED(hdr)) {
+                printf("ZFS: %s (DEBUG): !HDR_COMPRESSION_ENABLED(hdr)\n", __func__);
+		// keep going
+        }
+
+	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 1) {
+		uint64_t rc = refcount_count(&hdr->b_l1hdr.b_refcnt);
+                mutex_exit(hash_lock);
+                printf("ZFS: %s: high refcount (%llu)\n",
+                    __func__, rc);
+                return (KMEM_CBRC_LATER);
+        }
+
+	/* check the sizes in the header vs the size from the avl */
+	size_t sl = HDR_GET_LSIZE(hdr);
+	size_t sp = HDR_GET_PSIZE(hdr);
+	size_t vrfysize = 0;
+	if (stored_size == sl) {
+		vrfysize = sl;
+		dprintf("ZFS: %s: vrfysize == sl == %lu\n", __func__, vrfysize);
+	} else if (stored_size == sp) {
+		vrfysize = sp;
+		dprintf("ZFS: %s: vrfysize == sp == %lu\n", __func__, vrfysize);
+	} else {
+		mutex_exit(hash_lock);
+		dprintf("ZFS: %s: stored_size = %lu, sl = %lu, sp = %lu (none match, returning)\n",
+		    __func__, stored_size, sl, sp);
+		return (KMEM_CBRC_NO);
+	}
+
+	/* now we distinguish between having a hdr->..->buf->b_data
+	 * and having a hdr->b_pdata == mem
+	 */
+	if (hdr->b_l1hdr.b_buf != NULL) {
+		/* we operate on a buf */
+		if (hdr->b_l1hdr.b_buf->b_hdr != hdr) {
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: hdr->b_l1hdr.b_buf->b_hdr != hdr !!\n", __func__);
+			return (KMEM_CBRC_NO);
+		}
+		buf = hdr->b_l1hdr.b_buf;
+	        kmutex_t *buf_lock = &buf->b_evict_lock;
+		if(!mutex_tryenter(buf_lock)) {
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: could not get buf lock\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		/* we have the buf mutex */
+		if (hdr->b_l1hdr.b_buf->b_hdr != hdr) {
+			mutex_exit(buf_lock);
+			mutex_exit(hash_lock);
+			dprintf("ZFS: %s: (dropping lock) hdr->b_l1hdr.b_buf->b_hdr != hdr !!\n", __func__);
+			return (KMEM_CBRC_NO);
+		}
+		/* we have hdr->buf->hdr */
+		if (buf->b_next != NULL) {
+			mutex_exit(buf_lock);
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: buf has a next buf\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		/* check that mem points to buf */
+		if (mem == buf->b_data) {
+			if (!refcount_is_zero(&buf->b_hdr->b_l1hdr.b_refcnt)) {
+				uint64_t rc = refcount_count(&buf->b_hdr->b_l1hdr.b_refcnt);
+				bool later = false;
+				if (buf->b_data == hdr->b_l1hdr.b_pdata)
+					later = true;
+				mutex_exit(buf_lock);
+				mutex_exit(hash_lock);
+				printf("ZFS: %s: refcount is not zero (LAST SECOND) (%llu) ret %s\n",
+				    __func__, rc,
+				    (later == true) ? "LATER" : "NO");
+				if (later == true)
+					return (KMEM_CBRC_LATER);
+				else
+					return (KMEM_CBRC_NO);
+			}
+			bool pdata = false;
+			printf("ZFS: %s: YESYESYES (buf copying, %lu size)\n", __func__, size);
+			bcopy(mem, newbuf, size);
+			buf->b_data = newbuf;
+			if (hdr->b_l1hdr.b_pdata == mem) {
+				hdr->b_l1hdr.b_pdata = newbuf;
+				pdata=true;
+			}
+			//bzero(mem, size);
+			mutex_exit(buf_lock);
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: copied and zeroed %lu bytes %s\n", __func__,
+			    size, (pdata == true) ? "(and adjusted hdr ptr)" : "(not hdr pdata)");
+			return (KMEM_CBRC_YES);
+		}
+		/* fallthrough to check hdr pdata */
+		mutex_exit(buf_lock);
+	}
+
+	if (hdr->b_l1hdr.b_pdata == NULL) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: empty hdr->b_l1hdr.b_pdata\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+
+	if (hdr->b_l1hdr.b_pdata != mem) {
+		mutex_exit(hash_lock);
+		dprintf("ZFS: %s: hdr->b_l1hdr.b_pdata != mem (dropping lock)\n", __func__);
+		return (KMEM_CBRC_NO);
+	}
+
+	if (hdr->b_l1hdr.b_buf != NULL) {
+		/* we don't want to touch the pdata if we have a buf */
+                printf("ZFS: %s: LATE SANITY FAIL: hdr->b_buf != NULL\n", __func__);
+                mutex_exit(hash_lock);
+                return (KMEM_CBRC_LATER);
+        }
+
+	if (!refcount_is_zero(&hdr->b_l1hdr.b_refcnt)) {
+		uint64_t rc = refcount_count(&hdr->b_l1hdr.b_refcnt);
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: refcount is not zero (LAST SECOND HDR) (%llu)\n",   __func__, rc);
+		return (KMEM_CBRC_LATER);
+	}
+
+	printf("ZFS: %s: doing hdr bcopy YESYESYESYES\n", __func__);
+
+	bcopy(mem, newbuf, size);
+	hdr->b_l1hdr.b_pdata = newbuf;
+        //bzero(mem, size);
+	mutex_exit(hash_lock);
+
+	printf("ZFS: %s: (hdr copied %lu bytes)\n", __func__, size);
+	return (KMEM_CBRC_YES);
+}
+
+// arc_find_a_buf (memory_addr, size) :
+// walk through the multilists looking for a particular buffer
+// ml->hdr.l1hdr->b_buf->b_next ...
+//           |       |        |
+//         b_pdata   b_data   b_data
+//
+// constructs an avl of things that point to the memory
+
+// new data structure: { memory, avltree } -> { nanotime, realsize, cpsize, hdr, buf }
+//                                            sort first on nanotime, then non-null ptr
+
+#endif
