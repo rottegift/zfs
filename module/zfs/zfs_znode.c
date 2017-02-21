@@ -377,6 +377,27 @@ zfs_znode_move(void *buf, void *newbuf, size_t size, void *arg)
 }
 #endif /* sun */
 
+#ifdef __APPLE__
+static kmem_cbrc_t
+zfs_znode_move(void *buf, void *newbuf, size_t size, void *arg)
+{
+	/* we cannot move OSX znodes, but we can tell kmem whether
+	 * the znode will definitely never move vs "don't know" or "later"
+	 */
+	znode_t *ozp = buf;
+
+	if (ozp->z_is_mapped != 0) {
+		return (KMEM_CBRC_NO);
+	}
+
+	if (vnode_isinuse(ZTOV(ozp), 1)) {
+		return (KMEM_CBRC_LATER);
+	}
+
+	return (KMEM_CBRC_DONT_KNOW);
+}
+#endif
+
 void
 zfs_znode_init(void)
 {
@@ -393,9 +414,7 @@ zfs_znode_init(void)
 	    zfs_znode_cache_destructor, NULL, NULL,
 	    NULL, 0);
 
-	// BGH - dont support move semantics here yet.
-	// zfs_znode_move() requires porting
-	//kmem_cache_set_move(znode_cache, zfs_znode_move);
+	kmem_cache_set_move(znode_cache, zfs_znode_move);
 }
 
 void

@@ -179,11 +179,16 @@ zio_init(void)
 			    align, NULL, NULL, NULL, NULL,
 			    metadata_alloc_arena, cflags);
 
+			extern kmem_cbrc_t zio_arc_buf_move(void *, void *, size_t, void *);
+			kmem_cache_set_move(zio_buf_cache[c], zio_arc_buf_move);
+
 			(void) snprintf(name, sizeof(name), "zio_data_buf_%lu",
                             (ulong_t)size);
 			zio_data_buf_cache[c] = kmem_cache_create(name, size,
 			    align, NULL, NULL, NULL, NULL,
 			    data_alloc_arena, cflags);
+
+			kmem_cache_set_move(zio_data_buf_cache[c], zio_arc_buf_move);
 		}
 	}
 
