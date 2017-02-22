@@ -7804,6 +7804,12 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 
 	arc_buf_hdr_t *hdr = buf->b_hdr;
 
+	if (hdr == NULL) {
+		mutex_exit(&buf->b_evict_lock);
+		printf("SPL: %s: NULL arc_buf_hdr!\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+
 	if (HDR_EMPTY(hdr)) {
 		mutex_exit(&buf->b_evict_lock);
 		printf("SPL: %s: empty arc_buf_hdr!\n", __func__);
@@ -7845,6 +7851,8 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	}
 
 	bcopy(mem, newbuf, size);
+
+	buf->b_data = newbuf;
 
 	mutex_exit(hash_lock);
 	mutex_exit(&buf->b_evict_lock);
