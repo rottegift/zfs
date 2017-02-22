@@ -7902,6 +7902,8 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	printf("%s: doing bcopy\n", __func__);
 	IOSleep(10);
 
+	mem_to_arc_buf_remove(mem);
+
 	bcopy(mem, newbuf, size);
 
 	buf->b_data = newbuf;
