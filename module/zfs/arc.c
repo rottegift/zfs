@@ -351,10 +351,10 @@ mem_to_arc_buf_remove(void *memptr)
 	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
 	if (np != NULL) {
 	  dprintf("ZFS: %s found %lu, %lu\n", __func__, (uintptr_t)memptr, (uintptr_t)np->ab);
-	  avl_remove(&mem_to_arc_buf_avl, np);	
+	  avl_remove(&mem_to_arc_buf_avl, np);
 	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, np);
 	} else {
-          dprintf("ZFS: %s not found %lu\n", __func__, (uintptr_t)memptr);	
+          dprintf("ZFS: %s not found %lu\n", __func__, (uintptr_t)memptr);
         }
 	mutex_exit(&mem_to_arc_buf_avl_lock);
 }
@@ -1506,8 +1506,11 @@ buf_dest(void *vbuf, void *unused)
 {
 	arc_buf_t *buf = vbuf;
 
+#if 0
+	// panic: destroying held lock
 	mutex_enter(&buf->b_evict_lock);
 	mutex_exit(&buf->b_evict_lock);
+#endif
 	mutex_destroy(&buf->b_evict_lock);
 	arc_space_return(sizeof (arc_buf_t), ARC_SPACE_HDRS);
 }
@@ -7824,7 +7827,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 
 	if (buf == NULL) {
 		/* we have no record of this allocation in the avl */
-		return (KMEM_CBRC_DONT_KNOW);
+		return (KMEM_CBRC_NO);
 	}
 
 	/* remove from <mem,buf> from avl */
@@ -7839,13 +7842,13 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	if (hdr == NULL) {
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: NULL arc_buf_hdr!\n", __func__);
-		return (KMEM_CBRC_DONT_KNOW);
+		return (KMEM_CBRC_NO);
 	}
 
 	if (HDR_EMPTY(hdr)) {
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: empty arc_buf_hdr!\n", __func__);
-		return (KMEM_CBRC_DONT_KNOW);
+		return (KMEM_CBRC_NO);
 	}
 
 	dprintf("%s: hdr not empty\n", __func__);
@@ -7859,14 +7862,14 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: io in progress\n", __func__);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_LATER);
 	}
 
 	if (!HDR_HAS_L1HDR(hdr)) {
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: no l1hdr!\n", __func__);
-		return (KMEM_CBRC_DONT_KNOW);
+		return (KMEM_CBRC_NO);
 	}
 
 	if (arc_buf_is_shared(buf)) {
@@ -7891,7 +7894,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		 __func__, size, abs);
 	  mutex_exit(hash_lock);
 	  mutex_exit(&buf->b_evict_lock);
-	  return (KMEM_CBRC_DONT_KNOW);
+	  return (KMEM_CBRC_NO);
 	}
 
 	printf("ZFS: %s: doing bcopy YESYESYES\n", __func__);
