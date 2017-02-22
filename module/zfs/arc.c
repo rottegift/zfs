@@ -312,35 +312,31 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 }
 
 static arc_buf_t *mem_to_arc_buf_find(void *);
+static void mem_to_arc_buf_remove(void *);
+
 static void
 mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr)
 {
-  
-  arc_buf_t *a = mem_to_arc_buf_find(memptr);
-  if (a != NULL) {
-    dprintf("ZFS: %s oops, found %lu, %lu\n", __func__,
-	   (uintptr_t)a, (uintptr_t)memptr);
-    if (a != arcbufptr) {
-      dprintf("ZFS: %s it's OK, arcbufptr and a are the same\n", __func__);
-      return;
-    } else {
-      dprintf("ZFS: %s oops, they're not the same: %lu vs %lu", __func__,
-	     (uintptr_t)a, (uintptr_t)arcbufptr);
-      panic("%s : attempting to insert already present memptr arcbufptr", __func__);
-    }
-  }
 
 	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
 
+	mutex_enter(&mem_to_arc_buf_avl_lock);
 	node->m = memptr;
 	node->ab = arcbufptr;
 
-	dprintf("ZFS: %s: add: %lu, %lu\n", __func__, (uintptr_t) node->m, (uintptr_t) node->ab);
+	mem_to_arc_buf_t tofind = { .m = memptr };
+	mem_to_arc_buf_t *preexist = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
 
-	mutex_enter(&mem_to_arc_buf_avl_lock);
-	avl_add(&mem_to_arc_buf_avl, node);
+	if (preexist == NULL) {
+	  avl_add(&mem_to_arc_buf_avl, node);
+	} else if (preexist->m != memptr || preexist->ab != arcbufptr) {
+	  avl_remove(&mem_to_arc_buf_avl, preexist);
+	  dprintf("ZFS: %s: removed pre-existing entry\n", __func__);
+	} else {
+	  dprintf("ZFS: %s: duplicate insertion attempt ignored\n", __func__);
+	}
+
 	mutex_exit(&mem_to_arc_buf_avl_lock);
-
 }
 
 static void
@@ -1510,6 +1506,8 @@ buf_dest(void *vbuf, void *unused)
 {
 	arc_buf_t *buf = vbuf;
 
+	mutex_enter(&buf->b_evict_lock);
+	mutex_exit(&buf->b_evict_lock);
 	mutex_destroy(&buf->b_evict_lock);
 	arc_space_return(sizeof (arc_buf_t), ARC_SPACE_HDRS);
 }
@@ -4396,7 +4394,7 @@ arc_reclaim_thread(void)
 				const int64_t huge_amount = 128LL * 1024LL * 1024LL;
 
 				if (to_free > large_amount || evicted > huge_amount)
-					printf("SPL: %s: post-reap %lld post-evict %lld adjusted %lld "
+					printf("ZFS: %s: post-reap %lld post-evict %lld adjusted %lld "
 					    "pre-adjust %lld to-free %lld pressure %lld\n",
 					    __func__, free_memory, d_adj, evicted,
 					    pre_adjust_free_memory, to_free, manual_pressure);
@@ -7829,81 +7827,80 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_DONT_KNOW);
 	}
 
-	printf("%s: got buf\n", __func__);
-#ifdef _KERNEL
-	extern void IOSleep(unsigned microseconds);
-#else
-#define IOSleep(...)
-#endif
-	IOSleep(10);
+	/* remove from <mem,buf> from avl */
+	mem_to_arc_buf_remove(mem);
 
 	mutex_enter(&buf->b_evict_lock);
-	printf("%s: got buf mutex\n", __func__);
-	IOSleep(10);
+	dprintf("%s: got buf mutex\n", __func__);
 
 	arc_buf_hdr_t *hdr = buf->b_hdr;
-	printf("%s: got buf hdr\n", __func__);
-	IOSleep(10);
+	dprintf("%s: got buf hdr\n", __func__);
 
 	if (hdr == NULL) {
 		mutex_exit(&buf->b_evict_lock);
-		printf("SPL: %s: NULL arc_buf_hdr!\n", __func__);
+		printf("ZFS: %s: NULL arc_buf_hdr!\n", __func__);
 		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	if (HDR_EMPTY(hdr)) {
 		mutex_exit(&buf->b_evict_lock);
-		printf("SPL: %s: empty arc_buf_hdr!\n", __func__);
+		printf("ZFS: %s: empty arc_buf_hdr!\n", __func__);
 		return (KMEM_CBRC_DONT_KNOW);
 	}
 
-	printf("%s: hdr not empty\n", __func__);
-	IOSleep(10);
+	dprintf("%s: hdr not empty\n", __func__);
 
 	kmutex_t *hash_lock = HDR_LOCK(hdr);
 	mutex_enter(hash_lock);
 
-	printf("%s: got hash_lock mutex\n", __func__);
-	IOSleep(10);
+	dprintf("%s: got hash_lock mutex\n", __func__);
 
 	if (HDR_IO_IN_PROGRESS(hdr)) {
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
+		printf("ZFS: %s: io in progress\n", __func__);
 		return (KMEM_CBRC_NO);
 	}
 
 	if (!HDR_HAS_L1HDR(hdr)) {
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
-		printf("%s: no l1hdr!\n", __func__);
+		printf("ZFS: %s: no l1hdr!\n", __func__);
 		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	if (arc_buf_is_shared(buf)) {
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
+		printf("ZFS: %s: arc_buf_is_shared() returned true\n", __func__);
 		return (KMEM_CBRC_NO);
 	}
 
 	if (!refcount_is_zero(&hdr->b_l1hdr.b_refcnt)) {
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
+		printf("ZFS: %s: refcount_is_zero() returned FALSE\n", __func__);
 		return (KMEM_CBRC_NO);
 	}
 
-	printf("%s: getting size\n", __func__);
-	IOSleep(10);
+	printf("ZFS: %s: getting size\n", __func__);
 	size_t abs = (size_t)arc_buf_size(buf);
 
 	if (size != abs) {
-		panic("%s: size mismatch %zu vs %zu\n", __func__, size, abs);
+	  printf("ZFS: %s: SIZE MISMATCH size = %lu, arc_buf_size(buf) = %lu\n",
+		 __func__, size, abs);
+	  mutex_exit(hash_lock);
+	  mutex_exit(&buf->b_evict_lock);
+	  return (KMEM_CBRC_DONT_KNOW);
 	}
 
-	printf("%s: doing bcopy\n", __func__);
-	IOSleep(10);
+	printf("ZFS: %s: doing bcopy YESYESYES\n", __func__);
 
-	mem_to_arc_buf_remove(mem);
+	mutex_exit(hash_lock);
+	mutex_exit(&buf->b_evict_lock);
 
+	return (KMEM_CBRC_LATER);
+#if 0
 	bcopy(mem, newbuf, size);
 
 	buf->b_data = newbuf;
@@ -7911,9 +7908,9 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	mutex_exit(hash_lock);
 	mutex_exit(&buf->b_evict_lock);
 
-	printf("%s: move done OK\n", __func__);
-	IOSleep(10);
+	printf("ZFS: %s: move done OK\n", __func__);
 	return (KMEM_CBRC_YES);
+#endif
 }
 
 #endif
