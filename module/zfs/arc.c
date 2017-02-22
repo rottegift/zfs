@@ -347,7 +347,9 @@ mem_to_arc_buf_find(void *memptr)
 	mutex_enter(&mem_to_arc_buf_avl_lock);
 	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
 	mutex_exit(&mem_to_arc_buf_avl_lock);
-	return(np->ab);
+	if (np != NULL)
+	  return(np->ab);
+	return (NULL);
 }
 
 static int
