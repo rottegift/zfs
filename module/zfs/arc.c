@@ -347,7 +347,9 @@ mem_to_arc_buf_find(void *memptr)
 	mutex_enter(&mem_to_arc_buf_avl_lock);
 	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
 	mutex_exit(&mem_to_arc_buf_avl_lock);
-	return(np->ab);
+	if (np != NULL)
+	  return(np->ab);
+	return (NULL);
 }
 
 static int
@@ -7800,9 +7802,21 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_DONT_KNOW);
 	}
 
+	printf("%s: got buf\n", __func__);
+#ifdef _KERNEL
+	extern void IOSleep(unsigned microseconds);
+#else
+#define IOSleep(...)
+#endif
+	IOSleep(10);
+
 	mutex_enter(&buf->b_evict_lock);
+	printf("%s: got buf mutex\n", __func__);
+	IOSleep(10);
 
 	arc_buf_hdr_t *hdr = buf->b_hdr;
+	printf("%s: got buf hdr\n", __func__);
+	IOSleep(10);
 
 	if (hdr == NULL) {
 		mutex_exit(&buf->b_evict_lock);
@@ -7816,8 +7830,14 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_DONT_KNOW);
 	}
 
+	printf("%s: hdr not empty\n", __func__);
+	IOSleep(10);
+
 	kmutex_t *hash_lock = HDR_LOCK(hdr);
 	mutex_enter(hash_lock);
+
+	printf("%s: got hash_lock mutex\n", __func__);
+	IOSleep(10);
 
 	if (HDR_IO_IN_PROGRESS(hdr)) {
 		mutex_exit(hash_lock);
@@ -7844,11 +7864,16 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_NO);
 	}
 
+	printf("%s: getting size\n", __func__);
+	IOSleep(10);
 	size_t abs = (size_t)arc_buf_size(buf);
 
 	if (size != abs) {
 		panic("%s: size mismatch %zu vs %zu\n", __func__, size, abs);
 	}
+
+	printf("%s: doing bcopy\n", __func__);
+	IOSleep(10);
 
 	bcopy(mem, newbuf, size);
 
@@ -7856,6 +7881,9 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 
 	mutex_exit(hash_lock);
 	mutex_exit(&buf->b_evict_lock);
+
+	printf("%s: move done OK\n", __func__);
+	IOSleep(10);
 	return (KMEM_CBRC_YES);
 }
 
