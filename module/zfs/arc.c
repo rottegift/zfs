@@ -2624,9 +2624,11 @@ arc_buf_alloc_impl(arc_buf_hdr_t *hdr, void *tag, boolean_t compressed,
 		buf->b_data =
 		    arc_get_data_buf(hdr, arc_buf_size(buf), buf);
 		ARCSTAT_INCR(arcstat_overhead_size, arc_buf_size(buf));
-#ifdef __APPLE__
+#ifdef __OPPLE__
+		// this panics in ...->dbuf_hold->...->dbuf_read->arc_read
+		// because avl_find(... buf->b_data ...) succeeds inside avl_add()
 		/* map buf->b_data to hdr */
-		mem_to_arc_buf_insert(buf->b_data, buf);
+	        mem_to_arc_buf_insert(buf->b_data, buf);
 #endif
 	}
 	VERIFY3P(buf->b_data, !=, NULL);
@@ -7825,6 +7827,12 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	}
 
 	if (arc_buf_is_shared(buf)) {
+		mutex_exit(hash_lock);
+		mutex_exit(&buf->b_evict_lock);
+		return (KMEM_CBRC_NO);
+	}
+
+	if (!refcount_is_zero(&hdr->b_l1hdr.b_refcnt)) {
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
 		return (KMEM_CBRC_NO);
