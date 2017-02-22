@@ -301,6 +301,8 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 	const uintptr_t bamem = (const uintptr_t) ba->m;
 	const uintptr_t bbmem = (const uintptr_t) bb->m;
 
+	dprintf("%s: bamem %lu bbmem %lu\n", __func__, bamem, bbmem);
+
 	if (bamem < bbmem)
 		return (-1);
 	else if (bbmem > bamem)
@@ -309,13 +311,31 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 		return (0);
 }
 
+static arc_buf_t *mem_to_arc_buf_find(void *);
 static void
 mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr)
 {
+  
+  arc_buf_t *a = mem_to_arc_buf_find(memptr);
+  if (a != NULL) {
+    dprintf("ZFS: %s oops, found %lu, %lu\n", __func__,
+	   (uintptr_t)a, (uintptr_t)memptr);
+    if (a != arcbufptr) {
+      dprintf("ZFS: %s it's OK, arcbufptr and a are the same\n", __func__);
+      return;
+    } else {
+      dprintf("ZFS: %s oops, they're not the same: %lu vs %lu", __func__,
+	     (uintptr_t)a, (uintptr_t)arcbufptr);
+      panic("%s : attempting to insert already present memptr arcbufptr", __func__);
+    }
+  }
+
 	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
 
 	node->m = memptr;
 	node->ab = arcbufptr;
+
+	dprintf("ZFS: %s: add: %lu, %lu\n", __func__, (uintptr_t) node->m, (uintptr_t) node->ab);
 
 	mutex_enter(&mem_to_arc_buf_avl_lock);
 	avl_add(&mem_to_arc_buf_avl, node);
@@ -327,14 +347,19 @@ static void
 mem_to_arc_buf_remove(void *memptr)
 {
 	mem_to_arc_buf_t *np;
-	mem_to_arc_buf_t tofind = { .m = memptr, .ab = NULL };
+	mem_to_arc_buf_t tofind;
+
+	tofind.m = memptr;
 
 	mutex_enter(&mem_to_arc_buf_avl_lock);
 	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
 	if (np != NULL) {
-		avl_remove(&mem_to_arc_buf_avl, np);
-		kmem_cache_free(mem_to_arc_buf_avl_node_cache, np);
-	}
+	  dprintf("ZFS: %s found %lu, %lu\n", __func__, (uintptr_t)memptr, (uintptr_t)np->ab);
+	  avl_remove(&mem_to_arc_buf_avl, np);	
+	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, np);
+	} else {
+          dprintf("ZFS: %s not found %lu\n", __func__, (uintptr_t)memptr);	
+        }
 	mutex_exit(&mem_to_arc_buf_avl_lock);
 }
 
@@ -342,7 +367,9 @@ static arc_buf_t *
 mem_to_arc_buf_find(void *memptr)
 {
 	mem_to_arc_buf_t *np;
-	mem_to_arc_buf_t tofind = { .m = memptr, .ab = NULL };
+	mem_to_arc_buf_t tofind;
+
+	tofind.m = memptr;
 
 	mutex_enter(&mem_to_arc_buf_avl_lock);
 	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
@@ -2626,7 +2653,7 @@ arc_buf_alloc_impl(arc_buf_hdr_t *hdr, void *tag, boolean_t compressed,
 		buf->b_data =
 		    arc_get_data_buf(hdr, arc_buf_size(buf), buf);
 		ARCSTAT_INCR(arcstat_overhead_size, arc_buf_size(buf));
-#ifdef __OPPLE__
+#ifdef __APPLE__
 		// this panics in ...->dbuf_hold->...->dbuf_read->arc_read
 		// because avl_find(... buf->b_data ...) succeeds inside avl_add()
 		/* map buf->b_data to hdr */
