@@ -6674,6 +6674,11 @@ arc_fini(void)
 
 #ifdef __APPLE__
 	mutex_destroy(&mem_to_arc_buf_avl_lock);
+	void *cookie = NULL;
+	for (mem_to_arc_buf_t *m = NULL;
+	     (m = avl_destroy_nodes(&mem_to_arc_buf_avl, &cookie)) != NULL;
+	     kmem_cache_free(mem_to_arc_buf_avl_node_cache, m));
+
 	avl_destroy(&mem_to_arc_buf_avl);
 	kmem_cache_destroy(mem_to_arc_buf_avl_node_cache);
 #endif
@@ -7844,13 +7849,13 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	if (hdr == NULL) {
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: NULL arc_buf_hdr!\n", __func__);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	if (HDR_EMPTY(hdr)) {
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: empty arc_buf_hdr!\n", __func__);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	dprintf("%s: hdr not empty\n", __func__);
@@ -7905,7 +7910,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	mutex_exit(hash_lock);
 	mutex_exit(&buf->b_evict_lock);
 
-	return (KMEM_CBRC_NO);
+	return (KMEM_CBRC_LATER);
 #else
 	bcopy(mem, newbuf, size);
 

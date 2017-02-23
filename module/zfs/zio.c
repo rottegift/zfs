@@ -125,10 +125,16 @@ zio_init(void)
 	vmem_t *metadata_alloc_arena = NULL;
 #endif
 
+#define KMF_AUDIT               0x00000001      /* transaction auditing */
+#define KMF_DEADBEEF    0x00000002      /* deadbeef checking */
+#define KMF_REDZONE             0x00000004      /* redzone checking */
+#define KMF_CONTENTS    0x00000008      /* freed-buffer content logging */
+#define KMF_BUFTAG      (KMF_DEADBEEF | KMF_REDZONE)
+
 	zio_cache = kmem_cache_create("zio_cache",
-	    sizeof (zio_t), 0, NULL, NULL, NULL, NULL, NULL, 0);
+	    sizeof (zio_t), 0, NULL, NULL, NULL, NULL, NULL, KMF_BUFTAG|KMF_AUDIT);
 	zio_link_cache = kmem_cache_create("zio_link_cache",
-	    sizeof (zio_link_t), 0, NULL, NULL, NULL, NULL, NULL, 0);
+	    sizeof (zio_link_t), 0, NULL, NULL, NULL, NULL, NULL, KMF_BUFTAG|KMF_AUDIT);
 
 	/*
 	 * For small buffers, we want a cache for each multiple of
