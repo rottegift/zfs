@@ -7899,11 +7899,12 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 
 	printf("ZFS: %s: doing bcopy YESYESYES\n", __func__);
 
+#if 0
 	mutex_exit(hash_lock);
 	mutex_exit(&buf->b_evict_lock);
 
 	return (KMEM_CBRC_LATER);
-#if 0
+#else
 	bcopy(mem, newbuf, size);
 
 	buf->b_data = newbuf;
