@@ -331,9 +331,11 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr)
 	  avl_add(&mem_to_arc_buf_avl, node);
 	} else if (preexist->m != memptr || preexist->ab != arcbufptr) {
 	  avl_remove(&mem_to_arc_buf_avl, preexist);
+	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, node);
 	  dprintf("ZFS: %s: removed pre-existing entry\n", __func__);
 	} else {
 	  dprintf("ZFS: %s: duplicate insertion attempt ignored\n", __func__);
+	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, node);
 	}
 
 	mutex_exit(&mem_to_arc_buf_avl_lock);
@@ -7899,11 +7901,11 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 
 	printf("ZFS: %s: doing bcopy YESYESYES\n", __func__);
 
-#if 0
+#if 1
 	mutex_exit(hash_lock);
 	mutex_exit(&buf->b_evict_lock);
 
-	return (KMEM_CBRC_LATER);
+	return (KMEM_CBRC_NO);
 #else
 	bcopy(mem, newbuf, size);
 
