@@ -390,10 +390,6 @@ zfs_znode_move(void *buf, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_NO);
 	}
 
-	if (vnode_isinuse(ZTOV(ozp), 1)) {
-		return (KMEM_CBRC_LATER);
-	}
-
 	return (KMEM_CBRC_DONT_KNOW);
 }
 #endif
