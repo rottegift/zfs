@@ -125,16 +125,11 @@ zio_init(void)
 	vmem_t *metadata_alloc_arena = NULL;
 #endif
 
-#define KMF_AUDIT               0x00000001      /* transaction auditing */
-#define KMF_DEADBEEF    0x00000002      /* deadbeef checking */
-#define KMF_REDZONE             0x00000004      /* redzone checking */
-#define KMF_CONTENTS    0x00000008      /* freed-buffer content logging */
-#define KMF_BUFTAG      (KMF_DEADBEEF | KMF_REDZONE)
-
 	zio_cache = kmem_cache_create("zio_cache",
-	    sizeof (zio_t), 0, NULL, NULL, NULL, NULL, NULL, KMF_BUFTAG|KMF_AUDIT);
+				      sizeof (zio_t), 0, NULL, NULL, NULL, NULL, NULL, 0);
 	zio_link_cache = kmem_cache_create("zio_link_cache",
-	    sizeof (zio_link_t), 0, NULL, NULL, NULL, NULL, NULL, KMF_BUFTAG|KMF_AUDIT);
+					   sizeof (zio_link_t), 0, NULL, NULL, NULL, NULL, NULL, 0);
+
 
 	/*
 	 * For small buffers, we want a cache for each multiple of
@@ -142,11 +137,18 @@ zio_init(void)
 	 * for each sixteenth-power of 2 below 128k and each eighth
 	 * power-of-two above 128k.
 	 */
+#define KMF_AUDIT               0x00000001      /* transaction auditing */
+#define KMF_DEADBEEF    0x00000002      /* deadbeef checking */
+#define KMF_REDZONE             0x00000004      /* redzone checking */
+#define KMF_CONTENTS    0x00000008      /* freed-buffer content logging */
+#define KMF_BUFTAG      (KMF_DEADBEEF | KMF_REDZONE)
+
 	for (c = 0; c < SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT; c++) {
 		size_t size = (c + 1) << SPA_MINBLOCKSHIFT;
 		size_t p2 = size;
 		size_t align = 0;
-		size_t cflags = (size > zio_buf_debug_limit) ? KMC_NODEBUG : 0;
+		//size_t cflags = (size > zio_buf_debug_limit) ? KMC_NODEBUG : 0;
+		size_t cflags = KMF_AUDIT | KMF_BUFTAG;
 
 #ifdef _ILP32
 		/*
