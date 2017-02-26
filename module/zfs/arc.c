@@ -7894,11 +7894,16 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	}
 
 	printf("ZFS: %s: getting size\n", __func__);
-	size_t abs = (size_t)arc_buf_size(buf);
+	if (buf->b_hdr == NULL) {
+		printf("ZFS: %s: (getting arcbuf size vs %llu) b_hdr == NULL!\n",
+		    __func__, (uint64_t)size);
+		return (KMEM_CBRC_LATER);
+	}
+	size_t arcbufsz = (size_t)arc_buf_size(buf);
 
-	if (size != abs) {
+	if (size != arcbufsz) {
 	  printf("ZFS: %s: SIZE MISMATCH size = %lu, arc_buf_size(buf) = %lu\n",
-		 __func__, size, abs);
+		 __func__, size, arcbufsz);
 	  mutex_exit(hash_lock);
 	  mutex_exit(&buf->b_evict_lock);
 	  return (KMEM_CBRC_NO);
