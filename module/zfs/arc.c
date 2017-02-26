@@ -7864,6 +7864,19 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_NO);
 	}
 
+	if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
+	    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
+		mutex_exit(&buf->b_evict_lock);
+		printf("ZFS: %s: ghost buffer\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+
+	if (hdr->b_l1hdr.b_state == arc_l2c_only) {
+		mutex_exit(&buf->b_evict_lock);
+		printf("ZFS: %s: l2c only!\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+
 	dprintf("%s: hdr not empty\n", __func__);
 
 	kmutex_t *hash_lock = HDR_LOCK(hdr);
