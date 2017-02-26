@@ -7858,6 +7858,12 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_DONT_KNOW);
 	}
 
+	if (hdr->b_l1hdr.b_state == arc_anon) {
+		mutex_exit(&buf->b_evict_lock);
+		printf("ZFS: %s: anonymous buffer\n", __func__);
+		return (KMEM_CBRC_NO);
+	}
+
 	dprintf("%s: hdr not empty\n", __func__);
 
 	kmutex_t *hash_lock = HDR_LOCK(hdr);
