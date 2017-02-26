@@ -7897,6 +7897,8 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	if (buf->b_hdr == NULL) {
 		printf("ZFS: %s: (getting arcbuf size vs %llu) b_hdr == NULL!\n",
 		    __func__, (uint64_t)size);
+		mutex_exit(hash_lock);
+		mutex_exit(&buf->b_evict_lock);
 		return (KMEM_CBRC_LATER);
 	}
 	size_t arcbufsz = (size_t)arc_buf_size(buf);
