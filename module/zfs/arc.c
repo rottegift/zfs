@@ -7876,21 +7876,21 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: no l1hdr!\n", __func__);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_LATER);
 	}
 
 	if (arc_buf_is_shared(buf)) {
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: arc_buf_is_shared() returned true\n", __func__);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_LATER);
 	}
 
 	if (!refcount_is_zero(&hdr->b_l1hdr.b_refcnt)) {
 		mutex_exit(hash_lock);
 		mutex_exit(&buf->b_evict_lock);
 		printf("ZFS: %s: refcount_is_zero() returned FALSE\n", __func__);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_LATER);
 	}
 
 	printf("ZFS: %s: getting size\n", __func__);
