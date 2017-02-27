@@ -291,7 +291,7 @@ void IOSleep(unsigned milliseconds);
 static kmem_cache_t *mem_to_arc_buf_avl_node_cache = NULL;
 #include <sys/avl.h>
 typedef struct { avl_node_t avl_link; void *m; arc_buf_t *ab;
-	arc_buf_hdr_t *h; size_t size; bool header; } mem_to_arc_buf_t;
+	arc_buf_hdr_t *h; size_t size; size_t real_size; bool header; } mem_to_arc_buf_t;
 static avl_tree_t mem_to_arc_buf_avl;
 static kmutex_t mem_to_arc_buf_avl_lock;
 
@@ -313,14 +313,12 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 		return (0);
 }
 
-static arc_buf_t *mem_to_arc_buf_find_buf(void *);
-static arc_buf_hdr_t *mem_to_arc_buf_find_hdr(void *);
-static size_t mem_to_arc_buf_find_size(void *);
-static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *, bool *);
+static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *, size_t *, bool *);
 static void mem_to_arc_buf_remove(void *);
 
 static void
-mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr, arc_buf_hdr_t *archdrptr, size_t size, bool header)
+mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
+    arc_buf_hdr_t *archdrptr, size_t size, size_t real_size, bool header)
 {
 
 	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
@@ -330,6 +328,7 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr, arc_buf_hdr_t *archdrp
 	node->ab = arcbufptr;
 	node->h = archdrptr;
 	node->size = size;
+	node->real_size = real_size;
 	node->header = header;
 
 	mem_to_arc_buf_t tofind = { .m = memptr };
@@ -369,59 +368,9 @@ mem_to_arc_buf_remove(void *memptr)
 	mutex_exit(&mem_to_arc_buf_avl_lock);
 }
 
-static arc_buf_t *
-mem_to_arc_buf_find_buf(void *memptr)
-{
-	mem_to_arc_buf_t *np;
-	mem_to_arc_buf_t tofind;
-
-	tofind.m = memptr;
-
-	mutex_enter(&mem_to_arc_buf_avl_lock);
-	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
-	mutex_exit(&mem_to_arc_buf_avl_lock);
-	if (np != NULL && np->header == false) {
-		return (np->ab);
-	}
-	return (NULL);
-}
-
-static arc_buf_hdr_t *
-mem_to_arc_buf_find_hdr(void *memptr)
-{
-	mem_to_arc_buf_t *np;
-	mem_to_arc_buf_t tofind;
-
-	tofind.m = memptr;
-
-	mutex_enter(&mem_to_arc_buf_avl_lock);
-	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
-	mutex_exit(&mem_to_arc_buf_avl_lock);
-	if (np != NULL && np->header == true) {
-		return (np->h);
-	}
-	return (NULL);
-}
-
-static size_t
-mem_to_arc_buf_find_size(void *memptr)
-{
-	mem_to_arc_buf_t *np;
-	mem_to_arc_buf_t tofind;
-
-	tofind.m = memptr;
-
-	mutex_enter(&mem_to_arc_buf_avl_lock);
-	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
-	mutex_exit(&mem_to_arc_buf_avl_lock);
-	if (np != NULL && np->header == true) {
-		return (np->size);
-	}
-	return (0);
-}
-
 static bool
-mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp, size_t *szp, bool *isheaderp)
+mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
+    size_t *szp, size_t *real_sizep, bool *isheaderp)
 {
 	mem_to_arc_buf_t *np;
 	mem_to_arc_buf_t tofind;
@@ -435,6 +384,7 @@ mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp, si
 		*hdrp = np->h;
 		*isheaderp = np->header;
 		*szp = np->size;
+		*real_sizep = np->real_size;
 		mutex_exit(&mem_to_arc_buf_avl_lock);
 		return (true);
 	}
@@ -2157,10 +2107,6 @@ arc_buf_fill(arc_buf_t *buf, boolean_t compressed)
 			/* We increased the size of b_data; update overhead */
 			ARCSTAT_INCR(arcstat_overhead_size,
 			    HDR_GET_LSIZE(hdr) - HDR_GET_PSIZE(hdr));
-#ifdef __APPLE__
-			/* map buf->b_data to hdr */
-			mem_to_arc_buf_insert(buf->b_data, buf, NULL, (size_t)HDR_GET_LSIZE(hdr), false);
-#endif
 		}
 
 		/*
@@ -4789,19 +4735,22 @@ arc_get_data_buf(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
 		mutex_exit(&arc_reclaim_lock);
 	}
 
+	size_t real_consumed_size = 0;
+	extern size_t zio_buf_alloc_size(size_t), zio_data_buf_alloc_size(size_t);
+
 	VERIFY3U(hdr->b_type, ==, type);
 	if (type == ARC_BUFC_METADATA) {
 		datap = zio_buf_alloc(size);
+		real_consumed_size = zio_buf_alloc_size(size);
 		arc_space_consume(size, ARC_SPACE_META);
 	} else {
 		ASSERT(type == ARC_BUFC_DATA);
 		datap = zio_data_buf_alloc(size);
+		real_consumed_size = zio_data_buf_alloc_size(size);
 		arc_space_consume(size, ARC_SPACE_DATA);
 	}
 
-#ifdef __APPLE__
-	mem_to_arc_buf_insert(datap, NULL, hdr, size, true);
-#endif
+	mem_to_arc_buf_insert(datap, NULL, hdr, size, real_consumed_size, true);
 
 	/*
 	 * Update the state size.  Note that ghost states have a
@@ -7899,26 +7848,16 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	bool has_header = false;
 	bool is_header = false;
 
-	size_t stored_size = 0;
+	size_t stored_size = 0, real_size = 0;
 	arc_buf_t buf_l, *buf = &buf_l;
 	arc_buf_hdr_t hdr_l, *hdr = &hdr_l;
 
-	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &is_header) == false) {
+	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &real_size, &is_header) == false) {
 		return (KMEM_CBRC_NO);
 	}
 
-	if (buf != mem_to_arc_buf_find_buf(mem)) {
-		printf("ZFS: %s buf != find\n", __func__);
-	}
-	if (hdr != mem_to_arc_buf_find_hdr(mem)) {
-		printf("ZFS: %s hdr != find\n", __func__);
-	}
-	if (stored_size != mem_to_arc_buf_find_size(mem)) {
-		printf("ZFS: %s stored_size != find\n", __func__);
-	}
-
-	if (stored_size != size) {
-		printf("ZFS: %s: stored_size %lu does not match size arg %lu (is_header: %u)\n",
+	if (real_size != size) {
+		printf("ZFS: %s: (stored) real_size %lu does not match (arg) size %lu (is_header: %u)\n",
 		    __func__, stored_size, size, is_header);
 		return (KMEM_CBRC_NO);
 	}

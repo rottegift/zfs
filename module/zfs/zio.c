@@ -319,6 +319,34 @@ zio_data_buf_alloc(size_t size)
 #endif
 }
 
+#ifdef __APPLE__
+extern size_t kmem_cache_bufsize(kmem_cache_t *cp);
+size_t
+zio_data_buf_alloc_size(size_t size)
+{
+	size_t c = (size - 1) >> SPA_MINBLOCKSHIFT;
+
+	VERIFY3U(c, <, SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT);
+
+	kmem_cache_t *cp = zio_data_buf_cache[c];
+
+	return(kmem_cache_bufsize(cp));
+}
+
+size_t
+zio_buf_alloc_size(size_t size)
+{
+	size_t c = (size - 1) >> SPA_MINBLOCKSHIFT;
+
+	VERIFY3U(c, <, SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT);
+
+	kmem_cache_t *cp = zio_buf_cache[c];
+
+	return(kmem_cache_bufsize(cp));
+}
+
+#endif
+
 void
 zio_buf_free(void *buf, size_t size)
 {
