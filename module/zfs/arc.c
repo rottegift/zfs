@@ -290,8 +290,9 @@ void IOSleep(unsigned milliseconds);
 /* mapping of arc_get_data_buf <-> arc_buf_t */
 static kmem_cache_t *mem_to_arc_buf_avl_node_cache = NULL;
 #include <sys/avl.h>
-typedef struct { avl_node_t avl_link; void *m; arc_buf_t *ab;
-	arc_buf_hdr_t *h; size_t size; size_t real_size; bool header; } mem_to_arc_buf_t;
+typedef struct { void *m; arc_buf_t *ab;
+	arc_buf_hdr_t *h; size_t size; size_t real_size; bool header;
+	avl_node_t avl_link; } mem_to_arc_buf_t;
 static avl_tree_t mem_to_arc_buf_avl;
 static kmutex_t mem_to_arc_buf_avl_lock;
 
@@ -333,17 +334,23 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 	node->real_size = real_size;
 	node->header = header;
 
-	mem_to_arc_buf_t tofind = { .m = memptr };
-	mem_to_arc_buf_t *preexist = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
+	for (int i = 0; ; i++) {
+		avl_index_t where;
+		mem_to_arc_buf_t tofind;
 
-	if (preexist == NULL) {
-	  avl_add(&mem_to_arc_buf_avl, node);
-	} else {
-	  avl_remove(&mem_to_arc_buf_avl, preexist);
-	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
-	  avl_add(&mem_to_arc_buf_avl, node);
+		tofind.m = memptr;
+
+		mem_to_arc_buf_t *preexist = avl_find(&mem_to_arc_buf_avl, &tofind, &where);
+
+		if (preexist == NULL) {
+			avl_insert(&mem_to_arc_buf_avl, node, where);
+			break;
+		} else {
+			avl_remove(&mem_to_arc_buf_avl, preexist);
+			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
+			printf("ZFS: %s: preexisting %lu removed (i = %d)\n", __func__, (uintptr_t)memptr, i);
+		}
 	}
-
 	mutex_exit(&mem_to_arc_buf_avl_lock);
 }
 
