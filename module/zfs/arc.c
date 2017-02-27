@@ -7867,8 +7867,8 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	}
 
 	if (real_size != size) {
-		printf("ZFS: %s: (stored) real_size %lu does not match (arg) size %lu (is_header: %u)\n",
-		    __func__, stored_size, size, is_header);
+		printf("ZFS: %s: (stored) real_size %lu does not match (arg) size %lu (is_header: %u, stored_size: %lu)\n",
+		    __func__, stored_size, size, is_header, stored_size);
 		return (KMEM_CBRC_NO);
 	}
 
