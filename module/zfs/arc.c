@@ -315,6 +315,8 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 
 static arc_buf_t *mem_to_arc_buf_find_buf(void *);
 static arc_buf_hdr_t *mem_to_arc_buf_find_hdr(void *);
+static size_t mem_to_arc_buf_find_size(void *);
+static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *, bool *);
 static void mem_to_arc_buf_remove(void *);
 
 static void
@@ -416,6 +418,28 @@ mem_to_arc_buf_find_size(void *memptr)
 		return (np->size);
 	}
 	return (0);
+}
+
+static bool
+mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp, size_t *szp, bool *isheaderp)
+{
+	mem_to_arc_buf_t *np;
+	mem_to_arc_buf_t tofind;
+
+	tofind.m = memptr;
+
+	mutex_enter(&mem_to_arc_buf_avl_lock);
+	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
+	if (np != NULL) {
+		*bufp = np->ab;
+		*hdrp = np->h;
+		*isheaderp = np->header;
+		*szp = np->size;
+		mutex_exit(&mem_to_arc_buf_avl_lock);
+		return (true);
+	}
+	mutex_exit(&mem_to_arc_buf_avl_lock);
+	return (false);
 }
 
 static int
@@ -7889,19 +7913,29 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	bool has_header = false;
 	bool is_header = false;
 
-	size_t stored_size = mem_to_arc_buf_find_size(mem);
+	size_t stored_size = 0;
+	arc_buf_t buf_l, *buf = &buf_l;
+	arc_buf_hdr_t hdr_l, *hdr = &hdr_l;
 
-	if (stored_size == 0) {
-		printf("ZFS: %s: could not find stored size (wanted %lu)\n", __func__, size);
-		return (KMEM_CBRC_NO);
-	} else if (stored_size != size) {
-		printf("ZFS: %s: stored_size %lu does not match size arg %lu\n",
-		    __func__, stored_size, size);
+	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &is_header) == false) {
 		return (KMEM_CBRC_NO);
 	}
 
-	arc_buf_t *buf = mem_to_arc_buf_find_buf(mem);
-	arc_buf_hdr_t *hdr = mem_to_arc_buf_find_hdr(mem);
+	if (buf != mem_to_arc_buf_find_buf(mem)) {
+		printf("ZFS: %s buf != find\n", __func__);
+	}
+	if (hdr != mem_to_arc_buf_find_hdr(mem)) {
+		printf("ZFS: %s hdr != find\n", __func__);
+	}
+	if (stored_size != mem_to_arc_buf_find_size(mem)) {
+		printf("ZFS: %s stored_size != find\n", __func__);
+	}
+
+	if (stored_size != size) {
+		printf("ZFS: %s: stored_size %lu does not match size arg %lu (is_header: %u)\n",
+		    __func__, stored_size, size, is_header);
+		return (KMEM_CBRC_NO);
+	}
 
 	kmutex_t *hash_lock;
 	kmutex_t *buf_lock;
