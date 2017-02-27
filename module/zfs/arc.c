@@ -290,7 +290,8 @@ void IOSleep(unsigned milliseconds);
 /* mapping of arc_get_data_buf <-> arc_buf_t */
 static kmem_cache_t *mem_to_arc_buf_avl_node_cache = NULL;
 #include <sys/avl.h>
-typedef struct { avl_node_t avl_link; void *m; arc_buf_t *ab; arc_buf_hdr_t *h; bool header; } mem_to_arc_buf_t;
+typedef struct { avl_node_t avl_link; void *m; arc_buf_t *ab;
+	arc_buf_hdr_t *h; size_t size; bool header; } mem_to_arc_buf_t;
 static avl_tree_t mem_to_arc_buf_avl;
 static kmutex_t mem_to_arc_buf_avl_lock;
 
@@ -317,7 +318,7 @@ static arc_buf_hdr_t *mem_to_arc_buf_find_hdr(void *);
 static void mem_to_arc_buf_remove(void *);
 
 static void
-mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr, arc_buf_hdr_t *archdrptr, bool header)
+mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr, arc_buf_hdr_t *archdrptr, size_t size, bool header)
 {
 
 	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
@@ -326,6 +327,7 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr, arc_buf_hdr_t *archdrp
 	node->m = memptr;
 	node->ab = arcbufptr;
 	node->h = archdrptr;
+	node->size = size;
 	node->header = header;
 
 	mem_to_arc_buf_t tofind = { .m = memptr };
@@ -399,6 +401,23 @@ mem_to_arc_buf_find_hdr(void *memptr)
 	return (NULL);
 }
 
+static size_t
+mem_to_arc_buf_find_size(void *memptr)
+{
+	mem_to_arc_buf_t *np;
+	mem_to_arc_buf_t tofind;
+
+	tofind.m = memptr;
+
+	mutex_enter(&mem_to_arc_buf_avl_lock);
+	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
+	mutex_exit(&mem_to_arc_buf_avl_lock);
+	if (np != NULL && np->header == true) {
+		return (np->size);
+	}
+	return (0);
+}
+
 static int
 mem_to_arc_buf_node_cons(void *vbuf, void *unused, int kmflag)
 {
@@ -408,6 +427,7 @@ mem_to_arc_buf_node_cons(void *vbuf, void *unused, int kmflag)
 	node->ab = NULL;
 	node->h = NULL;
 	node->header = false;
+	node->size = 0;
 
 	return (0);
 }
@@ -421,6 +441,7 @@ mem_to_arc_buf_node_dest(void *vbuf, void *unused)
 	node->ab = NULL;
 	node->h = NULL;
 	node->header = NULL;
+	node->size = 0;
 }
 
 static void
@@ -2104,7 +2125,7 @@ arc_buf_fill(arc_buf_t *buf, boolean_t compressed)
 			ARCSTAT_INCR(arcstat_overhead_size, HDR_GET_LSIZE(hdr));
 #ifdef __APPLE__
 			/* map buf->b_data to hdr */
-			mem_to_arc_buf_insert(buf->b_data, buf, NULL, false);
+			mem_to_arc_buf_insert(buf->b_data, buf, NULL, (size_t)HDR_GET_LSIZE(hdr), false);
 #endif
 		} else if (ARC_BUF_COMPRESSED(buf)) {
 			/* We need to reallocate the buf's b_data */
@@ -2118,7 +2139,7 @@ arc_buf_fill(arc_buf_t *buf, boolean_t compressed)
 			    HDR_GET_LSIZE(hdr) - HDR_GET_PSIZE(hdr));
 #ifdef __APPLE__
 			/* map buf->b_data to hdr */
-			mem_to_arc_buf_insert(buf->b_data, buf, NULL, false);
+			mem_to_arc_buf_insert(buf->b_data, buf, NULL, (size_t)HDR_GET_LSIZE(hdr), false);
 #endif
 		}
 
@@ -2679,17 +2700,14 @@ arc_buf_alloc_impl(arc_buf_hdr_t *hdr, void *tag, boolean_t compressed,
 		buf->b_flags |= ARC_BUF_FLAG_SHARED;
 		arc_hdr_set_flags(hdr, ARC_FLAG_SHARED_DATA);
 #ifdef __APPLE__
-		mem_to_arc_buf_insert(buf->b_data, NULL, hdr, true);
+		mem_to_arc_buf_insert(buf->b_data, NULL, hdr, (size_t)arc_hdr_size(hdr), true);
 #endif
 	} else {
 		buf->b_data =
 		    arc_get_data_buf(hdr, arc_buf_size(buf), buf);
 		ARCSTAT_INCR(arcstat_overhead_size, arc_buf_size(buf));
 #ifdef __APPLE__
-		// this panics in ...->dbuf_hold->...->dbuf_read->arc_read
-		// because avl_find(... buf->b_data ...) succeeds inside avl_add()
-		/* map buf->b_data to hdr */
-	        mem_to_arc_buf_insert(buf->b_data, buf, NULL, false);
+	        mem_to_arc_buf_insert(buf->b_data, buf, NULL, (size_t)arc_buf_size(buf), false);
 #endif
 	}
 	VERIFY3P(buf->b_data, !=, NULL);
@@ -3024,7 +3042,7 @@ arc_hdr_alloc_pdata(arc_buf_hdr_t *hdr)
 	ASSERT3P(hdr->b_l1hdr.b_pdata, !=, NULL);
 
 #ifdef __APPLE__
-	mem_to_arc_buf_insert(hdr->b_l1hdr.b_pdata, NULL, hdr, true);
+	mem_to_arc_buf_insert(hdr->b_l1hdr.b_pdata, NULL, hdr, (size_t)arc_hdr_size(hdr), true);
 #endif
 
 	ARCSTAT_INCR(arcstat_compressed_size, arc_hdr_size(hdr));
@@ -7871,6 +7889,17 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	bool has_header = false;
 	bool is_header = false;
 
+	size_t stored_size = mem_to_arc_buf_find_size(mem);
+
+	if (stored_size == 0) {
+		printf("ZFS: %s: could not find stored size (wanted %lu)\n", __func__, size);
+		return (KMEM_CBRC_NO);
+	} else if (stored_size != size) {
+		printf("ZFS: %s: stored_size %lu does not match size arg %lu\n",
+		    __func__, stored_size, size);
+		return (KMEM_CBRC_NO);
+	}
+
 	arc_buf_t *buf = mem_to_arc_buf_find_buf(mem);
 	arc_buf_hdr_t *hdr = mem_to_arc_buf_find_hdr(mem);
 
@@ -8043,8 +8072,6 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 			return (KMEM_CBRC_LATER);
 		}
 	}
-
-	printf("ZFS: %s: getting size\n", __func__);
 
 	if (has_buffer) {
 		if (buf->b_hdr == NULL) {
