@@ -2147,10 +2147,6 @@ arc_buf_fill(arc_buf_t *buf, boolean_t compressed)
 
 			/* Previously overhead was 0; just add new overhead */
 			ARCSTAT_INCR(arcstat_overhead_size, HDR_GET_LSIZE(hdr));
-#ifdef __APPLE__
-			/* map buf->b_data to hdr */
-			mem_to_arc_buf_insert(buf->b_data, buf, NULL, (size_t)HDR_GET_LSIZE(hdr), false);
-#endif
 		} else if (ARC_BUF_COMPRESSED(buf)) {
 			/* We need to reallocate the buf's b_data */
 			arc_free_data_buf(hdr, buf->b_data, HDR_GET_PSIZE(hdr),
@@ -2723,16 +2719,10 @@ arc_buf_alloc_impl(arc_buf_hdr_t *hdr, void *tag, boolean_t compressed,
 		buf->b_data = hdr->b_l1hdr.b_pdata;
 		buf->b_flags |= ARC_BUF_FLAG_SHARED;
 		arc_hdr_set_flags(hdr, ARC_FLAG_SHARED_DATA);
-#ifdef __APPLE__
-		mem_to_arc_buf_insert(buf->b_data, NULL, hdr, (size_t)arc_hdr_size(hdr), true);
-#endif
 	} else {
 		buf->b_data =
 		    arc_get_data_buf(hdr, arc_buf_size(buf), buf);
 		ARCSTAT_INCR(arcstat_overhead_size, arc_buf_size(buf));
-#ifdef __APPLE__
-	        mem_to_arc_buf_insert(buf->b_data, buf, NULL, (size_t)arc_buf_size(buf), false);
-#endif
 	}
 	VERIFY3P(buf->b_data, !=, NULL);
 
@@ -3065,10 +3055,6 @@ arc_hdr_alloc_pdata(arc_buf_hdr_t *hdr)
 	hdr->b_l1hdr.b_byteswap = DMU_BSWAP_NUMFUNCS;
 	ASSERT3P(hdr->b_l1hdr.b_pdata, !=, NULL);
 
-#ifdef __APPLE__
-	mem_to_arc_buf_insert(hdr->b_l1hdr.b_pdata, NULL, hdr, (size_t)arc_hdr_size(hdr), true);
-#endif
-
 	ARCSTAT_INCR(arcstat_compressed_size, arc_hdr_size(hdr));
 	ARCSTAT_INCR(arcstat_uncompressed_size, HDR_GET_LSIZE(hdr));
 }
@@ -3078,10 +3064,6 @@ arc_hdr_free_pdata(arc_buf_hdr_t *hdr)
 {
 	ASSERT(HDR_HAS_L1HDR(hdr));
 	ASSERT3P(hdr->b_l1hdr.b_pdata, !=, NULL);
-
-#ifdef __APPLE__
-	mem_to_arc_buf_remove(hdr->b_l1hdr.b_pdata);
-#endif
 
 	/*
 	 * If the hdr is currently being written to the l2arc then
@@ -4816,6 +4798,10 @@ arc_get_data_buf(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
 		datap = zio_data_buf_alloc(size);
 		arc_space_consume(size, ARC_SPACE_DATA);
 	}
+
+#ifdef __APPLE__
+	mem_to_arc_buf_insert(datap, NULL, hdr, size, true);
+#endif
 
 	/*
 	 * Update the state size.  Note that ghost states have a
