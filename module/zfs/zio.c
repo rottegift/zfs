@@ -320,6 +320,7 @@ zio_data_buf_alloc(size_t size)
 }
 
 #ifdef __APPLE__
+#ifdef _KERNEL
 extern size_t kmem_cache_bufsize(kmem_cache_t *cp);
 size_t
 zio_data_buf_alloc_size(size_t size)
@@ -344,7 +345,7 @@ zio_buf_alloc_size(size_t size)
 
 	return(kmem_cache_bufsize(cp));
 }
-
+#endif
 #endif
 
 void

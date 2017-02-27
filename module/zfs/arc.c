@@ -4735,22 +4735,32 @@ arc_get_data_buf(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
 		mutex_exit(&arc_reclaim_lock);
 	}
 
-	size_t real_consumed_size = 0;
+#if defined(__APPLE__) && defined(_KERNEL)
 	extern size_t zio_buf_alloc_size(size_t), zio_data_buf_alloc_size(size_t);
+#endif
+#ifdef __APPLE__
+	size_t real_consumed_size = 0;
+#endif
 
 	VERIFY3U(hdr->b_type, ==, type);
 	if (type == ARC_BUFC_METADATA) {
 		datap = zio_buf_alloc(size);
+#if defined(__APPLE__) && defined(_KERNEL)
 		real_consumed_size = zio_buf_alloc_size(size);
+#endif
 		arc_space_consume(size, ARC_SPACE_META);
 	} else {
 		ASSERT(type == ARC_BUFC_DATA);
 		datap = zio_data_buf_alloc(size);
+#if defined(__APPLE__) && defined(_KERNEL)
 		real_consumed_size = zio_data_buf_alloc_size(size);
+#endif
 		arc_space_consume(size, ARC_SPACE_DATA);
 	}
 
+#if defined(__APPLE__)
 	mem_to_arc_buf_insert(datap, NULL, hdr, size, real_consumed_size, true);
+#endif
 
 	/*
 	 * Update the state size.  Note that ghost states have a
@@ -7819,7 +7829,7 @@ l2arc_stop(void)
 	mutex_exit(&l2arc_feed_thr_lock);
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && defined(_KERNEL)
 
 /* move and reclaim logic for zio caches
  *
@@ -7870,8 +7880,10 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_NO);
 	}
 
+#if defined(__APPLE__)
 	/* remove from <mem,buf> from avl */
 	mem_to_arc_buf_remove(mem);
+#endif
 
 	if (buf != NULL && hdr != NULL) {
 		panic("zio_arc_buf_move: both buf and hdr are non-NULL");
