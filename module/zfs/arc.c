@@ -292,6 +292,7 @@ static kmem_cache_t *mem_to_arc_buf_avl_node_cache = NULL;
 #include <sys/avl.h>
 typedef struct { void *m; arc_buf_t *ab;
 	arc_buf_hdr_t *h; size_t size; size_t real_size; bool header;
+        uint64_t ticket;
 	avl_node_t avl_link; } mem_to_arc_buf_t;
 static avl_tree_t mem_to_arc_buf_avl;
 static kmutex_t mem_to_arc_buf_avl_lock;
@@ -324,6 +325,10 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
     arc_buf_hdr_t *archdrptr, size_t size, size_t real_size, bool header)
 {
 
+  static _Atomic uint64_t ticket = 0;
+
+  ticket++;
+
 	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
 
 	mutex_enter(&mem_to_arc_buf_avl_lock);
@@ -333,6 +338,7 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 	node->size = size;
 	node->real_size = real_size;
 	node->header = header;
+	node->ticket = ticket;
 
 	for (int i = 0; ; i++) {
 		avl_index_t where;
@@ -345,10 +351,15 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 		if (preexist == NULL) {
 			avl_insert(&mem_to_arc_buf_avl, node, where);
 			break;
-		} else {
+	        } else if (node->ticket > preexist->ticket) {
 			avl_remove(&mem_to_arc_buf_avl, preexist);
 			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
-			printf("ZFS: %s: preexisting %lu removed (i = %d)\n", __func__, (uintptr_t)memptr, i);
+			dprintf("ZFS: %s: preexisting removed (i = %d, t_me = %llu, t_avl = %llu)\n",
+			       __func__, i, node->ticket, preexist->ticket);
+		} else {
+		  dprintf("ZFS: %s: preexisting NOT removed (i = %d, t_me = %llu, t_avl = %llu)\n",
+			 __func__, i, node->ticket, preexist->ticket);
+		        break;
 		}
 	}
 	mutex_exit(&mem_to_arc_buf_avl_lock);
