@@ -313,7 +313,9 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 		return (0);
 }
 
+#ifdef _KERNEL
 static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *, size_t *, bool *);
+#endif
 static void mem_to_arc_buf_remove(void *);
 
 static void
@@ -336,13 +338,10 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 
 	if (preexist == NULL) {
 	  avl_add(&mem_to_arc_buf_avl, node);
-	} else if (preexist->m != memptr || preexist->ab != arcbufptr) {
-	  avl_remove(&mem_to_arc_buf_avl, preexist);
-	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, node);
-	  dprintf("ZFS: %s: removed pre-existing entry\n", __func__);
 	} else {
-	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, node);
-	  dprintf("ZFS: %s: duplicate insertion attempt ignored\n", __func__);
+	  avl_remove(&mem_to_arc_buf_avl, preexist);
+	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
+	  avl_add(&mem_to_arc_buf_avl, node);
 	}
 
 	mutex_exit(&mem_to_arc_buf_avl_lock);
@@ -368,6 +367,7 @@ mem_to_arc_buf_remove(void *memptr)
 	mutex_exit(&mem_to_arc_buf_avl_lock);
 }
 
+#ifdef _KERNEL
 static bool
 mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
     size_t *szp, size_t *real_sizep, bool *isheaderp)
@@ -391,6 +391,7 @@ mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
 	mutex_exit(&mem_to_arc_buf_avl_lock);
 	return (false);
 }
+#endif
 
 static int
 mem_to_arc_buf_node_cons(void *vbuf, void *unused, int kmflag)
