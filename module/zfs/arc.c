@@ -279,6 +279,7 @@
 
 #ifdef __APPLE__
 #include <sys/kstat_osx.h>
+#include <stdbool.h>
 #ifdef _KERNEL
 extern vmem_t *zio_arena;
 extern vmem_t *zio_metadata_arena;
@@ -289,7 +290,7 @@ void IOSleep(unsigned milliseconds);
 /* mapping of arc_get_data_buf <-> arc_buf_t */
 static kmem_cache_t *mem_to_arc_buf_avl_node_cache = NULL;
 #include <sys/avl.h>
-typedef struct { avl_node_t avl_link; void *m; arc_buf_t *ab; } mem_to_arc_buf_t;
+typedef struct { avl_node_t avl_link; void *m; arc_buf_t *ab; arc_buf_hdr_t *h; bool header; } mem_to_arc_buf_t;
 static avl_tree_t mem_to_arc_buf_avl;
 static kmutex_t mem_to_arc_buf_avl_lock;
 
@@ -311,11 +312,12 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 		return (0);
 }
 
-static arc_buf_t *mem_to_arc_buf_find(void *);
+static arc_buf_t *mem_to_arc_buf_find_buf(void *);
+static arc_buf_hdr_t *mem_to_arc_buf_find_hdr(void *);
 static void mem_to_arc_buf_remove(void *);
 
 static void
-mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr)
+mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr, arc_buf_hdr_t *archdrptr, bool header)
 {
 
 	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
@@ -323,6 +325,8 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr)
 	mutex_enter(&mem_to_arc_buf_avl_lock);
 	node->m = memptr;
 	node->ab = arcbufptr;
+	node->h = archdrptr;
+	node->header = header;
 
 	mem_to_arc_buf_t tofind = { .m = memptr };
 	mem_to_arc_buf_t *preexist = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
@@ -334,8 +338,8 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr)
 	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, node);
 	  dprintf("ZFS: %s: removed pre-existing entry\n", __func__);
 	} else {
-	  dprintf("ZFS: %s: duplicate insertion attempt ignored\n", __func__);
 	  kmem_cache_free(mem_to_arc_buf_avl_node_cache, node);
+	  dprintf("ZFS: %s: duplicate insertion attempt ignored\n", __func__);
 	}
 
 	mutex_exit(&mem_to_arc_buf_avl_lock);
@@ -362,7 +366,7 @@ mem_to_arc_buf_remove(void *memptr)
 }
 
 static arc_buf_t *
-mem_to_arc_buf_find(void *memptr)
+mem_to_arc_buf_find_buf(void *memptr)
 {
 	mem_to_arc_buf_t *np;
 	mem_to_arc_buf_t tofind;
@@ -372,8 +376,26 @@ mem_to_arc_buf_find(void *memptr)
 	mutex_enter(&mem_to_arc_buf_avl_lock);
 	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
 	mutex_exit(&mem_to_arc_buf_avl_lock);
-	if (np != NULL)
-	  return(np->ab);
+	if (np != NULL && np->header == false) {
+		return (np->ab);
+	}
+	return (NULL);
+}
+
+static arc_buf_hdr_t *
+mem_to_arc_buf_find_hdr(void *memptr)
+{
+	mem_to_arc_buf_t *np;
+	mem_to_arc_buf_t tofind;
+
+	tofind.m = memptr;
+
+	mutex_enter(&mem_to_arc_buf_avl_lock);
+	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
+	mutex_exit(&mem_to_arc_buf_avl_lock);
+	if (np != NULL && np->header == true) {
+		return (np->h);
+	}
 	return (NULL);
 }
 
@@ -384,6 +406,8 @@ mem_to_arc_buf_node_cons(void *vbuf, void *unused, int kmflag)
 
 	node->m = NULL;
 	node->ab = NULL;
+	node->h = NULL;
+	node->header = false;
 
 	return (0);
 }
@@ -395,6 +419,8 @@ mem_to_arc_buf_node_dest(void *vbuf, void *unused)
 
 	node->m = NULL;
 	node->ab = NULL;
+	node->h = NULL;
+	node->header = NULL;
 }
 
 static void
@@ -2078,7 +2104,7 @@ arc_buf_fill(arc_buf_t *buf, boolean_t compressed)
 			ARCSTAT_INCR(arcstat_overhead_size, HDR_GET_LSIZE(hdr));
 #ifdef __APPLE__
 			/* map buf->b_data to hdr */
-			mem_to_arc_buf_insert(buf->b_data, buf);
+			mem_to_arc_buf_insert(buf->b_data, buf, NULL, false);
 #endif
 		} else if (ARC_BUF_COMPRESSED(buf)) {
 			/* We need to reallocate the buf's b_data */
@@ -2092,7 +2118,7 @@ arc_buf_fill(arc_buf_t *buf, boolean_t compressed)
 			    HDR_GET_LSIZE(hdr) - HDR_GET_PSIZE(hdr));
 #ifdef __APPLE__
 			/* map buf->b_data to hdr */
-			mem_to_arc_buf_insert(buf->b_data, buf);
+			mem_to_arc_buf_insert(buf->b_data, buf, NULL, false);
 #endif
 		}
 
@@ -2652,6 +2678,9 @@ arc_buf_alloc_impl(arc_buf_hdr_t *hdr, void *tag, boolean_t compressed,
 		buf->b_data = hdr->b_l1hdr.b_pdata;
 		buf->b_flags |= ARC_BUF_FLAG_SHARED;
 		arc_hdr_set_flags(hdr, ARC_FLAG_SHARED_DATA);
+#ifdef __APPLE__
+		mem_to_arc_buf_insert(buf->b_data, NULL, hdr, true);
+#endif
 	} else {
 		buf->b_data =
 		    arc_get_data_buf(hdr, arc_buf_size(buf), buf);
@@ -2660,7 +2689,7 @@ arc_buf_alloc_impl(arc_buf_hdr_t *hdr, void *tag, boolean_t compressed,
 		// this panics in ...->dbuf_hold->...->dbuf_read->arc_read
 		// because avl_find(... buf->b_data ...) succeeds inside avl_add()
 		/* map buf->b_data to hdr */
-	        mem_to_arc_buf_insert(buf->b_data, buf);
+	        mem_to_arc_buf_insert(buf->b_data, buf, NULL, false);
 #endif
 	}
 	VERIFY3P(buf->b_data, !=, NULL);
@@ -2994,6 +3023,10 @@ arc_hdr_alloc_pdata(arc_buf_hdr_t *hdr)
 	hdr->b_l1hdr.b_byteswap = DMU_BSWAP_NUMFUNCS;
 	ASSERT3P(hdr->b_l1hdr.b_pdata, !=, NULL);
 
+#ifdef __APPLE__
+	mem_to_arc_buf_insert(hdr->b_l1hdr.b_pdata, NULL, hdr, true);
+#endif	
+
 	ARCSTAT_INCR(arcstat_compressed_size, arc_hdr_size(hdr));
 	ARCSTAT_INCR(arcstat_uncompressed_size, HDR_GET_LSIZE(hdr));
 }
@@ -3003,6 +3036,10 @@ arc_hdr_free_pdata(arc_buf_hdr_t *hdr)
 {
 	ASSERT(HDR_HAS_L1HDR(hdr));
 	ASSERT3P(hdr->b_l1hdr.b_pdata, !=, NULL);
+
+#ifdef __APPLE__
+	mem_to_arc_buf_remove(hdr->b_l1hdr.b_pdata);
+#endif	
 
 	/*
 	 * If the hdr is currently being written to the l2arc then
@@ -7830,9 +7867,17 @@ l2arc_stop(void)
 kmem_cbrc_t
 zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 {
-	arc_buf_t *buf = mem_to_arc_buf_find(mem);
+	bool has_buffer = false;
+	bool has_header = false;
+	bool is_header = false;
 
-	if (buf == NULL) {
+	arc_buf_t *buf = mem_to_arc_buf_find_buf(mem);
+	arc_buf_hdr_t *hdr = mem_to_arc_buf_find_hdr(mem);
+
+	kmutex_t *hash_lock;
+	kmutex_t *buf_lock;
+
+	if (buf == NULL && hdr == NULL) {
 		/* we have no record of this allocation in the avl */
 		return (KMEM_CBRC_NO);
 	}
@@ -7840,143 +7885,262 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	/* remove from <mem,buf> from avl */
 	mem_to_arc_buf_remove(mem);
 
-	if(!mutex_tryenter(&buf->b_evict_lock)) {
-		printf("ZFS: %s: could not get buf lock\n", __func__);
-		return (KMEM_CBRC_LATER);
-	}
-	dprintf("%s: got buf mutex\n", __func__);
-
-	arc_buf_hdr_t *hdr = buf->b_hdr;
-	dprintf("%s: got buf hdr\n", __func__);
-
-	if (hdr == NULL) {
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: NULL arc_buf_hdr!\n", __func__);
-		return (KMEM_CBRC_DONT_KNOW);
+	if (buf != NULL && hdr != NULL) {
+		panic("zio_arc_buf_move: both buf and hdr are non-NULL");
 	}
 
-	if (HDR_EMPTY(hdr)) {
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: empty arc_buf_hdr!\n", __func__);
-		return (KMEM_CBRC_DONT_KNOW);
+	if (buf != NULL && hdr == NULL) {
+		is_header = false;
+		buf_lock = &buf->b_evict_lock;
+		if(!mutex_tryenter(buf_lock)) {
+			printf("ZFS: %s: could not get buf lock\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		dprintf("%s: got buf mutex\n", __func__);
+		hdr = buf->b_hdr;
+		if (hdr == NULL) {
+			mutex_exit(buf_lock);
+			printf("ZFS: %s hdr == NULL\n", __func__);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+		if (HDR_EMPTY(hdr)) {
+			mutex_exit(buf_lock);
+			printf("ZFS: %s hdr is empty!\n", __func__);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+		hash_lock = HDR_LOCK(hdr);
+                if (!mutex_tryenter(hash_lock)) {
+			mutex_exit(buf_lock);
+			printf("ZFS: %s: could not get hash lock (giving up buf lock)\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		if (!HDR_HAS_L1HDR(hdr)) {
+			mutex_exit(buf_lock);
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: no l1hdr, giving up buf_lock!\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		if (hdr->b_l1hdr.b_state == arc_l2c_only) {
+			mutex_exit(hash_lock);
+			mutex_exit(buf_lock);
+			printf("ZFS: %s: hdr is arc_l2c_only, but have buf\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		if (hdr->b_l1hdr.b_state == arc_anon) {
+			mutex_exit(hash_lock);
+			mutex_exit(buf_lock);
+			printf("ZFS: %s: hdr is arc_anon (giving up buf lock)\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
+		    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
+			mutex_exit(hash_lock);
+			mutex_exit(buf_lock);
+			printf("ZFS: %s: hdr is in ghost state, giving up buffer lock\n", __func__);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+		// have hash_lock and buf lock, hdr and buf are set
+		has_header = true;
+		has_buffer = true;
+	} else if (buf == NULL && hdr != NULL) {
+		is_header = true;
+		if (HDR_EMPTY(hdr)) {
+			printf("ZFS: %s: empty arc_buf_hdr!\n", __func__);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+		hash_lock = HDR_LOCK(hdr);
+		if (!mutex_tryenter(hash_lock)) {
+			printf("ZFS: %s: could not get hash lock\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		if (!HDR_HAS_L1HDR(hdr)) {
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: no l1hdr!\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		if (HDR_IO_IN_PROGRESS(hdr)) {
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: io in progress (hdr)\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		if (hdr->b_l1hdr.b_state == arc_l2c_only) {
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: l2c only!\n", __func__);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+		if (hdr->b_l1hdr.b_state == arc_anon) {
+			mutex_exit(hash_lock);			
+			printf("ZFS: %s: anonymous buffer\n", __func__);
+			return (KMEM_CBRC_NO);
+		}
+		if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
+		    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: ghost buffer\n", __func__);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+		has_header = true;
+		if (hdr->b_l1hdr.b_buf == NULL) {
+			has_buffer = false;
+		} else {
+			arc_buf_t *b = hdr->b_l1hdr.b_buf;
+			if (b->b_next != NULL) {
+				printf("ZFS: %s hdr->b_l1hdr.b_buf->b_next not NULL\n", __func__);
+				mutex_exit(hash_lock);
+				return (KMEM_CBRC_DONT_KNOW);
+			} else if (b->b_data != hdr->b_l1hdr.b_pdata) {
+				mutex_exit(hash_lock);
+				printf("ZFS: %s buf data != hdr l1hdr pdata\n", __func__);
+				return (KMEM_CBRC_DONT_KNOW);
+			}
+			buf_lock = &b->b_evict_lock;
+			if (!mutex_tryenter(buf_lock)) {
+				mutex_exit(hash_lock);
+				printf("ZFS: %s could not get buf_lock, gave up hash_lock\n", __func__);
+				return (KMEM_CBRC_LATER);
+			}
+			if (HDR_IO_IN_PROGRESS(hdr)) {
+				mutex_exit(hash_lock);
+				mutex_exit(buf_lock);
+				printf("ZFS: %s: io in progress (hdr)\n", __func__);
+				return (KMEM_CBRC_LATER);
+			}
+			buf = b;
+			has_buffer = true;
+		}
+	}
+		
+	if (hdr == NULL || has_header == false) {
+		panic("HDR null in %s!", __func__);
 	}
 
-	if (hdr->b_l1hdr.b_state == arc_anon) {
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: anonymous buffer\n", __func__);
-		return (KMEM_CBRC_NO);
-	}
-
-	if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
-	    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: ghost buffer\n", __func__);
-		return (KMEM_CBRC_DONT_KNOW);
-	}
-
-	if (hdr->b_l1hdr.b_state == arc_l2c_only) {
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: l2c only!\n", __func__);
-		return (KMEM_CBRC_DONT_KNOW);
-	}
-
-	dprintf("%s: hdr not empty\n", __func__);
-
-	kmutex_t *hash_lock = HDR_LOCK(hdr);
-	if (!mutex_tryenter(hash_lock)) {
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: could not get hash_lock\n", __func__);
-		return (KMEM_CBRC_LATER);
-	}
-
-	dprintf("%s: got hash_lock mutex\n", __func__);
-
-	if (HDR_IO_IN_PROGRESS(hdr)) {
-		mutex_exit(hash_lock);
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: io in progress\n", __func__);
-		return (KMEM_CBRC_LATER);
-	}
-
-	if (!HDR_HAS_L1HDR(hdr)) {
-		mutex_exit(hash_lock);
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: no l1hdr!\n", __func__);
-		return (KMEM_CBRC_LATER);
-	}
-
-	if (hdr->b_l1hdr.b_pdata == buf->b_data) {
-		printf("ZFS: %s (DEBUG): hdr->l1hdr.b_pdata is buf->b_data\n", __func__);
-	} else {
-		printf("ZFS: %s (DEBUG): hdr->l1hdr.b_pdata is NOT buf->b_data\n", __func__);
+	if (has_buffer == true || is_header == false) {
+		if (buf == NULL) {
+			panic("BUF null in %s!\n", __func__);
+		}
 	}
 
 	if (!HDR_COMPRESSION_ENABLED(hdr)) {
 		printf("ZFS: %s (DEBUG): !HDR_COMPRESSION_ENABLED(hdr)\n", __func__);
 	}
 
-	if (arc_buf_is_shared(buf) &&
-	    hdr->b_l1hdr.b_pdata != buf->b_data && buf->b_next != NULL) {
-		mutex_exit(hash_lock);
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: arc_buf_is_shared(), buf is not b_pdata and buf has a next\n", __func__);
-		return (KMEM_CBRC_LATER);
-	}
-
 	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 1) {
 		printf("ZFS: %s: high refcount (%llu)\n",
 		    __func__, refcount_count(&hdr->b_l1hdr.b_refcnt));
 		mutex_exit(hash_lock);
-		mutex_exit(&buf->b_evict_lock);
+		if (has_buffer) {
+			mutex_exit(buf_lock);
+		}
 		return (KMEM_CBRC_LATER);
+	}
+
+	if (has_buffer) {
+		if (arc_buf_is_shared(buf) &&
+		    hdr->b_l1hdr.b_pdata != buf->b_data) {
+			mutex_exit(hash_lock);
+			mutex_exit(buf_lock);
+			printf("ZFS: %s: arc_buf_is_shared(), buf->b_data is not hdr->b_l1hdr.pdata\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
 	}
 
 	printf("ZFS: %s: getting size\n", __func__);
-	if (buf->b_hdr == NULL) {
-		printf("ZFS: %s: (getting arcbuf size vs %llu) b_hdr == NULL!\n",
-		    __func__, (uint64_t)size);
+
+	if (has_buffer) {
+		if (buf->b_hdr == NULL) {
+			printf("ZFS: %s: (getting arcbuf size vs %llu) b_hdr == NULL!\n",
+			    __func__, (uint64_t)size);
+			mutex_exit(hash_lock);
+			mutex_exit(buf_lock);
+			return (KMEM_CBRC_LATER);
+		}
+		size_t arcbufsz = (size_t)arc_buf_size(buf);
+		size_t arcbufsz_l = arcbufsz;
+		if (ARC_BUF_COMPRESSED(buf)) {
+			arcbufsz_l = HDR_GET_LSIZE(buf->b_hdr);
+		}
+		if (size != arcbufsz && size != arcbufsz_l) {
+			printf("ZFS: %s: SIZE MISMATCH size = %lu, arc_buf_size(buf) = %lu,"
+			    "HDR_GET_LSIZE(buf) = %lu, refcount = %llu\n",
+			    __func__, size, arcbufsz, arcbufsz_l, refcount_count(&hdr->b_l1hdr.b_refcnt));
+			mutex_exit(hash_lock);
+			mutex_exit(buf_lock);
+			return (KMEM_CBRC_NO);
+		}
+		if (buf->b_next != NULL) {
+			mutex_exit(hash_lock);
+			mutex_exit(buf_lock);
+			printf("ZFS: %s: non-NULL buf->b_next\n", __func__);
+			return (KMEM_CBRC_LATER);
+		}
+		printf("ZFS: %s: (has_buffer) YESYES arcbufsz = %lu arcbufsz_l = %lu size = %lu"
+		    "is_header = %u\n",
+		    __func__, arcbufsz, arcbufsz_l, size, is_header);
 		mutex_exit(hash_lock);
-		mutex_exit(&buf->b_evict_lock);
+		mutex_exit(buf_lock);
 		return (KMEM_CBRC_LATER);
 	}
 
-	size_t arcbufsz = (size_t)arc_buf_size(buf);
-
-	if (size != arcbufsz) {
-	  printf("ZFS: %s: SIZE MISMATCH size = %lu, arc_buf_size(buf) = %lu, refcount = %llu\n",
-	      __func__, size, arcbufsz, refcount_count(&hdr->b_l1hdr.b_refcnt));
-	  mutex_exit(hash_lock);
-	  mutex_exit(&buf->b_evict_lock);
-	  return (KMEM_CBRC_NO);
+	if (is_header != true) {
+		panic("%s is_header is not true", __func__);
 	}
 
-	if (buf->b_next != NULL) {
+	if (has_buffer != false) {
+		panic("%s has_buffer should be false", __func__);
+	}
+
+	if (has_header != true) {
+		panic("%s has_header should be true", __func__);
+	}
+
+	// is_header == true, has_buffer == false, has_header == true
+	// therefore hdr->b_l1hdr.b_pdata is moveable in principle
+
+	size_t psize = (size_t)HDR_GET_PSIZE(hdr);
+	size_t lsize = (size_t)HDR_GET_LSIZE(hdr);
+
+	size_t copysize = 0;
+
+	if (psize == size) {
+		copysize = psize;
+		printf("ZFS: %s: DEBUG: psize == size == %lu (copysize)\n", __func__, copysize);
+	} else if (lsize == size) {
+		copysize = lsize;
+		printf("ZFS: %s: DEBUG: lsize == size == %lu (copysize)\n", __func__, copysize);
+	} else {
+		printf("ZFS: %s: ERROR: size mismatch! (size: %lu, lsize: %lu, psize: %lu)\n",
+		    __func__, size, lsize, psize);
 		mutex_exit(hash_lock);
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: non-NULL buf->b_next\n", __func__);
 		return (KMEM_CBRC_LATER);
 	}
 
-	if (!refcount_is_zero(&hdr->b_l1hdr.b_refcnt)) {
+	if (hdr->b_l1hdr.b_pdata != mem) {
+		printf("ZFS: %s: hdr->b_pdata != mem!\n", __func__);
 		mutex_exit(hash_lock);
-		mutex_exit(&buf->b_evict_lock);
-		printf("ZFS: %s: refcount_is_zero() returned FALSE (refcount = %llu) (returning)\n",
-		    __func__, refcount_count(&hdr->b_l1hdr.b_refcnt));
-		return (KMEM_CBRC_LATER);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+
+	if (hdr->b_l1hdr.b_buf != NULL) {
+		printf("ZFS: %s: LATE SANITY FAIL: hdr->b_buf != NULL\n", __func__);
+		mutex_exit(hash_lock);
+		return (KMEM_CBRC_NO);
 	}
 
 	printf("ZFS: %s: doing bcopy YESYESYES\n", __func__);
 
 #if 1
 	mutex_exit(hash_lock);
-	mutex_exit(&buf->b_evict_lock);
 
 	return (KMEM_CBRC_LATER);
 #else
-	bcopy(mem, newbuf, size);
+
+	bcopy(mem, newbuf, copysize);
+
+	hdr->b_l1hdr.b_pdata = newbuf;
+
+	bzero(mem, size);
 
 	// CASE: buf->b_data == hdr->l1hdr.b_pdata (buf shares headers compressed phys data)
-	buf->b_data = newbuf;
 
 	mutex_exit(hash_lock);
 	mutex_exit(&buf->b_evict_lock);
