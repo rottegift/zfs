@@ -3025,7 +3025,7 @@ arc_hdr_alloc_pdata(arc_buf_hdr_t *hdr)
 
 #ifdef __APPLE__
 	mem_to_arc_buf_insert(hdr->b_l1hdr.b_pdata, NULL, hdr, true);
-#endif	
+#endif
 
 	ARCSTAT_INCR(arcstat_compressed_size, arc_hdr_size(hdr));
 	ARCSTAT_INCR(arcstat_uncompressed_size, HDR_GET_LSIZE(hdr));
@@ -3039,7 +3039,7 @@ arc_hdr_free_pdata(arc_buf_hdr_t *hdr)
 
 #ifdef __APPLE__
 	mem_to_arc_buf_remove(hdr->b_l1hdr.b_pdata);
-#endif	
+#endif
 
 	/*
 	 * If the hdr is currently being written to the l2arc then
@@ -7969,7 +7969,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 			return (KMEM_CBRC_DONT_KNOW);
 		}
 		if (hdr->b_l1hdr.b_state == arc_anon) {
-			mutex_exit(hash_lock);			
+			mutex_exit(hash_lock);
 			printf("ZFS: %s: anonymous buffer\n", __func__);
 			return (KMEM_CBRC_NO);
 		}
@@ -8009,7 +8009,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 			has_buffer = true;
 		}
 	}
-		
+
 	if (hdr == NULL || has_header == false) {
 		panic("HDR null in %s!", __func__);
 	}
@@ -8054,15 +8054,19 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 			mutex_exit(buf_lock);
 			return (KMEM_CBRC_LATER);
 		}
-		size_t arcbufsz = (size_t)arc_buf_size(buf);
-		size_t arcbufsz_l = arcbufsz;
-		if (ARC_BUF_COMPRESSED(buf)) {
-			arcbufsz_l = HDR_GET_LSIZE(buf->b_hdr);
-		}
-		if (size != arcbufsz && size != arcbufsz_l) {
-			printf("ZFS: %s: SIZE MISMATCH size = %lu, arc_buf_size(buf) = %lu,"
-			    "HDR_GET_LSIZE(buf) = %lu, refcount = %llu\n",
-			    __func__, size, arcbufsz, arcbufsz_l, refcount_count(&hdr->b_l1hdr.b_refcnt));
+		size_t arcbufsz_l = HDR_GET_LSIZE(buf->b_hdr);
+		size_t arcbufsz_p = HDR_GET_PSIZE(buf->b_hdr);
+		size_t copysize_sz = 0;
+		if (size == arcbufsz_l) {
+			copysize_sz = arcbufsz_l;
+			printf("ZFS: %s: copysize_sz == arcbufsz_l == %lu\n", __func__, copysize_sz);
+		} else if (size == arcbufsz_p) {
+			copysize_sz = arcbufsz_p;
+			printf("ZFS: %s: copysize_sz == arcbufsz_p == %lu\n", __func__, copysize_sz);
+		} else {
+			printf("ZFS: %s: SIZE MISMATCH size = %lu, lsize = %lu, "
+			    "psize = %lu, refcount = %llu\n",
+			    __func__, size, arcbufsz_l, arcbufsz_p, refcount_count(&hdr->b_l1hdr.b_refcnt));
 			mutex_exit(hash_lock);
 			mutex_exit(buf_lock);
 			return (KMEM_CBRC_NO);
@@ -8073,9 +8077,8 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 			printf("ZFS: %s: non-NULL buf->b_next\n", __func__);
 			return (KMEM_CBRC_LATER);
 		}
-		printf("ZFS: %s: (has_buffer) YESYES arcbufsz = %lu arcbufsz_l = %lu size = %lu"
-		    "is_header = %u\n",
-		    __func__, arcbufsz, arcbufsz_l, size, is_header);
+		printf("ZFS: %s: (has_buffer) YESYES copysize_sz =  %lu, is_header = %u\n",
+		    __func__, copysize_sz, is_header);
 		mutex_exit(hash_lock);
 		mutex_exit(buf_lock);
 		return (KMEM_CBRC_LATER);
