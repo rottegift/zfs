@@ -8077,11 +8077,29 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 			printf("ZFS: %s: non-NULL buf->b_next\n", __func__);
 			return (KMEM_CBRC_LATER);
 		}
+		if (buf->b_data != mem) {
+			mutex_exit(hash_lock);
+			mutex_exit(buf_lock);
+			printf("ZFS: %s: buf->b_data != mem!\n", __func__);
+			return (KMEM_CBRC_NO);
+		}
 		printf("ZFS: %s: (has_buffer) YESYES copysize_sz =  %lu, is_header = %u\n",
 		    __func__, copysize_sz, is_header);
+#if 1
+		bcopy(mem, newbuf, copysize_sz);
+		buf->b_data = newbuf;
+		if (hdr->b_l1hdr.b_pdata == mem) {
+			hdr->b_l1hdr.b_pdata = newbuf;
+		}
+		bzero(mem, size);
+		mutex_exit(hash_lock);
+		mutex_exit(buf_lock);
+		return (KMEM_CBRC_YES);
+#else
 		mutex_exit(hash_lock);
 		mutex_exit(buf_lock);
 		return (KMEM_CBRC_LATER);
+#endif
 	}
 
 	if (is_header != true) {
@@ -8131,7 +8149,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 
 	printf("ZFS: %s: doing bcopy YESYESYES\n", __func__);
 
-#if 1
+#if 0
 	mutex_exit(hash_lock);
 
 	return (KMEM_CBRC_LATER);
@@ -8143,10 +8161,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 
 	bzero(mem, size);
 
-	// CASE: buf->b_data == hdr->l1hdr.b_pdata (buf shares headers compressed phys data)
-
 	mutex_exit(hash_lock);
-	mutex_exit(&buf->b_evict_lock);
 
 	printf("ZFS: %s: move done OK\n", __func__);
 	return (KMEM_CBRC_YES);
