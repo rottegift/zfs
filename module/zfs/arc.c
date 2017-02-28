@@ -298,6 +298,10 @@ typedef struct {
 	void *m;                 /* memory address from kmem_cache */
 	arc_buf_t *ab;
 	arc_buf_hdr_t *h;
+	uint64_t b_spa;
+	uint64_t b_dva0;
+	uint64_t b_dva1;
+	uint64_t b_birth;
 	size_t size;             /* amount wanted by caller of arc_get_data_buf */
 	size_t real_size;        /* (kmem_cache_t *)cp->cache_bufsize */
 	bool header;             /* true if h is valid, false if ab is valid */
@@ -334,56 +338,11 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 
 #ifdef _KERNEL
 static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *,
-    size_t *, bool *, hrtime_t *);
+    size_t *, bool *, hrtime_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *);
 #endif
 static void mem_to_arc_buf_remove(void *);
-
-static void
-mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
-    arc_buf_hdr_t *archdrptr, size_t size, size_t real_size, bool header)
-{
-
-	hrtime_t now = gethrtime();
-
-	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
-
-	mutex_enter(&mem_to_arc_buf_avl_lock);
-	node->m = memptr;
-	node->ab = arcbufptr;
-	node->h = archdrptr;
-	node->size = size;
-	node->real_size = real_size;
-	node->header = header;
-	node->insert_time = now;
-
-	for (int i = 0; ; i++) {
-		avl_index_t where;
-		mem_to_arc_buf_t tofind;
-
-		tofind.m = memptr;
-		tofind.real_size = real_size;
-
-		mem_to_arc_buf_t *preexist = avl_find(&mem_to_arc_buf_avl, &tofind, &where);
-
-		if (preexist == NULL) {
-			avl_insert(&mem_to_arc_buf_avl, node, where);
-			break;
-	        } else if (node->insert_time > preexist->insert_time) {
-			printf("ZFS: %s: preexisting removed (i = %d, s = %lu, rs = %lu "
-			    "now %lld preetime %lld delta %lld\n",
-			    __func__, i, preexist->size, preexist->size,
-			    now, preexist->insert_time,
-			    (node->insert_time - preexist->insert_time));
-			avl_remove(&mem_to_arc_buf_avl, preexist);
-			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
-		} else {
-			printf("ZFS: %s: preexisting NOT removed (i = %d, it_arg = %lld, it_pre = %lld)\n",
-			    __func__, i, node->insert_time, preexist->insert_time);
-		        break;
-		}
-	}
-	mutex_exit(&mem_to_arc_buf_avl_lock);
-}
+static void mem_to_arc_buf_insert(void *, arc_buf_t *,
+    arc_buf_hdr_t *, size_t, size_t, bool);
 
 static void
 mem_to_arc_buf_remove(void *memptr)
@@ -404,33 +363,6 @@ mem_to_arc_buf_remove(void *memptr)
         }
 	mutex_exit(&mem_to_arc_buf_avl_lock);
 }
-
-#ifdef _KERNEL
-static bool
-mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
-    size_t *szp, size_t *real_sizep, bool *isheaderp, hrtime_t *insert_time)
-{
-	mem_to_arc_buf_t *np;
-	mem_to_arc_buf_t tofind;
-
-	tofind.m = memptr;
-
-	mutex_enter(&mem_to_arc_buf_avl_lock);
-	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
-	if (np != NULL) {
-		*bufp = np->ab;
-		*hdrp = np->h;
-		*isheaderp = np->header;
-		*szp = np->size;
-		*real_sizep = np->real_size;
-		*insert_time = np->insert_time;
-		mutex_exit(&mem_to_arc_buf_avl_lock);
-		return (true);
-	}
-	mutex_exit(&mem_to_arc_buf_avl_lock);
-	return (false);
-}
-#endif
 
 static int
 mem_to_arc_buf_node_cons(void *vbuf, void *unused, int kmflag)
@@ -7873,7 +7805,106 @@ l2arc_stop(void)
 	mutex_exit(&l2arc_feed_thr_lock);
 }
 
+#ifdef __APPLE__
+static void
+mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
+    arc_buf_hdr_t *archdrptr, size_t size, size_t real_size, bool header)
+{
+
+	hrtime_t now = gethrtime();
+
+	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
+
+	mutex_enter(&mem_to_arc_buf_avl_lock);
+	node->m = memptr;
+	node->ab = arcbufptr;
+	node->h = archdrptr;
+	node->size = size;
+	node->real_size = real_size;
+	node->header = header;
+	node->insert_time = now;
+
+	arc_buf_hdr_t *hdr = NULL;
+
+	if (header == true) {
+		VERIFY3P(archdrptr, !=, NULL);
+		VERIFY3P(arcbufptr, ==, NULL);
+		hdr = archdrptr;
+	} else {
+		VERIFY3P(archdrptr, ==, NULL);
+		VERIFY3P(arcbufptr, !=, NULL);
+		hdr = arcbufptr->b_hdr;
+		VERIFY3P(hdr, !=, NULL);
+	}
+
+	/* possbily racy : check if we hold hash lock above, and if not, grab it */
+	node->b_spa = hdr->b_spa;
+	node->b_birth = hdr->b_birth;
+	node->b_dva0 = hdr->b_dva.dva_word[0];
+	node->b_dva1 = hdr->b_dva.dva_word[1];
+
+	for (int i = 0; ; i++) {
+		avl_index_t where;
+		mem_to_arc_buf_t tofind;
+
+		tofind.m = memptr;
+		tofind.real_size = real_size;
+
+		mem_to_arc_buf_t *preexist = avl_find(&mem_to_arc_buf_avl, &tofind, &where);
+
+		if (preexist == NULL) {
+			avl_insert(&mem_to_arc_buf_avl, node, where);
+			break;
+	        } else if (node->insert_time > preexist->insert_time) {
+			printf("ZFS: %s: preexisting removed (i = %d, s = %lu, rs = %lu "
+			    "now %lld preetime %lld delta %lld\n",
+			    __func__, i, preexist->size, preexist->size,
+			    now, preexist->insert_time,
+			    (node->insert_time - preexist->insert_time));
+			avl_remove(&mem_to_arc_buf_avl, preexist);
+			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
+		} else {
+			printf("ZFS: %s: preexisting NOT removed (i = %d, it_arg = %lld, it_pre = %lld)\n",
+			    __func__, i, node->insert_time, preexist->insert_time);
+		        break;
+		}
+	}
+	mutex_exit(&mem_to_arc_buf_avl_lock);
+}
+#endif
+
+
 #if defined(__APPLE__) && defined(_KERNEL)
+
+static bool
+mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
+    size_t *szp, size_t *real_sizep, bool *isheaderp, hrtime_t *insert_time,
+    uint64_t *spap, uint64_t *dva0p, uint64_t *dva1p, uint64_t *birthp)
+{
+	mem_to_arc_buf_t *np;
+	mem_to_arc_buf_t tofind;
+
+	tofind.m = memptr;
+
+	mutex_enter(&mem_to_arc_buf_avl_lock);
+	np = avl_find(&mem_to_arc_buf_avl, &tofind, NULL);
+	if (np != NULL) {
+		*bufp = np->ab;
+		*hdrp = np->h;
+		*isheaderp = np->header;
+		*szp = np->size;
+		*real_sizep = np->real_size;
+		*insert_time = np->insert_time;
+		*spap = np->b_spa;
+		*dva0p = np->b_dva0;
+		*dva1p = np->b_dva1;
+		*birthp = np->b_birth;
+		mutex_exit(&mem_to_arc_buf_avl_lock);
+		return (true);
+	}
+	mutex_exit(&mem_to_arc_buf_avl_lock);
+	return (false);
+}
 
 /* move and reclaim logic for zio caches
  *
@@ -7907,10 +7938,53 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	arc_buf_hdr_t hdr_l, *hdr = &hdr_l;
 	hrtime_t insert_time = 0;
 
+	uint64_t spa, dva0, dva1, birth;
+
 	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &real_size,
-		&is_header, &insert_time) == false) {
+		&is_header, &insert_time, &spa, &dva0, &dva1, &birth) == false) {
 		return (KMEM_CBRC_NO);
 	}
+
+	if (buf == NULL && hdr == NULL) {
+		/* this is a mess from the avl, but we can just return */
+		return (KMEM_CBRC_NO);
+	}
+
+	dva_t dva;
+	dva.dva_word[0] = dva0;
+	dva.dva_word[1] = dva1;
+
+	if (is_header == true) {
+		VERIFY3P(hdr, !=, NULL);
+		VERIFY3P(buf, ==, NULL);
+		if (!HDR_EQUAL(spa, &dva, birth, hdr)) {
+			printf("ZFS: %s: HDR_EQUAL(%llu, [%llu,%llu], %llu, hdr) false!\n",
+			    __func__, spa, dva0, dva1, birth);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+	} else {
+		VERIFY3P(buf, !=, NULL);
+		VERIFY3P(hdr, ==, NULL);
+		if (buf->b_hdr != NULL) {
+			arc_buf_t *thdr = buf->b_hdr;
+			VERIFY3P(thdr, !=, NULL);
+			if (!HDR_EQUAL(spa, &dva, birth, hdr)) {
+				printf("ZFS: %s: (note) HDR_EQUAL buf fail: "
+				    "(%llu, [%llu,%llu] %llu, buf->b_hdr) v "
+				    "(%llu, [%llu,%llu] %llu, from_avl)\n",
+				    __func__,
+				    hdr->b_spa, hdr->b_dva.dva_word[0], hdr->b_dva.dva_word[1], hdr->b_birth,
+				    spa, dva0, dva1, birth);
+				return (KMEM_CBRC_DONT_KNOW);
+			} else {
+				hdr = thdr;
+			}
+		}
+	}
+
+	/* hdr now points to a header for spa, dva, birth */
+	/* buf *MAY* be NULL or points to a buffer that points to hdr */
+	/* but both are subject to other threads until we lock */
 
 	hrtime_t now = gethrtime();
 	const hrtime_t hundred_msec = MSEC2NSEC(100);
@@ -7930,17 +8004,8 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	kmutex_t *hash_lock;
 	kmutex_t *buf_lock;
 
-	if (buf == NULL && hdr == NULL) {
-		/* we have no record of this allocation in the avl */
-		return (KMEM_CBRC_NO);
-	}
-
-	/* remove from <mem,buf> from avl */
+	/* remove from node from avl */
 	mem_to_arc_buf_remove(mem);
-
-	if (buf != NULL && hdr != NULL) {
-		panic("zio_arc_buf_move: both buf and hdr are non-NULL");
-	}
 
 	if (buf != NULL && hdr == NULL) {
 		is_header = false;
