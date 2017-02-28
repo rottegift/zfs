@@ -7884,7 +7884,7 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 			break;
 		} else if (node->b_birth > preexist->b_birth &&
 			node->b_spa == preexist->b_spa) {
-			printf("ZFS: %s: preexisting has lower birth time "
+			dprintf("ZFS: %s: preexisting has lower birth time "
 			    "(%llu,[%llu:%llu],%llu) > (%llu,[%llu:%llu],%llu)\n",
 			    __func__,
 			    node->b_spa, node->b_dva0, node->b_dva1, node->b_birth,
@@ -7893,7 +7893,7 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
 			continue;
 	        } else if (node->insert_time > preexist->insert_time) {
-			printf("ZFS: %s: preexisting removed (i = %d, s = %lu, rs = %lu "
+			dprintf("ZFS: %s: preexisting removed (i = %d, s = %lu, rs = %lu "
 			    "now %lld preetime %lld delta %lld\n",
 			    __func__, i, preexist->size, preexist->size,
 			    now, preexist->insert_time,
@@ -7902,7 +7902,7 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
 			continue;
 		} else {
-			printf("ZFS: %s: preexisting NOT removed (i = %d, it_arg = %lld, it_pre = %lld)\n",
+			dprintf("ZFS: %s: preexisting NOT removed (i = %d, it_arg = %lld, it_pre = %lld)\n",
 			    __func__, i, node->insert_time, preexist->insert_time);
 		        break;
 		}
