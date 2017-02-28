@@ -8160,6 +8160,13 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		}
 		/* check that mem points to buf */
 		if (mem == buf->b_data) {
+		  if (!refcount_is_zero(&buf->b_hdr->b_l1hdr.b_refcnt)) {
+		    uint64_t rc = refcount_count(&buf->b_hdr->b_l1hdr.b_refcnt);
+		    mutex_exit(buf_lock);
+		    mutex_exit(hash_lock);
+		    printf("ZFS: %s: refcount is not zero (LAST SECOND) (%llu)\n",   __func__, rc);
+		    return (KMEM_CBRC_LATER);
+		  }
 			bool pdata = false;
 			printf("ZFS: %s: YESYESYES (buf copying, %lu size)\n", __func__, size);
 			bcopy(mem, newbuf, size);
@@ -8168,7 +8175,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 				hdr->b_l1hdr.b_pdata = newbuf;
 				pdata=true;
 			}
-			bzero(mem, size);
+			//bzero(mem, size);
 			mutex_exit(buf_lock);
 			mutex_exit(hash_lock);
 			printf("ZFS: %s: copied and zeroed %lu bytes %s\n", __func__,
@@ -8198,12 +8205,21 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
                 return (KMEM_CBRC_LATER);
         }
 
-	printf("ZFS: %s: doing hdr bcopy YESYESYES\n", __func__);
+	if (!refcount_is_zero(&hdr->b_l1hdr.b_refcnt)) {
+	  uint64_t rc = refcount_count(&hdr->b_l1hdr.b_refcnt);
+	  mutex_exit(hash_lock);
+	  printf("ZFS: %s: refcount is not zero (LAST SECOND HDR) (%llu)\n",   __func__, rc);
+	  return (KMEM_CBRC_LATER);
+	}
+
+	printf("ZFS: %s: doing hdr bcopy YESYESYESYES\n", __func__);
 
 	bcopy(mem, newbuf, size);
 	hdr->b_l1hdr.b_pdata = newbuf;
-	bzero(mem, size);
+        //bzero(mem, size);
 	mutex_exit(hash_lock);
+
+	printf("ZFS: %s: (hdr copied %lu bytes)\n", __func__, size);
 	return (KMEM_CBRC_YES);
 }
 
