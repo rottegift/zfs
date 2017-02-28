@@ -287,13 +287,23 @@ extern vmem_t *heap_arena;
 static _Atomic int64_t reclaim_shrink_target = 0;
 void IOSleep(unsigned milliseconds);
 #endif
+
 /* mapping of arc_get_data_buf <-> arc_buf_t */
+
 static kmem_cache_t *mem_to_arc_buf_avl_node_cache = NULL;
+
 #include <sys/avl.h>
-typedef struct { void *m; arc_buf_t *ab;
-	arc_buf_hdr_t *h; size_t size; size_t real_size; bool header;
-        uint64_t ticket;
+
+typedef struct {
+	void *m;                 /* memory address from kmem_cache */
+	arc_buf_t *ab;
+	arc_buf_hdr_t *h;
+	size_t size;             /* amount wanted by caller of arc_get_data_buf */
+	size_t real_size;        /* (kmem_cache_t *)cp->cache_bufsize */
+	bool header;             /* true if h is valid, false if ab is valid */
+	hrtime_t insert_time;    /* used for tie-breaking and not killing too-recent allocs */
 	avl_node_t avl_link; } mem_to_arc_buf_t;
+
 static avl_tree_t mem_to_arc_buf_avl;
 static kmutex_t mem_to_arc_buf_avl_lock;
 
@@ -311,12 +321,20 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 		return (-1);
 	else if (bbmem > bamem)
 		return (+1);
-	else
-		return (0);
+	else { /* bbmem == bamem */
+		if (ba->size < bb->size) {
+			return (-1);
+		} else if (ba->size > bb->size) {
+			return (+1);
+		} else {
+			return (0);
+		}
+	}
 }
 
 #ifdef _KERNEL
-static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *, size_t *, bool *);
+static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *,
+    size_t *, bool *, hrtime_t *);
 #endif
 static void mem_to_arc_buf_remove(void *);
 
@@ -325,9 +343,7 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
     arc_buf_hdr_t *archdrptr, size_t size, size_t real_size, bool header)
 {
 
-  static _Atomic uint64_t ticket = 0;
-
-  ticket++;
+	hrtime_t now = gethrtime();
 
 	mem_to_arc_buf_t *node = kmem_cache_alloc(mem_to_arc_buf_avl_node_cache, KM_SLEEP);
 
@@ -338,27 +354,31 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 	node->size = size;
 	node->real_size = real_size;
 	node->header = header;
-	node->ticket = ticket;
+	node->insert_time = now;
 
 	for (int i = 0; ; i++) {
 		avl_index_t where;
 		mem_to_arc_buf_t tofind;
 
 		tofind.m = memptr;
+		tofind.real_size = real_size;
 
 		mem_to_arc_buf_t *preexist = avl_find(&mem_to_arc_buf_avl, &tofind, &where);
 
 		if (preexist == NULL) {
 			avl_insert(&mem_to_arc_buf_avl, node, where);
 			break;
-	        } else if (node->ticket > preexist->ticket) {
+	        } else if (node->insert_time > preexist->insert_time) {
+			printf("ZFS: %s: preexisting removed (i = %d, s = %lu, rs = %lu "
+			    "now %lld preetime %lld delta %lld\n",
+			    __func__, i, preexist->size, preexist->size,
+			    now, preexist->insert_time,
+			    (node->insert_time - preexist->insert_time));
 			avl_remove(&mem_to_arc_buf_avl, preexist);
 			kmem_cache_free(mem_to_arc_buf_avl_node_cache, preexist);
-			dprintf("ZFS: %s: preexisting removed (i = %d, t_me = %llu, t_avl = %llu)\n",
-			       __func__, i, node->ticket, preexist->ticket);
 		} else {
-		  dprintf("ZFS: %s: preexisting NOT removed (i = %d, t_me = %llu, t_avl = %llu)\n",
-			 __func__, i, node->ticket, preexist->ticket);
+			printf("ZFS: %s: preexisting NOT removed (i = %d, it_arg = %lld, it_pre = %lld)\n",
+			    __func__, i, node->insert_time, preexist->insert_time);
 		        break;
 		}
 	}
@@ -388,7 +408,7 @@ mem_to_arc_buf_remove(void *memptr)
 #ifdef _KERNEL
 static bool
 mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
-    size_t *szp, size_t *real_sizep, bool *isheaderp)
+    size_t *szp, size_t *real_sizep, bool *isheaderp, hrtime_t *insert_time)
 {
 	mem_to_arc_buf_t *np;
 	mem_to_arc_buf_t tofind;
@@ -403,6 +423,7 @@ mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
 		*isheaderp = np->header;
 		*szp = np->size;
 		*real_sizep = np->real_size;
+		*insert_time = np->insert_time;
 		mutex_exit(&mem_to_arc_buf_avl_lock);
 		return (true);
 	}
@@ -421,6 +442,8 @@ mem_to_arc_buf_node_cons(void *vbuf, void *unused, int kmflag)
 	node->h = NULL;
 	node->header = false;
 	node->size = 0;
+	node->real_size = 0;
+	node->insert_time = 0;
 
 	return (0);
 }
@@ -435,6 +458,8 @@ mem_to_arc_buf_node_dest(void *vbuf, void *unused)
 	node->h = NULL;
 	node->header = NULL;
 	node->size = 0;
+	node->real_size = 0;
+	node->insert_time = 0;
 }
 
 static void
@@ -4758,7 +4783,7 @@ arc_get_data_buf(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
 	extern size_t zio_buf_alloc_size(size_t), zio_data_buf_alloc_size(size_t);
 #endif
 #ifdef __APPLE__
-	size_t real_consumed_size = 0;
+	size_t real_consumed_size = size;
 #endif
 
 	VERIFY3U(hdr->b_type, ==, type);
@@ -7880,9 +7905,20 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	size_t stored_size = 0, real_size = 0;
 	arc_buf_t buf_l, *buf = &buf_l;
 	arc_buf_hdr_t hdr_l, *hdr = &hdr_l;
+	hrtime_t insert_time = 0;
 
-	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &real_size, &is_header) == false) {
+	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &real_size,
+		&is_header, &insert_time) == false) {
 		return (KMEM_CBRC_NO);
+	}
+
+	hrtime_t now = gethrtime();
+	const hrtime_t hundred_msec = MSEC2NSEC(100);
+
+	if (now - insert_time < hundred_msec) {
+		// too young, it will probably be replaced shortly
+		// but watch out for KMEM_DISBELIEF here
+		return (KMEM_CBRC_LATER);
 	}
 
 	if (real_size != size) {
@@ -7899,10 +7935,8 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_NO);
 	}
 
-#if defined(__APPLE__)
 	/* remove from <mem,buf> from avl */
 	mem_to_arc_buf_remove(mem);
-#endif
 
 	if (buf != NULL && hdr != NULL) {
 		panic("zio_arc_buf_move: both buf and hdr are non-NULL");
@@ -8184,5 +8218,16 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	return (KMEM_CBRC_YES);
 #endif
 }
+
+// arc_find_a_buf (memory_addr, size) :
+// walk through the multilists looking for a particular buffer
+// ml->hdr.l1hdr->b_buf->b_next ...
+//           |       |        |
+//         b_pdata   b_data   b_data
+//
+// constructs an avl of things that point to the memory
+
+// new data structure: { memory, avltree } -> { nanotime, realsize, cpsize, hdr, buf }
+//                                            sort first on nanotime, then non-null ptr
 
 #endif
