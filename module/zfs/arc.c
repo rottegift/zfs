@@ -7929,7 +7929,6 @@ mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
 kmem_cbrc_t
 zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 {
-	bool has_buffer = false;
 	bool has_header = false;
 	bool is_header = false;
 
@@ -7966,7 +7965,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		VERIFY3P(buf, !=, NULL);
 		VERIFY3P(hdr, ==, NULL);
 		if (buf->b_hdr != NULL) {
-			arc_buf_t *thdr = buf->b_hdr;
+			arc_buf_hdr_t *thdr = buf->b_hdr;
 			VERIFY3P(thdr, !=, NULL);
 			if (!HDR_EQUAL(spa, &dva, birth, hdr)) {
 				printf("ZFS: %s: (note) HDR_EQUAL buf fail: "
@@ -8001,287 +8000,172 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_NO);
 	}
 
-	kmutex_t *hash_lock;
-	kmutex_t *buf_lock;
-
 	/* remove from node from avl */
 	mem_to_arc_buf_remove(mem);
 
-	if (buf != NULL && hdr == NULL) {
-		is_header = false;
-		buf_lock = &buf->b_evict_lock;
+	if (HDR_EMPTY(hdr)) {
+                        printf("ZFS: %s: empty arc_buf_hdr!\n", __func__);
+                        return (KMEM_CBRC_DONT_KNOW);
+	}
+
+	kmutex_t *hash_lock = HDR_LOCK(hdr);
+
+	if (!mutex_tryenter(hash_lock)) {
+		printf("ZFS: %s could not get hash_lock\n", __func__);
+		return (KMEM_CBRC_LATER);
+	}
+
+	// under the lock, now check header sanity
+
+	if (!HDR_EQUAL(spa, &dva, birth,hdr)) {
+		printf("ZFS: %s: (under lock) HDR_EQUAL buf fail: "
+		    "(%llu, [%llu,%llu] %llu, buf->b_hdr) v "
+		    "(%llu, [%llu,%llu] %llu, from_avl)\n",
+		    __func__,
+		    hdr->b_spa, hdr->b_dva.dva_word[0], hdr->b_dva.dva_word[1], hdr->b_birth,
+		    spa, dva0, dva1, birth);
+		mutex_exit(hash_lock);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+	if (!HDR_HAS_L1HDR(hdr)) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: no l1hdr!\n", __func__);
+		return (KMEM_CBRC_LATER);
+	}
+	if (HDR_IO_IN_PROGRESS(hdr)) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: io in progress (hdr)\n", __func__);
+		return (KMEM_CBRC_LATER);
+	}
+
+	// now check states
+	if (hdr->b_l1hdr.b_state == arc_l2c_only) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: l2c only!\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+	if (hdr->b_l1hdr.b_state == arc_anon) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: anonymous buffer\n", __func__);
+		return (KMEM_CBRC_NO);
+	}
+	if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
+	    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: ghost buffer\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
+	}
+
+	has_header = true;
+
+	if (!HDR_COMPRESSION_ENABLED(hdr)) {
+                printf("ZFS: %s (DEBUG): !HDR_COMPRESSION_ENABLED(hdr)\n", __func__);
+		// keep going
+        }
+
+	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 1) {
+		uint64_t rc = refcount_count(&hdr->b_l1hdr.b_refcnt);
+                mutex_exit(hash_lock);
+                printf("ZFS: %s: high refcount (%llu)\n",
+                    __func__, rc);
+                return (KMEM_CBRC_LATER);
+        }
+
+	/* check the sizes in the header vs the size from the avl */
+	size_t sl = HDR_GET_LSIZE(hdr);
+	size_t sp = HDR_GET_PSIZE(hdr);
+	size_t vrfysize = 0;
+	if (stored_size == sl) {
+		vrfysize = sl;
+		printf("ZFS: %s: vrfysize == sl == %lu\n", __func__, vrfysize);
+	} else if (stored_size == sp) {
+		vrfysize = sp;
+		printf("ZFS: %s: vrfysize == sp == %lu\n", __func__, vrfysize);
+	} else {
+		mutex_exit(hash_lock);
+		printf("ZFS: %s: stored_size = %lu, sl = %lu, sp = %lu (none match, returning)\n",
+		    __func__, stored_size, sl, sp);
+		return (KMEM_CBRC_NO);
+	}
+
+	/* now we distinguish between having a hdr->..->buf->b_data
+	 * and having a hdr->b_pdata == mem
+	 */
+	if (hdr->b_l1hdr.b_buf != NULL) {
+		/* we operate on a buf */
+		if (hdr->b_l1hdr.b_buf->b_hdr != hdr) {
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: hdr->b_l1hdr.b_buf->b_hdr != hdr !!\n", __func__);
+			return (KMEM_CBRC_DONT_KNOW);
+		}
+		buf = hdr->b_l1hdr.b_buf;
+	        kmutex_t *buf_lock = &buf->b_evict_lock;
 		if(!mutex_tryenter(buf_lock)) {
+			mutex_exit(hash_lock);
 			printf("ZFS: %s: could not get buf lock\n", __func__);
 			return (KMEM_CBRC_LATER);
 		}
-		dprintf("%s: got buf mutex\n", __func__);
-		hdr = buf->b_hdr;
-		if (hdr == NULL) {
+		/* we have the buf mutex */
+		if (hdr->b_l1hdr.b_buf->b_hdr != hdr) {
 			mutex_exit(buf_lock);
-			printf("ZFS: %s hdr == NULL\n", __func__);
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: (dropping lock) hdr->b_l1hdr.b_buf->b_hdr != hdr !!\n", __func__);
 			return (KMEM_CBRC_DONT_KNOW);
 		}
-		if (HDR_EMPTY(hdr)) {
-			mutex_exit(buf_lock);
-			printf("ZFS: %s hdr is empty!\n", __func__);
-			return (KMEM_CBRC_DONT_KNOW);
-		}
-		hash_lock = HDR_LOCK(hdr);
-                if (!mutex_tryenter(hash_lock)) {
-			mutex_exit(buf_lock);
-			printf("ZFS: %s: could not get hash lock (giving up buf lock)\n", __func__);
-			return (KMEM_CBRC_LATER);
-		}
-		if (!HDR_HAS_L1HDR(hdr)) {
-			mutex_exit(buf_lock);
-			mutex_exit(hash_lock);
-			printf("ZFS: %s: no l1hdr, giving up buf_lock!\n", __func__);
-			return (KMEM_CBRC_LATER);
-		}
-		if (hdr->b_l1hdr.b_state == arc_l2c_only) {
-			mutex_exit(hash_lock);
-			mutex_exit(buf_lock);
-			printf("ZFS: %s: hdr is arc_l2c_only, but have buf\n", __func__);
-			return (KMEM_CBRC_LATER);
-		}
-		if (hdr->b_l1hdr.b_state == arc_anon) {
-			mutex_exit(hash_lock);
-			mutex_exit(buf_lock);
-			printf("ZFS: %s: hdr is arc_anon (giving up buf lock)\n", __func__);
-			return (KMEM_CBRC_LATER);
-		}
-		if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
-		    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
-			mutex_exit(hash_lock);
-			mutex_exit(buf_lock);
-			printf("ZFS: %s: hdr is in ghost state, giving up buffer lock\n", __func__);
-			return (KMEM_CBRC_DONT_KNOW);
-		}
-		// have hash_lock and buf lock, hdr and buf are set
-		has_header = true;
-		has_buffer = true;
-	} else if (buf == NULL && hdr != NULL) {
-		is_header = true;
-		if (HDR_EMPTY(hdr)) {
-			printf("ZFS: %s: empty arc_buf_hdr!\n", __func__);
-			return (KMEM_CBRC_DONT_KNOW);
-		}
-		hash_lock = HDR_LOCK(hdr);
-		if (!mutex_tryenter(hash_lock)) {
-			printf("ZFS: %s: could not get hash lock\n", __func__);
-			return (KMEM_CBRC_LATER);
-		}
-		if (!HDR_HAS_L1HDR(hdr)) {
-			mutex_exit(hash_lock);
-			printf("ZFS: %s: no l1hdr!\n", __func__);
-			return (KMEM_CBRC_LATER);
-		}
-		if (HDR_IO_IN_PROGRESS(hdr)) {
-			mutex_exit(hash_lock);
-			printf("ZFS: %s: io in progress (hdr)\n", __func__);
-			return (KMEM_CBRC_LATER);
-		}
-		if (hdr->b_l1hdr.b_state == arc_l2c_only) {
-			mutex_exit(hash_lock);
-			printf("ZFS: %s: l2c only!\n", __func__);
-			return (KMEM_CBRC_DONT_KNOW);
-		}
-		if (hdr->b_l1hdr.b_state == arc_anon) {
-			mutex_exit(hash_lock);
-			printf("ZFS: %s: anonymous buffer\n", __func__);
-			return (KMEM_CBRC_NO);
-		}
-		if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
-		    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
-			mutex_exit(hash_lock);
-			printf("ZFS: %s: ghost buffer\n", __func__);
-			return (KMEM_CBRC_DONT_KNOW);
-		}
-		has_header = true;
-		if (hdr->b_l1hdr.b_buf == NULL) {
-			has_buffer = false;
-		} else {
-			arc_buf_t *b = hdr->b_l1hdr.b_buf;
-			if (b->b_next != NULL) {
-				printf("ZFS: %s hdr->b_l1hdr.b_buf->b_next not NULL\n", __func__);
-				mutex_exit(hash_lock);
-				return (KMEM_CBRC_DONT_KNOW);
-			} else if (b->b_data != hdr->b_l1hdr.b_pdata) {
-				mutex_exit(hash_lock);
-				printf("ZFS: %s buf data != hdr l1hdr pdata\n", __func__);
-				return (KMEM_CBRC_DONT_KNOW);
-			}
-			buf_lock = &b->b_evict_lock;
-			if (!mutex_tryenter(buf_lock)) {
-				mutex_exit(hash_lock);
-				printf("ZFS: %s could not get buf_lock, gave up hash_lock\n", __func__);
-				return (KMEM_CBRC_LATER);
-			}
-			if (HDR_IO_IN_PROGRESS(hdr)) {
-				mutex_exit(hash_lock);
-				mutex_exit(buf_lock);
-				printf("ZFS: %s: io in progress (hdr)\n", __func__);
-				return (KMEM_CBRC_LATER);
-			}
-			buf = b;
-			has_buffer = true;
-		}
-	}
-
-	if (hdr == NULL || has_header == false) {
-		panic("HDR null in %s!", __func__);
-	}
-
-	if (has_buffer == true || is_header == false) {
-		if (buf == NULL) {
-			panic("BUF null in %s!\n", __func__);
-		}
-	}
-
-	if (!HDR_COMPRESSION_ENABLED(hdr)) {
-		printf("ZFS: %s (DEBUG): !HDR_COMPRESSION_ENABLED(hdr)\n", __func__);
-	}
-
-	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 1) {
-		printf("ZFS: %s: high refcount (%llu)\n",
-		    __func__, refcount_count(&hdr->b_l1hdr.b_refcnt));
-		mutex_exit(hash_lock);
-		if (has_buffer) {
-			mutex_exit(buf_lock);
-		}
-		return (KMEM_CBRC_LATER);
-	}
-
-	if (has_buffer) {
-		if (arc_buf_is_shared(buf) &&
-		    hdr->b_l1hdr.b_pdata != buf->b_data) {
-			mutex_exit(hash_lock);
-			mutex_exit(buf_lock);
-			printf("ZFS: %s: arc_buf_is_shared(), buf->b_data is not hdr->b_l1hdr.pdata\n", __func__);
-			return (KMEM_CBRC_LATER);
-		}
-	}
-
-	if (has_buffer) {
-		if (buf->b_hdr == NULL) {
-			printf("ZFS: %s: (getting arcbuf size vs %llu) b_hdr == NULL!\n",
-			    __func__, (uint64_t)size);
-			mutex_exit(hash_lock);
-			mutex_exit(buf_lock);
-			return (KMEM_CBRC_LATER);
-		}
-		size_t arcbufsz_l = HDR_GET_LSIZE(buf->b_hdr);
-		size_t arcbufsz_p = HDR_GET_PSIZE(buf->b_hdr);
-		size_t copysize_sz = 0;
-		if (size == arcbufsz_l) {
-			copysize_sz = arcbufsz_l;
-			printf("ZFS: %s: copysize_sz == arcbufsz_l == %lu\n", __func__, copysize_sz);
-		} else if (size == arcbufsz_p) {
-			copysize_sz = arcbufsz_p;
-			printf("ZFS: %s: copysize_sz == arcbufsz_p == %lu\n", __func__, copysize_sz);
-		} else {
-			printf("ZFS: %s: SIZE MISMATCH size = %lu, lsize = %lu, "
-			    "psize = %lu, refcount = %llu\n",
-			    __func__, size, arcbufsz_l, arcbufsz_p, refcount_count(&hdr->b_l1hdr.b_refcnt));
-			mutex_exit(hash_lock);
-			mutex_exit(buf_lock);
-			return (KMEM_CBRC_NO);
-		}
+		/* we have hdr->buf->hdr */
 		if (buf->b_next != NULL) {
-			mutex_exit(hash_lock);
 			mutex_exit(buf_lock);
-			printf("ZFS: %s: non-NULL buf->b_next\n", __func__);
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: buf has a next buf\n", __func__);
 			return (KMEM_CBRC_LATER);
 		}
-		if (buf->b_data != mem) {
-			mutex_exit(hash_lock);
+		/* check that mem points to buf */
+		if (mem == buf->b_data) {
+			bool pdata = false;
+			printf("ZFS: %s: YESYESYES (buf copying, %lu size)\n", __func__, size);
+			bcopy(mem, newbuf, size);
+			buf->b_data = newbuf;
+			if (hdr->b_l1hdr.b_pdata == mem) {
+				hdr->b_l1hdr.b_pdata = newbuf;
+				pdata=true;
+			}
+			bzero(mem, size);
 			mutex_exit(buf_lock);
-			printf("ZFS: %s: buf->b_data != mem!\n", __func__);
-			return (KMEM_CBRC_NO);
+			mutex_exit(hash_lock);
+			printf("ZFS: %s: copied and zeroed %lu bytes %s\n", __func__,
+			    size, (pdata == true) ? "(and adjusted hdr ptr)" : "(not hdr pdata)");
+			return (KMEM_CBRC_YES);
 		}
-		printf("ZFS: %s: (has_buffer) YESYES copysize_sz =  %lu, is_header = %u\n",
-		    __func__, copysize_sz, is_header);
-#if 1
-		bcopy(mem, newbuf, copysize_sz);
-		buf->b_data = newbuf;
-		if (hdr->b_l1hdr.b_pdata == mem) {
-			hdr->b_l1hdr.b_pdata = newbuf;
-		}
-		bzero(mem, size);
-		mutex_exit(hash_lock);
+		/* fallthrough to check hdr pdata */
 		mutex_exit(buf_lock);
-		return (KMEM_CBRC_YES);
-#else
+	}
+
+	if (hdr->b_l1hdr.b_pdata == NULL) {
 		mutex_exit(hash_lock);
-		mutex_exit(buf_lock);
-		return (KMEM_CBRC_LATER);
-#endif
-	}
-
-	if (is_header != true) {
-		panic("%s is_header is not true", __func__);
-	}
-
-	if (has_buffer != false) {
-		panic("%s has_buffer should be false", __func__);
-	}
-
-	if (has_header != true) {
-		panic("%s has_header should be true", __func__);
-	}
-
-	// is_header == true, has_buffer == false, has_header == true
-	// therefore hdr->b_l1hdr.b_pdata is moveable in principle
-
-	size_t psize = (size_t)HDR_GET_PSIZE(hdr);
-	size_t lsize = (size_t)HDR_GET_LSIZE(hdr);
-
-	size_t copysize = 0;
-
-	if (psize == size) {
-		copysize = psize;
-		printf("ZFS: %s: DEBUG: psize == size == %lu (copysize)\n", __func__, copysize);
-	} else if (lsize == size) {
-		copysize = lsize;
-		printf("ZFS: %s: DEBUG: lsize == size == %lu (copysize)\n", __func__, copysize);
-	} else {
-		printf("ZFS: %s: ERROR: size mismatch! (size: %lu, lsize: %lu, psize: %lu)\n",
-		    __func__, size, lsize, psize);
-		mutex_exit(hash_lock);
-		return (KMEM_CBRC_LATER);
+		printf("ZFS: %s: empty hdr->b_l1hdr.b_pdata\n", __func__);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	if (hdr->b_l1hdr.b_pdata != mem) {
-		printf("ZFS: %s: hdr->b_pdata != mem!\n", __func__);
 		mutex_exit(hash_lock);
+		printf("ZFS: %s: hdr->b_l1hdr.b_pdata != mem (dropping lock)\n", __func__);
 		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	if (hdr->b_l1hdr.b_buf != NULL) {
-		printf("ZFS: %s: LATE SANITY FAIL: hdr->b_buf != NULL\n", __func__);
-		mutex_exit(hash_lock);
-		return (KMEM_CBRC_NO);
-	}
+		/* we don't want to touch the pdata if we have a buf */
+                printf("ZFS: %s: LATE SANITY FAIL: hdr->b_buf != NULL\n", __func__);
+                mutex_exit(hash_lock);
+                return (KMEM_CBRC_LATER);
+        }
 
-	printf("ZFS: %s: doing bcopy YESYESYES\n", __func__);
+	printf("ZFS: %s: doing hdr bcopy YESYESYES\n", __func__);
 
-#if 0
-	mutex_exit(hash_lock);
-
-	return (KMEM_CBRC_LATER);
-#else
-
-	bcopy(mem, newbuf, copysize);
-
+	bcopy(mem, newbuf, size);
 	hdr->b_l1hdr.b_pdata = newbuf;
-
 	bzero(mem, size);
-
 	mutex_exit(hash_lock);
-
-	printf("ZFS: %s: move done OK\n", __func__);
 	return (KMEM_CBRC_YES);
-#endif
 }
 
 // arc_find_a_buf (memory_addr, size) :
