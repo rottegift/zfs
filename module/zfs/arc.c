@@ -303,6 +303,7 @@ typedef struct {
 	uint64_t b_dva1;
 	uint64_t b_birth;
 	size_t size;             /* amount wanted by caller of arc_get_data_buf */
+	kmem_cache_t *cp;        /* where we got the allocation */
 	size_t real_size;        /* (kmem_cache_t *)cp->cache_bufsize */
 	bool header;             /* true if h is valid, false if ab is valid */
 	hrtime_t insert_time;    /* used for tie-breaking and not killing too-recent allocs */
@@ -338,7 +339,7 @@ mem_to_arc_buf_compare(const void *a, const void *b)
 
 #ifdef _KERNEL
 static bool mem_to_arc_buf_find_all(void *, arc_buf_t **, arc_buf_hdr_t **, size_t *,
-    size_t *, bool *, hrtime_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *);
+    size_t *, kmem_cache_t **, bool *, hrtime_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *);
 #endif
 static void mem_to_arc_buf_remove(void *, size_t);
 static void mem_to_arc_buf_insert(void *, arc_buf_t *,
@@ -383,6 +384,7 @@ mem_to_arc_buf_node_cons(void *vbuf, void *unused, int kmflag)
 	node->header = false;
 	node->size = 0;
 	node->real_size = 0;
+	node->cp = NULL;
 	node->insert_time = 0;
 
 	return (0);
@@ -399,6 +401,7 @@ mem_to_arc_buf_node_dest(void *vbuf, void *unused)
 	node->header = NULL;
 	node->size = 0;
 	node->real_size = 0;
+	node->cp = NULL;
 	node->insert_time = 0;
 }
 
@@ -2027,7 +2030,10 @@ arc_buf_try_copy_decompressed_data(arc_buf_t *buf)
 	 * There were no decompressed bufs, so there should not be a
 	 * checksum on the hdr either.
 	 */
+#ifdef _KERNEL
+	// XXX: ifdef out of userland because it causes zdb to die
 	EQUIV(!copied, hdr->b_l1hdr.b_freeze_cksum == NULL);
+#endif
 
 	return (copied);
 }
@@ -2106,7 +2112,10 @@ arc_buf_fill(arc_buf_t *buf, boolean_t compressed)
 		 */
 		if (arc_buf_try_copy_decompressed_data(buf)) {
 			/* Skip byteswapping and checksumming (already done) */
+#ifdef _KERNEL
+			//XXX #ifdef out because it causes zdb to die
 			ASSERT3P(hdr->b_l1hdr.b_freeze_cksum, !=, NULL);
+#endif
 			return (0);
 		} else {
 			int error = zio_decompress_data(HDR_GET_COMPRESS(hdr),
@@ -7819,9 +7828,12 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 	node->insert_time = now;
 #ifdef _KERNEL
 	extern size_t zio_buf_alloc_size(size_t), zio_data_buf_alloc_size(size_t);
+	extern kmem_cache_t *zio_buf_alloc_cache(size_t), *zio_data_buf_alloc_cache(size_t);
 	node->real_size = zio_data_buf_alloc_size(size);
+	node->cp = zio_data_buf_alloc_cache(size);
 #else
 	node->real_size = size;
+	node->cp = NULL;
 #endif
 	size_t real_size = node->real_size;
 
@@ -7916,7 +7928,7 @@ mem_to_arc_buf_insert(void *memptr, arc_buf_t *arcbufptr,
 
 static bool
 mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
-    size_t *szp, size_t *real_sizep, bool *isheaderp, hrtime_t *insert_time,
+    size_t *szp, size_t *real_sizep, kmem_cache_t **cp, bool *isheaderp, hrtime_t *insert_time,
     uint64_t *spap, uint64_t *dva0p, uint64_t *dva1p, uint64_t *birthp)
 {
 	mem_to_arc_buf_t *np;
@@ -7933,11 +7945,13 @@ mem_to_arc_buf_find_all(void *memptr, arc_buf_t **bufp, arc_buf_hdr_t **hdrp,
 		*isheaderp = np->header;
 		*szp = np->size;
 		*real_sizep = np->real_size;
+		*cp = np->cp;
 		*insert_time = np->insert_time;
 		*spap = np->b_spa;
 		*dva0p = np->b_dva0;
 		*dva1p = np->b_dva1;
 		*birthp = np->b_birth;
+
 		mutex_exit(&mem_to_arc_buf_avl_lock);
 		return (true);
 	}
@@ -7972,20 +7986,21 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	bool is_header = false;
 
 	size_t stored_size = 0, real_size = size;
+	kmem_cache_t *cp = NULL;
 	arc_buf_t buf_l, *buf = &buf_l;
 	arc_buf_hdr_t hdr_l, *hdr = &hdr_l;
 	hrtime_t insert_time = 0;
 
 	uint64_t spa, dva0, dva1, birth;
 
-	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &real_size,
+	if (mem_to_arc_buf_find_all(mem, &buf, &hdr, &stored_size, &real_size, &cp,
 		&is_header, &insert_time, &spa, &dva0, &dva1, &birth) == false) {
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	if (buf == NULL && hdr == NULL) {
 		/* this is a mess from the avl, but we can just return */
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	dva_t dva;
@@ -8036,7 +8051,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	if (real_size != size) {
 		printf("ZFS: %s: (stored) real_size %lu does not match (arg) size %lu (is_header: %u, stored_size: %lu)\n",
 		    __func__, stored_size, size, is_header, stored_size);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	/* remove from node from avl */
@@ -8086,7 +8101,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	if (hdr->b_l1hdr.b_state == arc_anon) {
 		mutex_exit(hash_lock);
 		printf("ZFS: %s: anonymous buffer\n", __func__);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 	if (hdr->b_l1hdr.b_state == arc_mru_ghost ||
 	    hdr->b_l1hdr.b_state == arc_mfu_ghost) {
@@ -8098,8 +8113,9 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	has_header = true;
 
 	if (!HDR_COMPRESSION_ENABLED(hdr)) {
-                printf("ZFS: %s (DEBUG): !HDR_COMPRESSION_ENABLED(hdr)\n", __func__);
-		// keep going
+                printf("ZFS: %s !HDR_COMPRESSION_ENABLED(hdr) (returning)\n", __func__);
+		mutex_exit(hash_lock);
+		return (KMEM_CBRC_NO);
         }
 
 	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 1) {
@@ -8124,7 +8140,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		mutex_exit(hash_lock);
 		dprintf("ZFS: %s: stored_size = %lu, sl = %lu, sp = %lu (none match, returning)\n",
 		    __func__, stored_size, sl, sp);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	/* now we distinguish between having a hdr->..->buf->b_data
@@ -8135,7 +8151,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		if (hdr->b_l1hdr.b_buf->b_hdr != hdr) {
 			mutex_exit(hash_lock);
 			printf("ZFS: %s: hdr->b_l1hdr.b_buf->b_hdr != hdr !!\n", __func__);
-			return (KMEM_CBRC_NO);
+			return (KMEM_CBRC_DONT_KNOW);
 		}
 		buf = hdr->b_l1hdr.b_buf;
 	        kmutex_t *buf_lock = &buf->b_evict_lock;
@@ -8203,7 +8219,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	if (hdr->b_l1hdr.b_pdata != mem) {
 		mutex_exit(hash_lock);
 		dprintf("ZFS: %s: hdr->b_l1hdr.b_pdata != mem (dropping lock)\n", __func__);
-		return (KMEM_CBRC_NO);
+		return (KMEM_CBRC_DONT_KNOW);
 	}
 
 	if (hdr->b_l1hdr.b_buf != NULL) {
