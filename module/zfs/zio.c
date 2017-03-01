@@ -322,8 +322,8 @@ zio_data_buf_alloc(size_t size)
 #ifdef __APPLE__
 #ifdef _KERNEL
 extern size_t kmem_cache_bufsize(kmem_cache_t *cp);
-size_t
-zio_data_buf_alloc_size(size_t size)
+kmem_cache_t *
+zio_data_buf_alloc_cache(size_t size)
 {
 	size_t c = (size - 1) >> SPA_MINBLOCKSHIFT;
 
@@ -331,11 +331,18 @@ zio_data_buf_alloc_size(size_t size)
 
 	kmem_cache_t *cp = zio_data_buf_cache[c];
 
-	return(kmem_cache_bufsize(cp));
+	return(cp);
 }
 
+/* we don't export kmem_cache_t's details outside SPL */
 size_t
-zio_buf_alloc_size(size_t size)
+zio_data_buf_alloc_size(size_t size)
+{
+	return (kmem_cache_bufsize(zio_data_buf_alloc_cache(size)));
+}
+
+kmem_cache_t *
+zio_buf_alloc_cache(size_t size)
 {
 	size_t c = (size - 1) >> SPA_MINBLOCKSHIFT;
 
@@ -343,8 +350,16 @@ zio_buf_alloc_size(size_t size)
 
 	kmem_cache_t *cp = zio_buf_cache[c];
 
-	return(kmem_cache_bufsize(cp));
+	return (cp);
 }
+
+/* we don't export kmem_cache_t's details outside SPL */
+size_t
+zio_buf_alloc_size(size_t size)
+{
+	return(kmem_cache_bufsize(zio_buf_alloc_cache(size)));
+}
+
 #endif
 #endif
 
