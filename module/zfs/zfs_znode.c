@@ -398,6 +398,8 @@ zfs_znode_move(void *buf, void *newbuf, size_t size, void *arg)
 #define KMF_DEADBEEF    0x00000002      /* deadbeef checking */
 #define KMF_REDZONE             0x00000004      /* redzone checking */
 #define KMF_CONTENTS    0x00000008      /* freed-buffer content logging */
+#define KMF_LITE        0x00000100      /* lightweight debugging */
+#define KMF_HASH                0x00000200      /* cache has hash table */
 #define KMF_BUFTAG      (KMF_DEADBEEF | KMF_REDZONE)
 
 void
@@ -414,7 +416,7 @@ zfs_znode_init(void)
 	    sizeof (znode_t), 0,
 		zfs_znode_cache_constructor,
 	    zfs_znode_cache_destructor, NULL, NULL,
-	    NULL, KMF_BUFTAG|KMF_AUDIT);
+	    NULL, KMF_BUFTAG|KMF_LITE|KMF_HASH);
 
 	kmem_cache_set_move(znode_cache, zfs_znode_move);
 }
