@@ -951,6 +951,7 @@ dbuf_read_done(zio_t *zio, arc_buf_t *buf, void *vdb)
 		/* we were freed in flight; disregard any error */
 		arc_release(buf, db);
 		bzero(buf->b_data, db->db.db_size);
+		arc_buf_freeze_assert(buf, __func__, __LINE__);
 		arc_buf_freeze(buf);
 		db->db_freed_in_flight = FALSE;
 		dbuf_set_data(db, buf);
@@ -1376,6 +1377,7 @@ dbuf_free_range(dnode_t *dn, uint64_t start_blkid, uint64_t end_blkid,
 			ASSERT(db->db.db_data != NULL);
 			arc_release(db->db_buf, db);
 			bzero(db->db.db_data, db->db.db_size);
+			arc_buf_freeze_assert(db->db_buf, __func__, __LINE__);
 			arc_buf_freeze(db->db_buf);
 		}
 
@@ -2876,6 +2878,7 @@ dbuf_rele_and_unlock(dmu_buf_impl_t *db, void *tag)
 	 */
 	if (db->db_buf != NULL &&
 	    holds == (db->db_level == 0 ? db->db_dirtycnt : 0)) {
+		arc_buf_freeze_assert(db->db_buf, __func__, __LINE__);
 		arc_buf_freeze(db->db_buf);
 	}
 

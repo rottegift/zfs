@@ -1271,8 +1271,11 @@ sa_byteswap(sa_handle_t *hdl, sa_buf_type_t buftype)
 	sa_attr_iter(hdl->sa_os, sa_hdr_phys, DMU_OT_SA,
 	    sa_byteswap_cb, NULL, hdl);
 
-	if (buftype == SA_SPILL)
+	if (buftype == SA_SPILL) {
+		arc_buf_t *b = ((dmu_buf_impl_t *)hdl->sa_spill)->db_buf;
+		arc_buf_freeze_assert(b, __func__, __LINE__);
 		arc_buf_freeze(((dmu_buf_impl_t *)hdl->sa_spill)->db_buf);
+	}
 }
 
 static int
