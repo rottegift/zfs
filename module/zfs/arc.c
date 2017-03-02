@@ -8088,7 +8088,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	}
 	if (HDR_IO_IN_PROGRESS(hdr)) {
 		mutex_exit(hash_lock);
-		printf("ZFS: %s: io in progress (hdr)\n", __func__);
+		dprintf("ZFS: %s: io in progress (hdr)\n", __func__);
 		return (KMEM_CBRC_LATER);
 	}
 
@@ -8121,9 +8121,21 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 1) {
 		uint64_t rc = refcount_count(&hdr->b_l1hdr.b_refcnt);
                 mutex_exit(hash_lock);
-                printf("ZFS: %s: high refcount (%llu)\n",
-                    __func__, rc);
-                return (KMEM_CBRC_LATER);
+		if (rc > 100) {
+			printf("ZFS: %s: WARNING: suspiciously high refcount (%llu) for "
+			    "(%llu, [%llu:%llu], %llu)\n",
+			    __func__, rc,
+			    hdr->b_spa,
+			    hdr->b_dva.dva_word[0], hdr->b_dva.dva_word[1],
+			    hdr->b_birth);
+			return (KMEM_CBRC_DONT_KNOW);
+		} else if (rc > 3) {
+			printf("ZFS: %s: high refcount (%llu)\n",
+			    __func__, rc);
+			return (KMEM_CBRC_NO);
+		} else {
+			return (KMEM_CBRC_LATER);
+		}
         }
 
 	/* check the sizes in the header vs the size from the avl */
@@ -8178,35 +8190,32 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		if (mem == buf->b_data) {
 			if (!refcount_is_zero(&buf->b_hdr->b_l1hdr.b_refcnt)) {
 				uint64_t rc = refcount_count(&buf->b_hdr->b_l1hdr.b_refcnt);
-				bool later = false;
-				if (buf->b_data == hdr->b_l1hdr.b_pdata)
-					later = true;
-				mutex_exit(buf_lock);
-				mutex_exit(hash_lock);
-				printf("ZFS: %s: refcount is not zero (LAST SECOND) (%llu) ret %s\n",
-				    __func__, rc,
-				    (later == true) ? "LATER" : "NO");
-				if (later == true)
-					return (KMEM_CBRC_LATER);
-				else
+				if (buf->b_data != hdr->b_l1hdr.b_pdata ||
+				    rc != 1) {
+					mutex_exit(buf_lock);
+					mutex_exit(hash_lock);
+					printf("ZFS: %s: refcount is not zero or one "
+					    "(%llu) (LAST SECOND) ret NO\n",
+					    __func__, rc);
 					return (KMEM_CBRC_NO);
+				}
 			}
 			bool pdata = false;
-			printf("ZFS: %s: YESYESYES (buf copying, %lu size)\n", __func__, size);
 			bcopy(mem, newbuf, size);
 			buf->b_data = newbuf;
 			if (hdr->b_l1hdr.b_pdata == mem) {
 				hdr->b_l1hdr.b_pdata = newbuf;
 				pdata=true;
 			}
-			//bzero(mem, size);
+			//bzero(mem, size); - interferes with kmem debugging
 			mutex_exit(buf_lock);
 			mutex_exit(hash_lock);
-			printf("ZFS: %s: copied and zeroed %lu bytes %s\n", __func__,
-			    size, (pdata == true) ? "(and adjusted hdr ptr)" : "(not hdr pdata)");
+			printf("ZFS: %s: YESYESYESYES copied %lu bytes %s\n", __func__,
+			    size,
+			    (pdata == true) ? "(and adjusted hdr ptr OK)" : "(but NOT hdr pdata WARNING)");
 			return (KMEM_CBRC_YES);
 		}
-		/* fallthrough to check hdr pdata */
+		/* we can't move the buf, so fallthrough to check hdr pdata */
 		mutex_exit(buf_lock);
 	}
 
@@ -8236,14 +8245,13 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_LATER);
 	}
 
-	printf("ZFS: %s: doing hdr bcopy YESYESYESYES\n", __func__);
-
 	bcopy(mem, newbuf, size);
 	hdr->b_l1hdr.b_pdata = newbuf;
         //bzero(mem, size);
 	mutex_exit(hash_lock);
 
-	printf("ZFS: %s: (hdr copied %lu bytes)\n", __func__, size);
+	printf("ZFS: %s: finished  hdr bcopy YESYESYESYES (size == %lu)\n", __func__, size);
+
 	return (KMEM_CBRC_YES);
 }
 
