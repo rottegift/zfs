@@ -7992,7 +7992,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 
 	if (buf == NULL && hdr == NULL) {
 		/* this is a mess from the avl, but we can just return */
-		return (KMEM_CBRC_DONT_KNOW);
+		return (KMEM_CBRC_NO);
 	}
 
 	dva_t dva;
