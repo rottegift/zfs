@@ -67,6 +67,7 @@ dnode_increase_indirection(dnode_t *dn, dmu_tx_t *tx)
 	ASSERT3U(sizeof (blkptr_t) * nblkptr, <=, db->db.db_size);
 	bcopy(dn->dn_phys->dn_blkptr, db->db.db_data,
 	    sizeof (blkptr_t) * nblkptr);
+	arc_buf_freeze_assert(db->db_buf, __func__, __LINE__);
 	arc_buf_freeze(db->db_buf);
 
 	/* set dbuf's parent pointers to new indirect buf */
@@ -315,6 +316,7 @@ free_children(dmu_buf_impl_t *db, uint64_t blkid, uint64_t nblks,
 	}
 
 	DB_DNODE_EXIT(db);
+	arc_buf_freeze_assert(db->db_buf, __func__, __LINE__);
 	arc_buf_freeze(db->db_buf);
 }
 

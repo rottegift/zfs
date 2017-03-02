@@ -8259,3 +8259,21 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 //                                            sort first on nanotime, then non-null ptr
 
 #endif
+
+void
+arc_buf_freeze_assert(arc_buf_t *buf, const char *caller, const int line)
+{
+        if (!(zfs_flags & ZFS_DEBUG_MODIFY))
+                return;
+
+	if (ARC_BUF_COMPRESSED(buf))
+		return;
+
+	if (!(buf->b_hdr->b_l1hdr.b_freeze_cksum != NULL || buf->b_hdr->b_l1hdr.b_state == arc_anon))
+	{
+		printf("ZFS: %s: (%s : %d) assertion will trip! (%s) (%s)\n",
+		    __func__, caller, line,
+		    (buf->b_hdr->b_l1hdr.b_freeze_cksum != NULL) ? "cheksum exists" : "NULL checksum",
+		    (buf->b_hdr->b_l1hdr.b_state == arc_anon) ? "arc_anon" : "other state");
+	}
+}
