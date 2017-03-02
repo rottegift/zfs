@@ -524,6 +524,7 @@ extern void *zio_buf_alloc(size_t size);
 extern void zio_buf_free(void *buf, size_t size);
 extern void *zio_data_buf_alloc(size_t size);
 extern void zio_data_buf_free(void *buf, size_t size);
+extern kmem_cache_t *zio_data_buf_alloc_cache(size_t size);
 
 extern void zio_push_transform(zio_t *zio, void *data, uint64_t size,
     uint64_t bufsize, zio_transform_func_t *transform);
