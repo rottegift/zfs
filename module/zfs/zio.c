@@ -141,6 +141,8 @@ zio_init(void)
 #define KMF_DEADBEEF    0x00000002      /* deadbeef checking */
 #define KMF_REDZONE             0x00000004      /* redzone checking */
 #define KMF_CONTENTS    0x00000008      /* freed-buffer content logging */
+#define KMF_LITE        0x00000100      /* lightweight debugging */
+#define KMF_HASH                0x00000200      /* cache has hash table */
 #define KMF_BUFTAG      (KMF_DEADBEEF | KMF_REDZONE)
 
 	for (c = 0; c < SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT; c++) {
@@ -148,7 +150,7 @@ zio_init(void)
 		size_t p2 = size;
 		size_t align = 0;
 		//size_t cflags = (size > zio_buf_debug_limit) ? KMC_NODEBUG : 0;
-		size_t cflags = KMF_AUDIT | KMF_BUFTAG;
+		size_t cflags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
 
 #ifdef _ILP32
 		/*
