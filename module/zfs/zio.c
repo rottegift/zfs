@@ -191,7 +191,7 @@ zio_init(void)
 
 			extern kmem_cbrc_t zio_arc_buf_move(void *, void *, size_t, void *);
 
-		       kmem_cache_set_move(zio_buf_cache[c], zio_arc_buf_move);
+			//kmem_cache_set_move(zio_buf_cache[c], zio_arc_buf_move);
 
 			(void) snprintf(name, sizeof(name), "zio_data_buf_%lu",
                             (ulong_t)size);
