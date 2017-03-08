@@ -1046,6 +1046,7 @@ typedef struct l1arc_buf_hdr {
 
 	arc_callback_t		*b_acb;
 	void			*b_pdata;
+	uint32_t                b_pdata_size;
 } l1arc_buf_hdr_t;
 
 typedef struct l2arc_dev l2arc_dev_t;
@@ -2804,6 +2805,7 @@ arc_share_buf(arc_buf_hdr_t *hdr, arc_buf_t *buf)
 	 */
 	refcount_transfer_ownership(&state->arcs_size, buf, hdr);
 	hdr->b_l1hdr.b_pdata = buf->b_data;
+	hdr->b_l1hdr.b_pdata_size = arc_buf_size(buf);
 	arc_hdr_set_flags(hdr, ARC_FLAG_SHARED_DATA);
 	buf->b_flags |= ARC_BUF_FLAG_SHARED;
 
@@ -2835,6 +2837,7 @@ arc_unshare_buf(arc_buf_hdr_t *hdr, arc_buf_t *buf)
 	refcount_transfer_ownership(&state->arcs_size, hdr, buf);
 	arc_hdr_clear_flags(hdr, ARC_FLAG_SHARED_DATA);
 	hdr->b_l1hdr.b_pdata = NULL;
+	hdr->b_l1hdr.b_pdata_size = 0;
 	buf->b_flags &= ~ARC_BUF_FLAG_SHARED;
 
 	/*
@@ -2991,8 +2994,10 @@ arc_hdr_alloc_pdata(arc_buf_hdr_t *hdr)
 
 	ASSERT3P(hdr->b_l1hdr.b_pdata, ==, NULL);
 	hdr->b_l1hdr.b_pdata = arc_get_data_buf(hdr, arc_hdr_size(hdr), hdr);
+	hdr->b_l1hdr.b_pdata_size = arc_hdr_size(hdr);
 	hdr->b_l1hdr.b_byteswap = DMU_BSWAP_NUMFUNCS;
 	ASSERT3P(hdr->b_l1hdr.b_pdata, !=, NULL);
+	ASSERT3U(hdr->b_l1hdr.b_pdata_size, ==, arc_hdr_size(hdr));
 
 	ARCSTAT_INCR(arcstat_compressed_size, arc_hdr_size(hdr));
 	ARCSTAT_INCR(arcstat_uncompressed_size, HDR_GET_LSIZE(hdr));
@@ -3014,9 +3019,11 @@ arc_hdr_free_pdata(arc_buf_hdr_t *hdr)
 		arc_hdr_free_on_write(hdr);
 		ARCSTAT_BUMP(arcstat_l2_free_on_write);
 	} else {
+		ASSERT3U(arc_hdr_size(hdr), ==, hdr->b_l1hdr.b_pdata_size);
 		arc_free_data_buf(hdr, hdr->b_l1hdr.b_pdata,
 		    arc_hdr_size(hdr), hdr);
 	}
+	hdr->b_l1hdr.b_pdata_size = 0;
 	hdr->b_l1hdr.b_pdata = NULL;
 	hdr->b_l1hdr.b_byteswap = DMU_BSWAP_NUMFUNCS;
 
@@ -8203,9 +8210,10 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 			bool pdata = false;
 			bcopy(mem, newbuf, size);
 			buf->b_data = newbuf;
+			ASSERT3U(hdr->b_l1hdr.b_pdata_size, ==, stored_size);
 			if (hdr->b_l1hdr.b_pdata == mem) {
 				hdr->b_l1hdr.b_pdata = newbuf;
-				pdata=true;
+				pdata = true;
 			}
 			//bzero(mem, size); - interferes with kmem debugging
 			mutex_exit(buf_lock);
@@ -8245,6 +8253,7 @@ zio_arc_buf_move(void *mem, void *newbuf, size_t size, void *arg)
 		return (KMEM_CBRC_LATER);
 	}
 
+	ASSERT3U(hdr->b_l1hdr.b_pdata, ==, stored_size);
 	bcopy(mem, newbuf, size);
 	hdr->b_l1hdr.b_pdata = newbuf;
         //bzero(mem, size);
