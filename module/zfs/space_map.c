@@ -123,7 +123,8 @@ space_map_load(space_map_t *sm, range_tree_t *rt, maptype_t maptype)
 				if(0 != range_tree_add_safe(rt, offset, size)) {
 					printf("ZFS: %s %d returning error after range_tree_add_safe != 0\n",
 					    __func__, __LINE__);
-					return (ENOENT);
+					error = ENOENT;
+					goto out;
 				}
 			} else {
 				range_tree_remove(rt, offset, size);
@@ -131,6 +132,7 @@ space_map_load(space_map_t *sm, range_tree_t *rt, maptype_t maptype)
 		}
 	}
 
+out:
 	if (error == 0)
 		VERIFY3U(range_tree_space(rt), ==, space);
 	else
