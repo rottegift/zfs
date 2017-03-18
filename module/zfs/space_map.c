@@ -70,7 +70,7 @@ space_map_load(space_map_t *sm, range_tree_t *rt, maptype_t maptype)
 		if(0!=range_tree_add_safe(rt, sm->sm_start, sm->sm_size)) {
 			printf("ZFS: %s %d returning error after range_tree_add_safe != 0\n",
 			    __func__, __LINE__);
-			return (ENOENT);
+			return (ENOSPC);
 		}
 		space = sm->sm_size - space;
 	}
@@ -123,7 +123,7 @@ space_map_load(space_map_t *sm, range_tree_t *rt, maptype_t maptype)
 				if(0 != range_tree_add_safe(rt, offset, size)) {
 					printf("ZFS: %s %d returning error after range_tree_add_safe != 0\n",
 					    __func__, __LINE__);
-					error = ENOENT;
+					error = ENOSPC;
 					goto out;
 				}
 			} else {
