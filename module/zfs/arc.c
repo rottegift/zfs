@@ -282,8 +282,7 @@
 #ifdef __APPLE__
 #include <sys/kstat_osx.h>
 #ifdef _KERNEL
-extern vmem_t *zio_arena;
-extern vmem_t *zio_metadata_arena;
+extern vmem_t *zio_arena_parent;
 extern vmem_t *heap_arena;
 static _Atomic int64_t reclaim_shrink_target = 0;
 void IOSleep(unsigned milliseconds);
@@ -1902,7 +1901,10 @@ arc_buf_try_copy_decompressed_data(arc_buf_t *buf)
 	 * There were no decompressed bufs, so there should not be a
 	 * checksum on the hdr either.
 	 */
+#ifdef _KERNEL
+	// XXX: ifdef out of userland because it causes zdb to die
 	EQUIV(!copied, hdr->b_l1hdr.b_freeze_cksum == NULL);
+#endif
 
 	return (copied);
 }
@@ -1981,7 +1983,10 @@ arc_buf_fill(arc_buf_t *buf, boolean_t compressed)
 		 */
 		if (arc_buf_try_copy_decompressed_data(buf)) {
 			/* Skip byteswapping and checksumming (already done) */
+#ifdef _KERNEL
+			// XXX #ifdef out of userland because it causes zdb to die
 			ASSERT3P(hdr->b_l1hdr.b_freeze_cksum, !=, NULL);
+#endif
 			return (0);
 		} else {
 			int error = zio_decompress_data(HDR_GET_COMPRESS(hdr),
@@ -4092,6 +4097,7 @@ arc_kmem_reap_now(void)
 	extern kmem_cache_t	*zio_data_buf_cache[];
 	extern kmem_cache_t	*range_seg_cache;
 	extern kmem_cache_t	*abd_chunk_cache;
+	extern vmem_t           *abd_chunk_arena;
 
 #ifdef _KERNEL
 	if (arc_meta_used >= arc_meta_limit) {
@@ -4130,16 +4136,12 @@ arc_kmem_reap_now(void)
 	extern kmem_cache_t *znode_cache;
 	if (znode_cache) kmem_cache_reap_now(znode_cache);
 
-	if (zio_arena != NULL) {
+	if (zio_arena_parent != NULL) {
 		/*
 		 * Ask the vmem arena to reclaim unused memory from its
 		 * quantum caches.
 		 */
-		vmem_qcache_reap(zio_arena);
-	}
-
-	if (zio_metadata_arena != NULL) {
-		vmem_qcache_reap(zio_metadata_arena);
+		vmem_qcache_reap(zio_arena_parent);
 	}
 #endif
 }
@@ -4199,6 +4201,8 @@ arc_reclaim_thread(void)
 			int64_t t = reclaim_shrink_target;
 			reclaim_shrink_target = 0;
 			arc_shrink(t);
+			extern kmem_cache_t	*abd_chunk_cache;
+			kmem_cache_reap_now(abd_chunk_cache);
 			IOSleep(1);
 		}
 
@@ -4241,6 +4245,11 @@ arc_reclaim_thread(void)
 		}
 
 		free_memory = post_adjust_free_memory;
+
+		if (free_memory >= 0 && manual_pressure <= 0 && evicted > 0) {
+			extern kmem_cache_t	*abd_chunk_cache;
+			kmem_cache_reap_now(abd_chunk_cache);
+		}
 
 		if (free_memory < 0 || manual_pressure > 0) {
 
@@ -4334,10 +4343,8 @@ arc_reclaim_thread(void)
 
 				int64_t total_freed = arc_shrink_freed + evicted;
 				if (total_freed >= huge_amount) {
-					if (zio_arena != NULL)
-						vmem_qcache_reap(zio_arena);
-					if (zio_metadata_arena != NULL)
-						vmem_qcache_reap(zio_metadata_arena);
+					if (zio_arena_parent != NULL)
+						vmem_qcache_reap(zio_arena_parent);
 				}
 			} else if (old_to_free > 0) {
 			  printf("ZFS: %s, (old_)to_free has returned to zero from %lld\n",

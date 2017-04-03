@@ -99,6 +99,7 @@
 #include <sys/zio.h>
 #include <sys/zfs_context.h>
 #include <sys/zfs_znode.h>
+#include <sys/debug.h>
 
 typedef struct abd_stats {
 	kstat_named_t abdstat_struct_size;
@@ -107,6 +108,11 @@ typedef struct abd_stats {
 	kstat_named_t abdstat_scatter_chunk_waste;
 	kstat_named_t abdstat_linear_cnt;
 	kstat_named_t abdstat_linear_data_size;
+	kstat_named_t abdstat_is_file_data_scattered;
+	kstat_named_t abdstat_is_metadata_scattered;
+	kstat_named_t abdstat_is_file_data_linear;
+	kstat_named_t abdstat_is_metadata_linear;
+	kstat_named_t abdstat_small_linear_cnt;
 } abd_stats_t;
 
 static abd_stats_t abd_stats = {
@@ -134,6 +140,13 @@ static abd_stats_t abd_stats = {
 	{ "linear_cnt",				KSTAT_DATA_UINT64 },
 	/* Amount of data stored in all linear ABDs tracked by linear_cnt */
 	{ "linear_data_size",			KSTAT_DATA_UINT64 },
+	/* Amount of data that is respectively file data and metadata */
+	{ "is_file_data_scattered",                       KSTAT_DATA_UINT64 },
+	{ "is_metadata_scattered",                        KSTAT_DATA_UINT64 },
+	{ "is_file_data_linear",                       KSTAT_DATA_UINT64 },
+	{ "is_metadata_linear",                        KSTAT_DATA_UINT64 },
+	/* Number of allocations linearized because < zfs_abd_chunk_size */
+	{ "small_linear_cnt",                    KSTAT_DATA_UINT64 },
 };
 
 #define	ABDSTAT(stat)		(abd_stats.stat.value.ui64)
@@ -180,14 +193,17 @@ abd_free_chunk(void *c)
 	kmem_cache_free(abd_chunk_cache, c);
 }
 
+#if defined(__APPLE__) && defined(_KERNEL)
+vmem_t *abd_chunk_arena = NULL;
+#endif
+
 void
 abd_init(void)
 {
-	vmem_t *data_alloc_arena = NULL;
 
-#ifdef _KERNEL
-	data_alloc_arena = zio_arena;
-#endif
+#if !(defined(__APPLE__) && defined(_KERNEL))
+
+	vmem_t *data_alloc_arena = NULL;
 
 	/*
 	 * Since ABD chunks do not appear in crash dumps, we pass KMC_NOTOUCH
@@ -195,6 +211,38 @@ abd_init(void)
 	 */
 	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, 0,
 	    NULL, NULL, NULL, NULL, data_alloc_arena, KMC_NOTOUCH);
+#else
+#define KMF_DEADBEEF    0x00000002      /* deadbeef checking */
+#define KMF_REDZONE             0x00000004      /* redzone checking */
+#define KMF_CONTENTS    0x00000008      /* freed-buffer content logging */
+#define KMF_LITE        0x00000100      /* lightweight debugging */
+#define KMF_HASH                0x00000200      /* cache has hash table */
+#define KMF_BUFTAG      (KMF_DEADBEEF | KMF_REDZONE)
+
+	/* In xnu we crash dump differently anyway, so we can give
+	 * a real alignment argument (instead of using 0 == KMEM_ALGN == 8)
+	 * and also turn on debugging flags
+	 */
+
+	/* sanity check */
+	VERIFY(ISP2(zfs_abd_chunk_size)); /* must be power of two */
+
+	extern vmem_t *zio_arena_parent;
+
+	abd_chunk_arena = vmem_create("abd_chunk", NULL, 0,
+	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
+	    0, VM_SLEEP);
+
+	ASSERT3P(abd_chunk_arena, !=, NULL);
+
+	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
+	int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
+
+	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, zfs_abd_chunk_size,
+	    NULL, NULL, NULL, NULL, abd_chunk_arena, cache_debug_flags);
+
+	VERIFY3P(abd_chunk_cache, !=, NULL);
+#endif
 
 	abd_ksp = kstat_create("zfs", 0, "abdstats", "misc", KSTAT_TYPE_NAMED,
 	    sizeof (abd_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
@@ -214,6 +262,9 @@ abd_fini(void)
 
 	kmem_cache_destroy(abd_chunk_cache);
 	abd_chunk_cache = NULL;
+#if defined(__APPLE__) && defined (_KERNEL)
+	vmem_destroy(abd_chunk_arena);
+#endif
 }
 
 static inline size_t
@@ -282,6 +333,14 @@ abd_alloc(size_t size, boolean_t is_metadata)
 	if (!zfs_abd_scatter_enabled)
 		return (abd_alloc_linear(size, is_metadata));
 
+	if (size < zfs_abd_chunk_size) {
+		ABDSTAT_BUMP(abdstat_small_linear_cnt);
+		// don't pull trigger yet, just count while chunk size is 1k
+		// since maximum waste is (SPA_MINBLOCKSIZE == 512) bytes,
+		// and because the linear_cnt is interesting unpolluted.
+		//return (abd_alloc_linear(size, is_metadata));
+	}
+
 	VERIFY3U(size, <=, SPA_MAXBLOCKSIZE);
 
 	size_t n = abd_chunkcnt_for_bytes(size);
@@ -309,6 +368,12 @@ abd_alloc(size_t size, boolean_t is_metadata)
 	ABDSTAT_INCR(abdstat_scatter_chunk_waste,
 	    n * zfs_abd_chunk_size - size);
 
+	if (is_metadata) {
+		ABDSTAT_INCR(abdstat_is_metadata_scattered, size);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_scattered, size);
+	}
+
 	return (abd);
 }
 
@@ -325,6 +390,14 @@ abd_free_scatter(abd_t *abd)
 	ABDSTAT_INCR(abdstat_scatter_data_size, -(int)abd->abd_size);
 	ABDSTAT_INCR(abdstat_scatter_chunk_waste,
 	    abd->abd_size - n * zfs_abd_chunk_size);
+
+	int64_t unsize = -(int64_t)abd->abd_size;
+	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
+	if (is_metadata) {
+		ABDSTAT_INCR(abdstat_is_metadata_scattered, unsize);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_scattered, unsize);
+	}
 
 	abd_free_struct(abd);
 }
@@ -358,6 +431,12 @@ abd_alloc_linear(size_t size, boolean_t is_metadata)
 	ABDSTAT_BUMP(abdstat_linear_cnt);
 	ABDSTAT_INCR(abdstat_linear_data_size, size);
 
+	if (is_metadata) {
+		ABDSTAT_INCR(abdstat_is_metadata_linear, size);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_linear, size);
+	}
+
 	return (abd);
 }
 
@@ -373,6 +452,14 @@ abd_free_linear(abd_t *abd)
 	refcount_destroy(&abd->abd_children);
 	ABDSTAT_BUMPDOWN(abdstat_linear_cnt);
 	ABDSTAT_INCR(abdstat_linear_data_size, -(int)abd->abd_size);
+
+	int64_t unsize = -(int64_t)abd->abd_size;
+	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
+	if (is_metadata) {
+		ABDSTAT_INCR(abdstat_is_metadata_linear, unsize);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_linear, unsize);
+	}
 
 	abd_free_struct(abd);
 }
@@ -619,6 +706,13 @@ abd_take_ownership_of_buf(abd_t *abd, boolean_t is_metadata)
 
 	ABDSTAT_BUMP(abdstat_linear_cnt);
 	ABDSTAT_INCR(abdstat_linear_data_size, abd->abd_size);
+
+	int64_t size = abd->abd_size;
+	if (is_metadata) {
+		ABDSTAT_INCR(abdstat_is_metadata_linear, size);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_linear, size);
+	}
 }
 
 void
@@ -630,10 +724,18 @@ abd_release_ownership_of_buf(abd_t *abd)
 
 	abd->abd_flags &= ~ABD_FLAG_OWNER;
 	/* Disable this flag since we no longer own the data buffer */
+	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
 	abd->abd_flags &= ~ABD_FLAG_META;
 
 	ABDSTAT_BUMPDOWN(abdstat_linear_cnt);
 	ABDSTAT_INCR(abdstat_linear_data_size, -(int)abd->abd_size);
+
+	int64_t unsize = -(int64_t)abd->abd_size;
+	if (is_metadata) {
+		ABDSTAT_INCR(abdstat_is_metadata_scattered, unsize);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_scattered, unsize);
+	}
 }
 
 struct abd_iter {
