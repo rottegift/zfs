@@ -976,7 +976,9 @@ vdev_raidz_reconstruct_q(raidz_map_t *rm, int *tgts, int ntgts)
 		dst = rm->rm_col[x].rc_abd;
 
 		if (c == rm->rm_firstdatacol) {
-			abd_copy(dst, src, size);
+			ASSERT3P(dst,!=,src);
+			if (dst != src)
+				abd_copy(dst, src, size);
 			if (rm->rm_col[x].rc_size > size)
 				abd_zero_off(dst, size,
 				    rm->rm_col[x].rc_size - size);
