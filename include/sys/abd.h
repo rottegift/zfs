@@ -41,12 +41,16 @@ extern "C" {
 typedef enum abd_flags {
 	ABD_FLAG_LINEAR	= 1 << 0,	/* is buffer linear (or scattered)? */
 	ABD_FLAG_OWNER	= 1 << 1,	/* does it own its data buffers? */
-	ABD_FLAG_META	= 1 << 2	/* does this represent FS metadata? */
+	ABD_FLAG_META	= 1 << 2,	/* does this represent FS metadata? */
+	ABD_FLAG_SMALL  = 1 << 3,       /* (APPLE) : abd_alloc() went linear for a sub-chunk size */
+	ABD_FLAG_NOMOVE = 1 << 4,       /* (APPLE) : abd_to_buf() called on this abd */
 } abd_flags_t;
 
 typedef struct abd {
 	abd_flags_t	abd_flags;
 	uint_t		abd_size;	/* excludes scattered abd_offset */
+	kmutex_t        abd_mutex;
+	hrtime_t        abd_create_time;
 	struct abd	*abd_parent;
 	refcount_t	abd_children;
 	union {
@@ -90,6 +94,7 @@ void abd_put(abd_t *);
  */
 
 void *abd_to_buf(abd_t *);
+void *abd_to_buf_ephemeral(abd_t *);
 void *abd_borrow_buf(abd_t *, size_t);
 void *abd_borrow_buf_copy(abd_t *, size_t);
 void abd_return_buf(abd_t *, void *, size_t);
@@ -151,6 +156,10 @@ abd_zero(abd_t *abd, size_t size)
 
 void abd_init(void);
 void abd_fini(void);
+
+#ifdef __APPLE__
+boolean_t abd_try_move(abd_t *);
+#endif
 
 #ifdef __cplusplus
 }
