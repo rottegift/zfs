@@ -108,8 +108,10 @@ typedef struct abd_stats {
 	kstat_named_t abdstat_scatter_chunk_waste;
 	kstat_named_t abdstat_linear_cnt;
 	kstat_named_t abdstat_linear_data_size;
-	kstat_named_t abdstat_is_file_data;
-	kstat_named_t abdstat_is_metadata;
+	kstat_named_t abdstat_is_file_data_scattered;
+	kstat_named_t abdstat_is_metadata_scattered;
+	kstat_named_t abdstat_is_file_data_linear;
+	kstat_named_t abdstat_is_metadata_linear;
 	kstat_named_t abdstat_small_linear_cnt;
 } abd_stats_t;
 
@@ -139,8 +141,10 @@ static abd_stats_t abd_stats = {
 	/* Amount of data stored in all linear ABDs tracked by linear_cnt */
 	{ "linear_data_size",			KSTAT_DATA_UINT64 },
 	/* Amount of data that is respectively file data and metadata */
-	{ "is_file_data",                       KSTAT_DATA_UINT64 },
-	{ "is_metadata",                        KSTAT_DATA_UINT64 },
+	{ "is_file_data_scattered",                       KSTAT_DATA_UINT64 },
+	{ "is_metadata_scattered",                        KSTAT_DATA_UINT64 },
+	{ "is_file_data_linear",                       KSTAT_DATA_UINT64 },
+	{ "is_metadata_linear",                        KSTAT_DATA_UINT64 },
 	/* Number of allocations linearized because < zfs_abd_chunk_size */
 	{ "small_linear_cnt",                    KSTAT_DATA_UINT64 },
 };
@@ -375,9 +379,9 @@ abd_alloc(size_t size, boolean_t is_metadata)
 	    n * zfs_abd_chunk_size - size);
 
 	if (is_metadata) {
-		ABDSTAT_INCR(abdstat_is_metadata, size);
+		ABDSTAT_INCR(abdstat_is_metadata_scattered, size);
 	} else {
-		ABDSTAT_INCR(abdstat_is_file_data, size);
+		ABDSTAT_INCR(abdstat_is_file_data_scattered, size);
 	}
 
 	return (abd);
@@ -400,9 +404,9 @@ abd_free_scatter(abd_t *abd)
 	int unsize = -(int)abd->abd_size;
 	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
 	if (is_metadata) {
-		ABDSTAT_INCR(abdstat_is_metadata, unsize);
+		ABDSTAT_INCR(abdstat_is_metadata_scattered, unsize);
 	} else {
-		ABDSTAT_INCR(abdstat_is_file_data, unsize);
+		ABDSTAT_INCR(abdstat_is_file_data_scattered, unsize);
 	}
 
 	abd_free_struct(abd);
@@ -438,9 +442,9 @@ abd_alloc_linear(size_t size, boolean_t is_metadata)
 	ABDSTAT_INCR(abdstat_linear_data_size, size);
 
 	if (is_metadata) {
-		ABDSTAT_INCR(abdstat_is_metadata, size);
+		ABDSTAT_INCR(abdstat_is_metadata_linear, size);
 	} else {
-		ABDSTAT_INCR(abdstat_is_file_data, size);
+		ABDSTAT_INCR(abdstat_is_file_data_linear, size);
 	}
 
 	return (abd);
@@ -462,9 +466,9 @@ abd_free_linear(abd_t *abd)
 	int unsize = -(int)abd->abd_size;
 	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
 	if (is_metadata) {
-		ABDSTAT_INCR(abdstat_is_metadata, unsize);
+		ABDSTAT_INCR(abdstat_is_metadata_linear, unsize);
 	} else {
-		ABDSTAT_INCR(abdstat_is_file_data, unsize);
+		ABDSTAT_INCR(abdstat_is_file_data_linear, unsize);
 	}
 
 	abd_free_struct(abd);
