@@ -401,7 +401,7 @@ abd_free_scatter(abd_t *abd)
 	ABDSTAT_INCR(abdstat_scatter_chunk_waste,
 	    abd->abd_size - n * zfs_abd_chunk_size);
 
-	int unsize = -(int)abd->abd_size;
+	int64_t unsize = -(int64_t)abd->abd_size;
 	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
 	if (is_metadata) {
 		ABDSTAT_INCR(abdstat_is_metadata_scattered, unsize);
@@ -463,7 +463,7 @@ abd_free_linear(abd_t *abd)
 	ABDSTAT_BUMPDOWN(abdstat_linear_cnt);
 	ABDSTAT_INCR(abdstat_linear_data_size, -(int)abd->abd_size);
 
-	int unsize = -(int)abd->abd_size;
+	int64_t unsize = -(int64_t)abd->abd_size;
 	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
 	if (is_metadata) {
 		ABDSTAT_INCR(abdstat_is_metadata_linear, unsize);
@@ -716,6 +716,13 @@ abd_take_ownership_of_buf(abd_t *abd, boolean_t is_metadata)
 
 	ABDSTAT_BUMP(abdstat_linear_cnt);
 	ABDSTAT_INCR(abdstat_linear_data_size, abd->abd_size);
+
+	int64_t size = abd->abd_size;
+	if (is_metadata) {
+		ABDSTAT_INCR(abdstat_is_metadata_linear, size);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_linear, size);
+	}
 }
 
 void
@@ -731,6 +738,14 @@ abd_release_ownership_of_buf(abd_t *abd)
 
 	ABDSTAT_BUMPDOWN(abdstat_linear_cnt);
 	ABDSTAT_INCR(abdstat_linear_data_size, -(int)abd->abd_size);
+
+	int64_t unsize = -(int64_t)abd->abd_size;
+	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
+	if (is_metadata) {
+		ABDSTAT_INCR(abdstat_is_metadata_scattered, unsize);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_scattered, unsize);
+	}
 }
 
 struct abd_iter {
