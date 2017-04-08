@@ -170,7 +170,15 @@ boolean_t zfs_abd_scatter_enabled = B_TRUE;
  * will cause the machine to panic if you change it and try to access the data
  * within a scattered ABD.
  */
-size_t zfs_abd_chunk_size = 4096; // original from openzfs uses 1024, see small_linear_cnt below
+#ifdef __APPLE__
+#ifdef _KERNEL
+size_t zfs_abd_chunk_size = PAGESIZE; // original from openzfs uses 1024, see small_linear_cnt below
+#else
+size_t zfs_abd_chunk_size = 4096;
+#endif
+#else
+size_t zfs_abd_chunk_size = 1024;
+#endif
 
 #ifdef _KERNEL
 extern vmem_t *zio_arena;
@@ -339,7 +347,9 @@ abd_alloc(size_t size, boolean_t is_metadata)
 	 */
 	if (size < zfs_abd_chunk_size) {
 		ABDSTAT_BUMP(abdstat_small_linear_cnt);
-		return (abd_alloc_linear(size, is_metadata));
+		abd_t *small_abd = abd_alloc_linear(size, is_metadata);
+		small_abd->abd_flags |= ABD_FLAG_SMALL;
+		return (small_abd);
 	}
 
 	VERIFY3U(size, <=, SPA_MAXBLOCKSIZE);
@@ -450,7 +460,7 @@ abd_free_linear(abd_t *abd)
 		zio_data_buf_free(abd->abd_u.abd_linear.abd_buf, abd->abd_size);
 	}
 
-	if (abd->abd_size < zfs_abd_chunk_size)
+	if ((abd->abd_flags & ABD_FLAG_SMALL) != 0)
 		ABDSTAT_BUMPDOWN(abdstat_small_linear_cnt);
 
 	refcount_destroy(&abd->abd_children);
