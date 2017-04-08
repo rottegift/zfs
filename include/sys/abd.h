@@ -41,7 +41,8 @@ extern "C" {
 typedef enum abd_flags {
 	ABD_FLAG_LINEAR	= 1 << 0,	/* is buffer linear (or scattered)? */
 	ABD_FLAG_OWNER	= 1 << 1,	/* does it own its data buffers? */
-	ABD_FLAG_META	= 1 << 2	/* does this represent FS metadata? */
+	ABD_FLAG_META	= 1 << 2,	/* does this represent FS metadata? */
+	ABD_FLAG_SMALL  = 1 << 3,       /* (APPLE) : abd_alloc() went linear for a sub-chunk size */
 } abd_flags_t;
 
 typedef struct abd {
