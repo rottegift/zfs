@@ -4537,6 +4537,27 @@ arc_adapt(int bytes, arc_state_t *state)
 				reclaim_shrink_target += bytes;
 				cv_signal(&arc_reclaim_thread_cv);
 			}
+		} else {
+			/*
+			 * Among other things, abd weakens the signal
+			 * from spl_arc_no_grow() because the zio_ allocators
+			 * are only used for transient allocations, and so
+			 * almost always will be able to satisfy requests before
+			 * hitting the bucket layer.
+			 *
+			 * abd's new dynamics also can let tsize grow
+			 * very quickly immediately after a reclaim
+			 * releases a large number of chunks, while
+			 * memory sits unused in the spl bucket layer.
+			 *
+			 * When this is the case, enforce arc_no_grow.
+			 */
+			extern int64_t vmem_buckets_size(int);
+			int64_t buckets_free = vmem_buckets_size(VMEM_FREE);
+			int64_t fraction_phys = physmem * 12 / 100;
+
+			if (buckets_free > fraction_phys)
+				return;
 		}
 	}
 
