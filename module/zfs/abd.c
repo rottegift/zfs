@@ -172,9 +172,9 @@ boolean_t zfs_abd_scatter_enabled = B_TRUE;
  */
 #ifdef __APPLE__
 #ifdef _KERNEL
-size_t zfs_abd_chunk_size = PAGESIZE; // original from openzfs uses 1024
+size_t zfs_abd_chunk_size = 1024; // original from openzfs uses 1024
 #else
-size_t zfs_abd_chunk_size = 4096;
+size_t zfs_abd_chunk_size = 1024;
 #endif
 #else
 size_t zfs_abd_chunk_size = 1024;
@@ -238,7 +238,7 @@ abd_init(void)
 	extern vmem_t *zio_arena_parent;
 
 	abd_chunk_arena = vmem_create("abd_chunk", NULL, 0,
-	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
+	    zfs_abd_chunk_size, vmem_alloc, vmem_free, zio_arena_parent,
 	    0, VM_SLEEP);
 
 	ASSERT3P(abd_chunk_arena, !=, NULL);
@@ -341,10 +341,6 @@ abd_alloc(size_t size, boolean_t is_metadata)
 	if (!zfs_abd_scatter_enabled)
 		return (abd_alloc_linear(size, is_metadata));
 
-	/* For better utilization, keep sub-chunk allocations linear.
-	 * This is especially useful when zfs_abd_chunk_size == PAGESIZE
-	 * for alignment and performance reasons (1k chunks are slow)
-	 */
 	VERIFY3U(size, <=, SPA_MAXBLOCKSIZE);
 
 	size_t n = abd_chunkcnt_for_bytes(size);
