@@ -6532,7 +6532,7 @@ arc_init(void)
 	if (zfs_arc_meta_min > 0) {
 		arc_meta_min = zfs_arc_meta_min;
 	} else {
-		arc_meta_min = arc_c_min / 2;
+		arc_meta_min = arc_c_min / 8;
 	}
 
 	if (zfs_arc_grow_retry > 0)
