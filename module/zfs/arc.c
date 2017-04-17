@@ -4520,11 +4520,11 @@ arc_adapt(int bytes, arc_state_t *state)
 	// fragmentation or because recently an allocation had to
 	// descend to the bucket arena
 
-	extern boolean_t spl_arc_no_grow(size_t, boolean_t);
+	extern boolean_t spl_arc_no_grow(size_t, boolean_t, kmem_cache_t **);
 	if (arc_no_grow ||
 	    spl_free_manual_pressure_wrapper() > 0 ||
 	    spl_free_wrapper() < (int64_t)bytes) {
-		if (spl_arc_no_grow((size_t)bytes, buf_is_metadata)) {
+		if (spl_arc_no_grow((size_t)bytes, buf_is_metadata, z)) {
 			// if we are likely to have to wait in our
 			// caller arc_get_data_buf(), then don't return
 			// early to it
