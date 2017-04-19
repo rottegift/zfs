@@ -48,6 +48,8 @@ typedef enum abd_flags {
 typedef struct abd {
 	abd_flags_t	abd_flags;
 	uint_t		abd_size;	/* excludes scattered abd_offset */
+	kmutex_t        abd_mutex;
+	hrtime_t        abd_create_time;
 	struct abd	*abd_parent;
 	refcount_t	abd_children;
 	union {

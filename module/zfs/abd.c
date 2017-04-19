@@ -303,7 +303,7 @@ abd_verify(abd_t *abd)
 	ASSERT3U(abd->abd_size, >, 0);
 	ASSERT3U(abd->abd_size, <=, SPA_MAXBLOCKSIZE);
 	ASSERT3U(abd->abd_flags, ==, abd->abd_flags & (ABD_FLAG_LINEAR |
-	    ABD_FLAG_OWNER | ABD_FLAG_META));
+	    ABD_FLAG_OWNER | ABD_FLAG_META | ABD_FLAG_SMALL));
 	IMPLY(abd->abd_parent != NULL, !(abd->abd_flags & ABD_FLAG_OWNER));
 	IMPLY(abd->abd_flags & ABD_FLAG_META, abd->abd_flags & ABD_FLAG_OWNER);
 	if (abd_is_linear(abd)) {
@@ -326,6 +326,8 @@ abd_alloc_struct(size_t chunkcnt)
 	abd_t *abd = kmem_alloc(size, KM_PUSHPAGE);
 	ASSERT3P(abd, !=, NULL);
 	ABDSTAT_INCR(abdstat_struct_size, size);
+	abd->abd_create_time = gethrtime();
+	mutex_init(&abd->abd_mutex, NULL, MUTEX_DEFAULT, NULL);
 
 	return (abd);
 }
@@ -335,6 +337,7 @@ abd_free_struct(abd_t *abd)
 {
 	size_t chunkcnt = abd_is_linear(abd) ? 0 : abd_scatter_chunkcnt(abd);
 	int size = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[chunkcnt]);
+	mutex_destroy(&abd->abd_mutex);
 	kmem_free(abd, size);
 	ABDSTAT_INCR(abdstat_struct_size, -size);
 }
@@ -626,8 +629,10 @@ abd_put(abd_t *abd)
 	ASSERT(!(abd->abd_flags & ABD_FLAG_OWNER));
 
 	if (abd->abd_parent != NULL) {
+		mutex_enter(&abd->abd_parent->abd_mutex);
 		(void) refcount_remove_many(&abd->abd_parent->abd_children,
 		    abd->abd_size, abd);
+		mutex_exit(&abd->abd_parent->abd_mutex);
 	}
 
 	refcount_destroy(&abd->abd_children);
@@ -662,7 +667,9 @@ abd_borrow_buf(abd_t *abd, size_t n)
 	} else {
 		buf = zio_buf_alloc(n);
 	}
+	mutex_enter(&abd->abd_mutex);
 	(void) refcount_add_many(&abd->abd_children, n, buf);
+	mutex_exit(&abd->abd_mutex);
 
 	ABDSTAT_BUMP(abdstat_borrowed_buf_cnt);
 
@@ -696,7 +703,9 @@ abd_return_buf(abd_t *abd, void *buf, size_t n)
 		ASSERT0(abd_cmp_buf(abd, buf, n));
 		zio_buf_free(buf, n);
 	}
+	mutex_enter(&abd->abd_mutex);
 	(void) refcount_remove_many(&abd->abd_children, n, buf);
+	mutex_exit(&abd->abd_mutex);
 	ABDSTAT_BUMPDOWN(abdstat_borrowed_buf_cnt);
 }
 
