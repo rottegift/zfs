@@ -150,7 +150,7 @@ static abd_stats_t abd_stats = {
 	/* Number of allocations linearized because < zfs_abd_chunk_size */
 	{ "small_scatter_cnt",                  KSTAT_DATA_UINT64 },
 	/* Counts, respectively, of metadata buffers vs file data buffers */
-	{ "metadata_scatterd_buffers",                   KSTAT_DATA_UINT64 },
+	{ "metadata_scattered_buffers",                   KSTAT_DATA_UINT64 },
 	{ "filedata_scattered_buffers",                   KSTAT_DATA_UINT64 },
 };
 
