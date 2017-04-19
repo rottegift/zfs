@@ -303,7 +303,7 @@ abd_verify(abd_t *abd)
 	ASSERT3U(abd->abd_size, >, 0);
 	ASSERT3U(abd->abd_size, <=, SPA_MAXBLOCKSIZE);
 	ASSERT3U(abd->abd_flags, ==, abd->abd_flags & (ABD_FLAG_LINEAR |
-	    ABD_FLAG_OWNER | ABD_FLAG_META));
+	    ABD_FLAG_OWNER | ABD_FLAG_META | ABD_FLAG_SMALL));
 	IMPLY(abd->abd_parent != NULL, !(abd->abd_flags & ABD_FLAG_OWNER));
 	IMPLY(abd->abd_flags & ABD_FLAG_META, abd->abd_flags & ABD_FLAG_OWNER);
 	if (abd_is_linear(abd)) {
