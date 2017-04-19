@@ -115,6 +115,7 @@ typedef struct abd_stats {
 	kstat_named_t abdstat_small_scatter_cnt;
 	kstat_named_t abdstat_scattered_metadata_cnt;
 	kstat_named_t abdstat_scattered_filedata_cnt;
+	kstat_named_t abdstat_borrowed_buf_cnt;
 } abd_stats_t;
 
 static abd_stats_t abd_stats = {
@@ -150,8 +151,10 @@ static abd_stats_t abd_stats = {
 	/* Number of allocations linearized because < zfs_abd_chunk_size */
 	{ "small_scatter_cnt",                  KSTAT_DATA_UINT64 },
 	/* Counts, respectively, of metadata buffers vs file data buffers */
-	{ "metadata_scattered_buffers",                   KSTAT_DATA_UINT64 },
-	{ "filedata_scattered_buffers",                   KSTAT_DATA_UINT64 },
+	{ "metadata_scattered_buffers",         KSTAT_DATA_UINT64 },
+	{ "filedata_scattered_buffers",         KSTAT_DATA_UINT64 },
+	/* number of borrowed bufs */
+	{ "borrowed_bufs",                      KSTAT_DATA_UINT64 },
 };
 
 #define	ABDSTAT(stat)		(abd_stats.stat.value.ui64)
@@ -661,6 +664,8 @@ abd_borrow_buf(abd_t *abd, size_t n)
 	}
 	(void) refcount_add_many(&abd->abd_children, n, buf);
 
+	ABDSTAT_BUMP(abdstat_borrowed_buf_cnt);
+
 	return (buf);
 }
 
@@ -692,6 +697,7 @@ abd_return_buf(abd_t *abd, void *buf, size_t n)
 		zio_buf_free(buf, n);
 	}
 	(void) refcount_remove_many(&abd->abd_children, n, buf);
+	ABDSTAT_BUMPDOWN(abdstat_borrowed_buf_cnt);
 }
 
 void
