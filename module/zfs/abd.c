@@ -1188,8 +1188,8 @@ abd_try_move_scattered_impl(abd_t *abd)
 		void *c = abd_alloc_chunk();
 		ASSERT3P(c, !=, NULL);
 		partialabd->abd_u.abd_scatter.abd_chunks[i] = c;
-		(void) memcpy(&partialabd->abd_u.abd_scatter.abd_chunks[i],
-		    &abd->abd_u.abd_scatter.abd_chunks[i], zfs_abd_chunk_size);
+		(void) memcpy(partialabd->abd_u.abd_scatter.abd_chunks[i],
+		    abd->abd_u.abd_scatter.abd_chunks[i], zfs_abd_chunk_size);
 	}
 
 	// release abd's old chunks to the kmem_cache
@@ -1228,8 +1228,6 @@ abd_try_move_linear_impl(abd_t *abd)
 		return (B_FALSE);
 	}
 
-	//refcount_add(&abd->abd_children, (void *) __func__);
-
 	// from abd_alloc_struct(0)
 	const size_t hsize = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[0]);
 	abd_t *partialabd = kmem_alloc(hsize, KM_PUSHPAGE);
@@ -1258,8 +1256,6 @@ abd_try_move_linear_impl(abd_t *abd)
 
 	// update time
 	abd->abd_create_time = gethrtime();
-
-	//refcount_remove(&abd->abd_children, (void *)__func__);
 
 	mutex_exit(&abd->abd_mutex);
 
