@@ -1168,7 +1168,7 @@ abd_try_move_scattered_impl(abd_t *abd)
 		return (B_FALSE);
 	}
 
-	refcount_add(&abd->abd_children, (void *) __func__);
+	//refcount_add(&abd->abd_children, (void *) __func__);
 
 	// from abd_alloc_struct and abd_alloc_free
 	const size_t chunkcnt = abd_scatter_chunkcnt(abd);
@@ -1203,7 +1203,7 @@ abd_try_move_scattered_impl(abd_t *abd)
 	// update time
 	abd->abd_create_time = gethrtime();
 
-	refcount_remove(&abd->abd_children, (void *) __func__);
+	//refcount_remove(&abd->abd_children, (void *) __func__);
 
 	abd_verify(abd);
 
@@ -1230,7 +1230,7 @@ abd_try_move_linear_impl(abd_t *abd)
 		return (B_FALSE);
 	}
 
-	refcount_add(&abd->abd_children, (void *) __func__);
+	//refcount_add(&abd->abd_children, (void *) __func__);
 
 	// from abd_alloc_struct(0)
 	const size_t hsize = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[0]);
@@ -1261,7 +1261,7 @@ abd_try_move_linear_impl(abd_t *abd)
 	// update time
 	abd->abd_create_time = gethrtime();
 
-	refcount_remove(&abd->abd_children, (void *)__func__);
+	//refcount_remove(&abd->abd_children, (void *)__func__);
 
 	mutex_exit(&abd->abd_mutex);
 
