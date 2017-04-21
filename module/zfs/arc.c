@@ -665,7 +665,7 @@ typedef struct arc_stats {
 	kstat_named_t abd_move_no_young_buf;
 	kstat_named_t abd_move_not_yet;
 	kstat_named_t abd_move_no_refcount;
-	kstat_named_t abd_move_no_linear_metadata;
+	kstat_named_t abd_move_no_metadata;
 	kstat_named_t abd_move_no_linear;
 #endif
 } arc_stats_t;
@@ -767,7 +767,7 @@ static arc_stats_t arc_stats = {
 	{ "arc_move_no_young_buf", KSTAT_DATA_UINT64 },
 	{ "arc_move_no_not_yet", KSTAT_DATA_UINT64 },
 	{ "arc_move_no_refcount", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_linear_metadata", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_metadata", KSTAT_DATA_UINT64 },
 	{ "arc_move_no_linear", KSTAT_DATA_UINT64 },
 #endif
 };
@@ -4827,6 +4827,8 @@ arc_access(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 		arc_change_state(arc_mru, hdr, hash_lock);
 
 	} else if (hdr->b_l1hdr.b_state == arc_mru) {
+		ASSERT(MUTEX_HELD(hash_lock));
+		arc_abd_try_move(hdr);
 		now = ddi_get_lbolt();
 
 		/*
@@ -4889,6 +4891,8 @@ arc_access(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 
 		ARCSTAT_BUMP(arcstat_mru_ghost_hits);
 	} else if (hdr->b_l1hdr.b_state == arc_mfu) {
+		ASSERT(MUTEX_HELD(hash_lock));
+		arc_abd_try_move(hdr);
 		/*
 		 * This buffer has been accessed more than once and is
 		 * still in the cache.  Keep it in the MFU state.
@@ -7785,7 +7789,7 @@ l2arc_stop(void)
 /*
  * check that this header is movable, and if so ask abd to move it
  */
-void
+static void
 arc_abd_try_move(arc_buf_hdr_t *hdr)
 {
 	// only move if fragmented, so:
@@ -7817,7 +7821,9 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	}
 
 	if (HDR_SHARED_DATA(hdr) ||
-	    hdr->b_l1hdr.b_buf != NULL) {
+	    (hdr->b_l1hdr.b_buf != NULL &&
+		hdr->b_l1hdr.b_buf->b_data !=
+		hdr->b_l1hdr.b_pabd)) {
 		ARCSTAT_BUMP(abd_move_no_shared);
 		fprintf(stderr, "c");
 		return;
@@ -7880,9 +7886,9 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		return;
 	}
 
-	// (abd) FIXME: make it safe to move linear metadata
-	if (HDR_ISTYPE_METADATA(hdr) && abd_is_linear(hdr->b_l1hdr.b_pabd)) {
-		ARCSTAT_BUMP(abd_move_no_linear_metadata);
+	// (abd) FIXME: make it safe to move metadata
+	if (HDR_ISTYPE_METADATA(hdr)) {
+		ARCSTAT_BUMP(abd_move_no_metadata);
 		fprintf(stderr, "i");
 		return;
 	}
