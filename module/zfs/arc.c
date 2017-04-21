@@ -665,6 +665,7 @@ typedef struct arc_stats {
 	kstat_named_t abd_move_no_young_buf;
 	kstat_named_t abd_move_not_yet;
 	kstat_named_t abd_move_no_refcount;
+	kstat_named_t abd_move_no_metadata;
 #endif
 } arc_stats_t;
 
@@ -755,6 +756,18 @@ static arc_stats_t arc_stats = {
 	{ "loaned_bytes", KSTAT_DATA_UINT64 },
 	{ "dbuf_redirtied", KSTAT_DATA_UINT64 },
 	{ "arc_no_grow", KSTAT_DATA_UINT64 },
+#ifdef __APPLE__
+	{ "arc_move_try", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_nol1hdr", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_nullabd", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_shared", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_big_arc", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_small_qcache", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_young_buf", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_not_yet", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_refcount", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_metadata", KSTAT_DATA_UINT64 },
+#endif
 };
 
 #define	ARCSTAT(stat)	(arc_stats.stat.value.ui64)
@@ -3425,7 +3438,7 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 			uint64_t evicted = arc_evict_hdr(hdr, hash_lock);
 #ifdef __APPLE__
 			if (evicted == 0 && hdr != NULL && hdr->b_spa != 0 &&
-				hdr != marker)
+				hdr != marker && bytes != ARC_EVICT_ALL)
 				arc_abd_try_move(hdr);
 #endif
 			mutex_exit(hash_lock);
@@ -7786,7 +7799,8 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
 	ARCSTAT_BUMP(abd_move_try);
 
-	if (!HDR_HAS_L1HDR(hdr) || GHOST_STATE(hdr->b_l1hdr.b_state)) {
+	if (!HDR_HAS_L1HDR(hdr) || GHOST_STATE(hdr->b_l1hdr.b_state) ||
+	    !HDR_IN_HASH_TABLE(hdr)) {
 		ARCSTAT_BUMP(abd_move_no_nol1hdr);
 		printf("a");
 		return;
@@ -7798,7 +7812,8 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		return;
 	}
 
-	if (HDR_SHARED_DATA(hdr)) {
+	if (HDR_SHARED_DATA(hdr) ||
+	    hdr->b_l1hdr.b_buf != NULL) {
 		ARCSTAT_BUMP(abd_move_no_shared);
 		printf("c");
 		return;
@@ -7832,7 +7847,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
 	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now) {
 		ARCSTAT_BUMP(abd_move_no_young_buf);
-		printf("e");
+		//printf("e");
 		//return;
 	}
 
@@ -7857,10 +7872,17 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		return;
 	}
 
+#if 0
+	if (HDR_ISTYPE_METADATA(hdr)) {
+		ARCSTAT_BUMP(abd_move_no_metadata);
+		printf("i");
+		return;
+	}
+#endif
+
 #ifdef _KERNEL
 	(void) abd_try_move(hdr->b_l1hdr.b_pabd);
 #else
-	printf("=");
 	if (abd_try_move(hdr->b_l1hdr.b_pabd) == B_TRUE)
 		printf("+\n");
 	else

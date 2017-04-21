@@ -411,6 +411,7 @@ abd_alloc(size_t size, boolean_t is_metadata)
 static void
 abd_free_scatter(abd_t *abd)
 {
+	mutex_enter(&abd->abd_mutex);
 	size_t n = abd_scatter_chunkcnt(abd);
 	for (int i = 0; i < n; i++) {
 		abd_free_chunk(abd->abd_u.abd_scatter.abd_chunks[i]);
@@ -435,6 +436,7 @@ abd_free_scatter(abd_t *abd)
 		ABDSTAT_BUMPDOWN(abdstat_scattered_filedata_cnt);
 	}
 
+	mutex_exit(&abd->abd_mutex);
 	abd_free_struct(abd);
 }
 
@@ -479,6 +481,8 @@ abd_alloc_linear(size_t size, boolean_t is_metadata)
 static void
 abd_free_linear(abd_t *abd)
 {
+	mutex_enter(&abd->abd_mutex);
+
 	if (abd->abd_flags & ABD_FLAG_META) {
 		zio_buf_free(abd->abd_u.abd_linear.abd_buf, abd->abd_size);
 	} else {
@@ -496,6 +500,8 @@ abd_free_linear(abd_t *abd)
 	} else {
 		ABDSTAT_INCR(abdstat_is_file_data_linear, unsize);
 	}
+
+	mutex_exit(&abd->abd_mutex);
 
 	abd_free_struct(abd);
 }
