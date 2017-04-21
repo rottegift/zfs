@@ -7834,7 +7834,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	// check fragmentation
 #ifdef _KERNEL
 	extern vmem_t *abd_chunk_arena, *zio_metadata_arena, *zio_arena;
-	const size_t qsize = vmem_size_semi_atomic(zio_arena_parent, VMEM_ALLOC|VMEM_FREE);
+	const size_t qsize = vmem_size_semi_atomic(zio_arena_parent, VMEM_ALLOC);
 	const size_t aused = vmem_size_semi_atomic(abd_chunk_arena, VMEM_ALLOC);
 	const size_t mused = vmem_size_semi_atomic(zio_metadata_arena, VMEM_ALLOC);
 	const size_t dused = vmem_size_semi_atomic(zio_arena, VMEM_ALLOC);
@@ -7843,7 +7843,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
 	const size_t empty = qsize - totused;
 
-	if (empty >= (qsize >> 4)) {
+	if (empty <= (qsize >> 4)) {
 		ARCSTAT_BUMP(abd_move_no_small_qcache);
 		return;
 	}
