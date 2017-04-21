@@ -7849,18 +7849,19 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 #endif
 
 	const hrtime_t now = gethrtime();
-	const hrtime_t fivemin = SEC2NSEC(5);
+	const hrtime_t fivemin = SEC2NSEC(5);  // small
 
 	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now) {
 		ARCSTAT_BUMP(abd_move_no_young_buf);
-		//printf("e");
-		//return;
+#ifdef _KERNEL
+		return;
+#endif
 	}
 
-	if (HDR_IO_IN_PROGRESS(hdr)/* ||
+	if (HDR_IO_IN_PROGRESS(hdr) ||
 	    ((hdr->b_flags & (ARC_FLAG_PREFETCH | ARC_FLAG_INDIRECT)) &&
 		ddi_get_lbolt() - hdr->b_l1hdr.b_arc_access <
-		arc_min_prefetch_lifespan)*/) {
+		arc_min_prefetch_lifespan)) {
 		ARCSTAT_BUMP(abd_move_not_yet);
 		fprintf(stderr, "f");
 		return;
