@@ -666,6 +666,7 @@ typedef struct arc_stats {
 	kstat_named_t abd_move_not_yet;
 	kstat_named_t abd_move_no_refcount;
 	kstat_named_t abd_move_no_metadata;
+	kstat_named_t abd_move_no_linear;
 #endif
 } arc_stats_t;
 
@@ -767,6 +768,7 @@ static arc_stats_t arc_stats = {
 	{ "arc_move_no_not_yet", KSTAT_DATA_UINT64 },
 	{ "arc_move_no_refcount", KSTAT_DATA_UINT64 },
 	{ "arc_move_no_metadata", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_linear", KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -7777,12 +7779,16 @@ l2arc_stop(void)
 }
 
 #ifdef __APPLE__
+#ifdef _KERNEL
+#define fprintf(...)
+#endif
 /*
  * check that this header is movable, and if so ask abd to move it
  */
 void
 arc_abd_try_move(arc_buf_hdr_t *hdr)
 {
+	return;
 
 	// only move if fragmented, so:
 	// make sure that arc_c ~ arc_c_min
@@ -7802,27 +7808,27 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	if (!HDR_HAS_L1HDR(hdr) || GHOST_STATE(hdr->b_l1hdr.b_state) ||
 	    !HDR_IN_HASH_TABLE(hdr)) {
 		ARCSTAT_BUMP(abd_move_no_nol1hdr);
-		printf("a");
+		fprintf(stderr, "a");
 		return;
 	}
 
 	if (hdr->b_l1hdr.b_pabd == NULL) {
 		ARCSTAT_BUMP(abd_move_no_nullabd);
-		printf("b");
+		fprintf(stderr, "b");
 		return;
 	}
 
 	if (HDR_SHARED_DATA(hdr) ||
 	    hdr->b_l1hdr.b_buf != NULL) {
 		ARCSTAT_BUMP(abd_move_no_shared);
-		printf("c");
+		fprintf(stderr, "c");
 		return;
 	}
 
 	// arc_c is relatively big, don't bother moving things
 	if (arc_c > arc_c_min + (arc_c_min >> arc_no_grow_shift)) {
 		ARCSTAT_BUMP(abd_move_no_big_arc);
-		printf("d");
+		fprintf(stderr, "d");
 		return;
 	}
 
@@ -7856,37 +7862,44 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		ddi_get_lbolt() - hdr->b_l1hdr.b_arc_access <
 		arc_min_prefetch_lifespan)*/) {
 		ARCSTAT_BUMP(abd_move_not_yet);
-		printf("f");
+		fprintf(stderr, "f");
 		return;
 	}
 
 	if (HDR_L2_WRITING(hdr)) {
 		ARCSTAT_BUMP(abd_move_not_yet);
-		printf("g");
+		fprintf(stderr, "g");
 		return;
 	}
 
 	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 0) {
 		ARCSTAT_BUMP(abd_move_no_refcount);
-		printf("h");
+		fprintf(stderr, "h");
 		return;
 	}
 
-#if 0
-	if (HDR_ISTYPE_METADATA(hdr)) {
+	// (abd) FIXME: make it safe to move linear metadata
+	if (HDR_ISTYPE_METADATA(hdr) && abd_is_linear(hdr->b_l1hdr.b_pabd)) {
 		ARCSTAT_BUMP(abd_move_no_metadata);
-		printf("i");
+		fprintf(stderr, "i");
 		return;
 	}
-#endif
+
+	// (abd) FIXME: make it safe to move all linear
+	if (abd_is_linear(hdr->b_l1hdr.b_pabd)) {
+		ARCSTAT_BUMP(abd_move_no_linear);
+		fprintf(stderr, "j");
+		return;
+	}
+
 
 #ifdef _KERNEL
 	(void) abd_try_move(hdr->b_l1hdr.b_pabd);
 #else
 	if (abd_try_move(hdr->b_l1hdr.b_pabd) == B_TRUE)
-		printf("+\n");
+		fprintf(stderr, "+\n");
 	else
-		printf("-\n");
+		fprintf(stderr, "-\n");
 #endif
 }
 #endif

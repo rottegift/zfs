@@ -1195,7 +1195,7 @@ abd_try_move_scattered_impl(abd_t *abd)
 	// release abd's old chunks to the kmem_cache
 	// and move chunks from partialabd to abd
 	for (int j = 0; j < chunkcnt; j++) {
-		//abd_free_chunk(abd->abd_u.abd_scatter.abd_chunks[j]);
+		abd_free_chunk(abd->abd_u.abd_scatter.abd_chunks[j]);
 		abd->abd_u.abd_scatter.abd_chunks[j] =
 		    partialabd->abd_u.abd_scatter.abd_chunks[j];
 	}
@@ -1210,7 +1210,7 @@ abd_try_move_scattered_impl(abd_t *abd)
 	mutex_exit(&abd->abd_mutex);
 
 	// release partialabd
-	//kmem_free(partialabd, hsize);
+	kmem_free(partialabd, hsize);
 
 	return (B_TRUE);
 }
@@ -1219,8 +1219,6 @@ static boolean_t
 abd_try_move_linear_impl(abd_t *abd)
 {
 	ASSERT((abd->abd_flags & ABD_FLAG_LINEAR) == ABD_FLAG_LINEAR);
-
-	return(B_FALSE);
 
 	mutex_enter(&abd->abd_mutex);
 
@@ -1235,12 +1233,11 @@ abd_try_move_linear_impl(abd_t *abd)
 	refcount_add(&abd->abd_children, (void *) __func__);
 
 	// from abd_alloc_struct(0)
-	size_t hsize = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[0]);
+	const size_t hsize = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[0]);
 	abd_t *partialabd = kmem_alloc(hsize, KM_PUSHPAGE);
 	ASSERT3P(partialabd, !=, NULL);
 
-	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) == ABD_FLAG_META;
-
+	const boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) == ABD_FLAG_META;
 	const size_t bsize = abd->abd_size;
 
 	void *newbuf = NULL;
