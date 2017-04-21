@@ -241,6 +241,7 @@ abd_init(void)
 	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, 0,
 	    NULL, NULL, NULL, NULL, data_alloc_arena, KMC_NOTOUCH);
 #else
+#define	KMF_AUDIT		0x00000001	/* transaction auditing */
 #define KMF_DEADBEEF    0x00000002      /* deadbeef checking */
 #define KMF_REDZONE             0x00000004      /* redzone checking */
 #define KMF_CONTENTS    0x00000008      /* freed-buffer content logging */
@@ -264,7 +265,8 @@ abd_init(void)
 
 	ASSERT3P(abd_chunk_arena, !=, NULL);
 
-	int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
+	int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
+	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
 	//int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
 
 	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, zfs_abd_chunk_size,
@@ -1168,8 +1170,6 @@ abd_try_move_scattered_impl(abd_t *abd)
 		return (B_FALSE);
 	}
 
-	//refcount_add(&abd->abd_children, (void *) __func__);
-
 	// from abd_alloc_struct and abd_alloc_free
 	const size_t chunkcnt = abd_scatter_chunkcnt(abd);
         const size_t hsize = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[chunkcnt]);
@@ -1203,14 +1203,12 @@ abd_try_move_scattered_impl(abd_t *abd)
 	// update time
 	abd->abd_create_time = gethrtime();
 
-	//refcount_remove(&abd->abd_children, (void *) __func__);
-
 	abd_verify(abd);
-
-	mutex_exit(&abd->abd_mutex);
 
 	// release partialabd
 	kmem_free(partialabd, hsize);
+
+	mutex_exit(&abd->abd_mutex);
 
 	return (B_TRUE);
 }
