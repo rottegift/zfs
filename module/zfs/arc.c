@@ -665,7 +665,7 @@ typedef struct arc_stats {
 	kstat_named_t abd_move_no_young_buf;
 	kstat_named_t abd_move_not_yet;
 	kstat_named_t abd_move_no_refcount;
-	kstat_named_t abd_move_no_metadata;
+	kstat_named_t abd_move_no_linear_metadata;
 	kstat_named_t abd_move_no_linear;
 #endif
 } arc_stats_t;
@@ -767,7 +767,7 @@ static arc_stats_t arc_stats = {
 	{ "arc_move_no_young_buf", KSTAT_DATA_UINT64 },
 	{ "arc_move_no_not_yet", KSTAT_DATA_UINT64 },
 	{ "arc_move_no_refcount", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_metadata", KSTAT_DATA_UINT64 },
+	{ "arc_move_no_linear_metadata", KSTAT_DATA_UINT64 },
 	{ "arc_move_no_linear", KSTAT_DATA_UINT64 },
 #endif
 };
@@ -7880,7 +7880,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
 	// (abd) FIXME: make it safe to move linear metadata
 	if (HDR_ISTYPE_METADATA(hdr) && abd_is_linear(hdr->b_l1hdr.b_pabd)) {
-		ARCSTAT_BUMP(abd_move_no_metadata);
+		ARCSTAT_BUMP(abd_move_no_linear_metadata);
 		fprintf(stderr, "i");
 		return;
 	}
