@@ -287,7 +287,7 @@ extern vmem_t *heap_arena;
 static _Atomic int64_t reclaim_shrink_target = 0;
 void IOSleep(unsigned milliseconds);
 #endif
-void arc_abd_try_move(arc_buf_hdr_t *);
+static void arc_abd_try_move(arc_buf_hdr_t *);
 #endif
 
 #ifndef _KERNEL
