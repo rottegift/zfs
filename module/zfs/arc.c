@@ -287,6 +287,7 @@ extern vmem_t *heap_arena;
 static _Atomic int64_t reclaim_shrink_target = 0;
 void IOSleep(unsigned milliseconds);
 #endif
+void arc_abd_try_move(arc_buf_hdr_t *);
 #endif
 
 #ifndef _KERNEL
@@ -3418,6 +3419,10 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 			 */
 			if (evicted != 0)
 				evict_count++;
+#ifdef __APPLE__
+			else
+				arc_abd_try_move(hdr);
+#endif
 
 			/*
 			 * If arc_size isn't overflowing, signal any
@@ -7741,3 +7746,67 @@ l2arc_stop(void)
 		cv_wait(&l2arc_feed_thr_cv, &l2arc_feed_thr_lock);
 	mutex_exit(&l2arc_feed_thr_lock);
 }
+
+#ifdef __APPLE__
+/*
+ * check that this header is movable, and if so ask abd to move it
+ */
+void
+arc_abd_try_move(arc_buf_hdr_t *hdr)
+{
+
+	// only move if fragmented, so:
+	// make sure that arc_c ~ arc_c_min
+	// make sure that zfs_qcache.mem_total >> abd_chunk.mem_inuse +
+	//                zfs_file_data.mem_inuse + zfs_data.mem_inuse
+	// make sure that abd is sufficiently old
+
+	// only hand to abd if it looks safe:
+	// (cf. checks in arc_evict_hdr())
+	// verify hdr refcount
+	// check against in progress i/o
+
+        // if all is good, call abd_try_move(hdr->p_abd)
+
+	if (!HDR_HAS_L1HDR(hdr))
+		return;
+
+	if (hdr->b_l1hdr.b_pabd == NULL)
+		return;
+
+	// arc_c is relatively big, don't bother moving things
+	if (arc_c > arc_c_min + (arc_c_min >> arc_no_grow_shift))
+		return;
+
+	// check fragmentation
+#ifdef _KERNEL
+	extern vmem_t *abd_chunk_arena, *zio_metadata_arena, *zio_arena;
+	const size_t qsize = vmem_size_semi_atomic(zio_arena_parent, VMEM_ALLOC|VMEM_FREE);
+	const size_t aused = vmem_size_semi_atomic(abd_chunk_arena, VMEM_ALLOC);
+	const size_t mused = vmem_size_semi_atomic(zio_metadata_arena, VMEM_ALLOC);
+	const size_t dused = vmem_size_semi_atomic(zio_arena, VMEM_ALLOC);
+
+	const size_t totused = aused+mused+dused;
+
+	if ((qsize >> 1) < totused)
+		return;
+#endif
+
+	const hrtime_t now = gethrtime();
+	const hrtime_t fivemin = SEC2NSEC(5*60);
+
+	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now)
+		return;
+
+	if (HDR_IO_IN_PROGRESS(hdr) ||
+	    ((hdr->b_flags & (ARC_FLAG_PREFETCH | ARC_FLAG_INDIRECT)) &&
+	    ddi_get_lbolt() - hdr->b_l1hdr.b_arc_access <
+	    arc_min_prefetch_lifespan))
+		return;
+
+	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 0)
+		return;
+
+	(void) abd_try_move(hdr->b_l1hdr.b_pabd);
+}
+#endif

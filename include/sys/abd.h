@@ -155,6 +155,10 @@ abd_zero(abd_t *abd, size_t size)
 void abd_init(void);
 void abd_fini(void);
 
+#ifdef __APPLE__
+boolean_t abd_try_move(abd_t *);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
