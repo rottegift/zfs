@@ -7788,8 +7788,6 @@ l2arc_stop(void)
 void
 arc_abd_try_move(arc_buf_hdr_t *hdr)
 {
-	return;
-
 	// only move if fragmented, so:
 	// make sure that arc_c ~ arc_c_min
 	// make sure that zfs_qcache.mem_total >> abd_chunk.mem_inuse +
