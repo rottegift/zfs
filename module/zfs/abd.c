@@ -121,6 +121,7 @@ typedef struct abd_stats {
 	kstat_named_t abdstat_move_linear_fail;
 	kstat_named_t abdstat_moved_scattered;
 	kstat_named_t abdstat_move_scattered_fail;
+	kstat_named_t abdstat_move_to_buf_flag_fail;
 } abd_stats_t;
 
 static abd_stats_t abd_stats = {
@@ -166,6 +167,7 @@ static abd_stats_t abd_stats = {
 	{ "move_linear_fail",                   KSTAT_DATA_UINT64 },
 	{ "moved_scattered",                    KSTAT_DATA_UINT64 },
 	{ "move_scattered_fail",                KSTAT_DATA_UINT64 },
+	{ "move_to_buf_flag_fail",              KSTAT_DATA_UINT64 },
 };
 
 #define	ABDSTAT(stat)		(abd_stats.stat.value.ui64)
@@ -262,8 +264,8 @@ abd_init(void)
 
 	ASSERT3P(abd_chunk_arena, !=, NULL);
 
-	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
-	int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
+	int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
+	//int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
 
 	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, zfs_abd_chunk_size,
 	    NULL, NULL, NULL, NULL, abd_chunk_arena, cache_debug_flags);
@@ -314,7 +316,7 @@ abd_verify(abd_t *abd)
 	ASSERT3U(abd->abd_size, >, 0);
 	ASSERT3U(abd->abd_size, <=, SPA_MAXBLOCKSIZE);
 	ASSERT3U(abd->abd_flags, ==, abd->abd_flags & (ABD_FLAG_LINEAR |
-	    ABD_FLAG_OWNER | ABD_FLAG_META | ABD_FLAG_SMALL));
+	    ABD_FLAG_OWNER | ABD_FLAG_META | ABD_FLAG_SMALL | ABD_FLAG_NOMOVE));
 	IMPLY(abd->abd_parent != NULL, !(abd->abd_flags & ABD_FLAG_OWNER));
 	IMPLY(abd->abd_flags & ABD_FLAG_META, abd->abd_flags & ABD_FLAG_OWNER);
 	if (abd_is_linear(abd)) {
@@ -505,7 +507,10 @@ abd_free_linear(abd_t *abd)
 void
 abd_free(abd_t *abd)
 {
+	mutex_enter(&abd->abd_mutex);
 	abd_verify(abd);
+	abd->abd_flags |= ABD_FLAG_NOMOVE;
+	mutex_exit(&abd->abd_mutex);
 	ASSERT3P(abd->abd_parent, ==, NULL);
 	ASSERT(abd->abd_flags & ABD_FLAG_OWNER);
 	if (abd_is_linear(abd))
@@ -555,7 +560,9 @@ abd_get_offset(abd_t *sabd, size_t off)
 {
 	abd_t *abd;
 
+	mutex_enter(&sabd->abd_mutex);
 	abd_verify(sabd);
+	sabd->abd_flags |= ABD_FLAG_NOMOVE;
 	ASSERT3U(off, <=, sabd->abd_size);
 
 	if (abd_is_linear(sabd)) {
@@ -597,8 +604,10 @@ abd_get_offset(abd_t *sabd, size_t off)
 
 	abd->abd_size = sabd->abd_size - off;
 	abd->abd_parent = sabd;
+	abd->abd_flags |= ABD_FLAG_NOMOVE;
 	refcount_create(&abd->abd_children);
 	(void) refcount_add_many(&sabd->abd_children, abd->abd_size, abd);
+	mutex_exit(&sabd->abd_mutex);
 
 	return (abd);
 }
@@ -619,7 +628,7 @@ abd_get_from_buf(void *buf, size_t size)
 	 * own the underlying data buffer, which is not true in this case.
 	 * Therefore, we don't ever use ABD_FLAG_META here.
 	 */
-	abd->abd_flags = ABD_FLAG_LINEAR;
+	abd->abd_flags = ABD_FLAG_LINEAR | ABD_FLAG_NOMOVE;
 	abd->abd_size = size;
 	abd->abd_parent = NULL;
 	refcount_create(&abd->abd_children);
@@ -636,6 +645,7 @@ abd_get_from_buf(void *buf, size_t size)
 void
 abd_put(abd_t *abd)
 {
+	mutex_enter(&abd->abd_mutex);
 	abd_verify(abd);
 	ASSERT(!(abd->abd_flags & ABD_FLAG_OWNER));
 
@@ -643,10 +653,13 @@ abd_put(abd_t *abd)
 		mutex_enter(&abd->abd_parent->abd_mutex);
 		(void) refcount_remove_many(&abd->abd_parent->abd_children,
 		    abd->abd_size, abd);
+		if (refcount_is_zero(&abd->abd_parent->abd_children))
+			abd->abd_parent->abd_flags &= ~(ABD_FLAG_NOMOVE);
 		mutex_exit(&abd->abd_parent->abd_mutex);
 	}
 
 	refcount_destroy(&abd->abd_children);
+	mutex_exit(&abd->abd_mutex);
 	abd_free_struct(abd);
 }
 
@@ -657,7 +670,23 @@ void *
 abd_to_buf(abd_t *abd)
 {
 	ASSERT(abd_is_linear(abd));
+	mutex_enter(&abd->abd_mutex);
 	abd_verify(abd);
+	abd->abd_flags |= ABD_FLAG_NOMOVE;
+	mutex_exit(&abd->abd_mutex);
+	return (abd->abd_u.abd_linear.abd_buf);
+}
+
+/* to be used in ASSERTs and other places where we do
+ * not want to set ABD_FLAG_NOMOVE
+ */
+void *
+abd_to_buf_ephemeral(abd_t *abd)
+{
+	ASSERT(abd_is_linear(abd));
+	mutex_enter(&abd->abd_mutex);
+	abd_verify(abd);
+	mutex_exit(&abd->abd_mutex);
 	return (abd->abd_u.abd_linear.abd_buf);
 }
 
@@ -671,14 +700,16 @@ void *
 abd_borrow_buf(abd_t *abd, size_t n)
 {
 	void *buf;
+	mutex_enter(&abd->abd_mutex);
 	abd_verify(abd);
 	ASSERT3U(abd->abd_size, >=, n);
 	if (abd_is_linear(abd)) {
+		mutex_exit(&abd->abd_mutex);
 		buf = abd_to_buf(abd);
+		mutex_enter(&abd->abd_mutex);
 	} else {
 		buf = zio_buf_alloc(n);
 	}
-	mutex_enter(&abd->abd_mutex);
 	(void) refcount_add_many(&abd->abd_children, n, buf);
 	mutex_exit(&abd->abd_mutex);
 
@@ -706,15 +737,19 @@ abd_borrow_buf_copy(abd_t *abd, size_t n)
 void
 abd_return_buf(abd_t *abd, void *buf, size_t n)
 {
+	mutex_enter(&abd->abd_mutex);
 	abd_verify(abd);
 	ASSERT3U(abd->abd_size, >=, n);
 	if (abd_is_linear(abd)) {
+		mutex_exit(&abd->abd_mutex);
 		ASSERT3P(buf, ==, abd_to_buf(abd));
+		mutex_enter(&abd->abd_mutex);
 	} else {
+		mutex_exit(&abd->abd_mutex);
 		ASSERT0(abd_cmp_buf(abd, buf, n));
+		mutex_enter(&abd->abd_mutex);
 		zio_buf_free(buf, n);
 	}
-	mutex_enter(&abd->abd_mutex);
 	(void) refcount_remove_many(&abd->abd_children, n, buf);
 	mutex_exit(&abd->abd_mutex);
 	ABDSTAT_BUMPDOWN(abdstat_borrowed_buf_cnt);
@@ -738,6 +773,7 @@ abd_return_buf_copy(abd_t *abd, void *buf, size_t n)
 void
 abd_take_ownership_of_buf(abd_t *abd, boolean_t is_metadata)
 {
+	mutex_enter(&abd->abd_mutex);
 	ASSERT(abd_is_linear(abd));
 	ASSERT(!(abd->abd_flags & ABD_FLAG_OWNER));
 	abd_verify(abd);
@@ -756,11 +792,13 @@ abd_take_ownership_of_buf(abd_t *abd, boolean_t is_metadata)
 	} else {
 		ABDSTAT_INCR(abdstat_is_file_data_linear, size);
 	}
+	mutex_exit(&abd->abd_mutex);
 }
 
 void
 abd_release_ownership_of_buf(abd_t *abd)
 {
+	mutex_enter(&abd->abd_mutex);
 	ASSERT(abd_is_linear(abd));
 	ASSERT(abd->abd_flags & ABD_FLAG_OWNER);
 	abd_verify(abd);
@@ -781,6 +819,7 @@ abd_release_ownership_of_buf(abd_t *abd)
 		ABDSTAT_INCR(abdstat_is_file_data_scattered, unsize);
 		ABDSTAT_BUMPDOWN(abdstat_scattered_filedata_cnt);
 	}
+	mutex_exit(&abd->abd_mutex);
 }
 
 struct abd_iter {
@@ -896,6 +935,7 @@ abd_iterate_func(abd_t *abd, size_t off, size_t size,
 	int ret = 0;
 	struct abd_iter aiter;
 
+	mutex_enter(&abd->abd_mutex);
 	abd_verify(abd);
 	ASSERT3U(off + size, <=, abd->abd_size);
 
@@ -919,6 +959,7 @@ abd_iterate_func(abd_t *abd, size_t off, size_t size,
 		abd_iter_advance(&aiter, len);
 	}
 
+	mutex_exit(&abd->abd_mutex);
 	return (ret);
 }
 
@@ -1024,6 +1065,8 @@ abd_iterate_func2(abd_t *dabd, abd_t *sabd, size_t doff, size_t soff,
 	int ret = 0;
 	struct abd_iter daiter, saiter;
 
+	mutex_enter(&dabd->abd_mutex);
+	mutex_enter(&sabd->abd_mutex);
 	abd_verify(dabd);
 	abd_verify(sabd);
 
@@ -1058,6 +1101,8 @@ abd_iterate_func2(abd_t *dabd, abd_t *sabd, size_t doff, size_t soff,
 		abd_iter_advance(&saiter, len);
 	}
 
+	mutex_exit(&sabd->abd_mutex);
+	mutex_exit(&dabd->abd_mutex);
 	return (ret);
 }
 
@@ -1105,9 +1150,11 @@ static boolean_t
 abd_try_move_scattered_impl(abd_t *abd)
 {
 
-	ASSERT0(abd->abd_flags & ABD_FLAG_LINEAR);
+	VERIFY0(abd->abd_flags & ABD_FLAG_LINEAR);
 
 	mutex_enter(&abd->abd_mutex);
+
+	abd_verify(abd);
 
 	if (!refcount_is_zero(&abd->abd_children)) {
 		mutex_exit(&abd->abd_mutex);
@@ -1118,19 +1165,20 @@ abd_try_move_scattered_impl(abd_t *abd)
 	refcount_add(&abd->abd_children, (void *) __func__);
 
 	// from abd_alloc_struct and abd_alloc_free
-	size_t chunkcnt = abd_is_linear(abd) ? 0 : abd_scatter_chunkcnt(abd);
-        size_t size = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[chunkcnt]);
-	size_t n = abd_chunkcnt_for_bytes(size);
+	const size_t chunkcnt = abd_scatter_chunkcnt(abd);
+        const size_t hsize = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[chunkcnt]);
+	const size_t asize = abd->abd_size;
+	const size_t n = abd_chunkcnt_for_bytes(asize);
 	VERIFY3U(n,==,chunkcnt);
 
-	abd_t *partialabd = kmem_alloc(size, KM_PUSHPAGE);
+	abd_t *partialabd = kmem_alloc(hsize, KM_PUSHPAGE);
 	ASSERT3P(partialabd, !=, NULL);
 
 	partialabd->abd_u.abd_scatter.abd_offset = 0;
 	partialabd->abd_u.abd_scatter.abd_chunk_size = zfs_abd_chunk_size;
 
 	// copy abd's chunks into new chunks under partialabd
-	for (int i = 0; i < n; i++) {
+	for (int i = 0; i < chunkcnt; i++) {
 		void *c = abd_alloc_chunk();
 		ASSERT3P(c, !=, NULL);
 		partialabd->abd_u.abd_scatter.abd_chunks[i] = c;
@@ -1140,10 +1188,10 @@ abd_try_move_scattered_impl(abd_t *abd)
 
 	// release abd's old chunks to the kmem_cache
 	// and move chunks from partialabd to abd
-	for (int i = 0; i < n; i++) {
-		abd_free_chunk(abd->abd_u.abd_scatter.abd_chunks[i]);
-		(void) memcpy(&partialabd->abd_u.abd_scatter.abd_chunks[i],
-		    &abd->abd_u.abd_scatter.abd_chunks[i], zfs_abd_chunk_size);
+	for (int j = 0; j < chunkcnt; j++) {
+		//abd_free_chunk(abd->abd_u.abd_scatter.abd_chunks[j]);
+		abd->abd_u.abd_scatter.abd_chunks[j] =
+		    partialabd->abd_u.abd_scatter.abd_chunks[j];
 	}
 
 	// update time
@@ -1151,10 +1199,12 @@ abd_try_move_scattered_impl(abd_t *abd)
 
 	refcount_remove(&abd->abd_children, (void *) __func__);
 
+	abd_verify(abd);
+
 	mutex_exit(&abd->abd_mutex);
 
 	// release partialabd
-	kmem_free(partialabd, size);
+	//kmem_free(partialabd, hsize);
 
 	return (B_TRUE);
 }
@@ -1164,7 +1214,11 @@ abd_try_move_linear_impl(abd_t *abd)
 {
 	ASSERT((abd->abd_flags & ABD_FLAG_LINEAR) == ABD_FLAG_LINEAR);
 
+	return(B_FALSE);
+
 	mutex_enter(&abd->abd_mutex);
+
+	abd_verify(abd);
 
 	if (!refcount_is_zero(&abd->abd_children)) {
 		mutex_exit(&abd->abd_mutex);
@@ -1216,6 +1270,14 @@ abd_try_move_linear_impl(abd_t *abd)
 static boolean_t
 abd_try_move_impl(abd_t *abd)
 {
+
+	if ((abd->abd_flags & ABD_FLAG_NOMOVE) == ABD_FLAG_NOMOVE) {
+		ABDSTAT_BUMP(abdstat_move_to_buf_flag_fail);
+		hrtime_t now = gethrtime();
+		hrtime_t fivemin = SEC2NSEC(5*60);
+		ASSERT3U((abd->abd_create_time + fivemin),<=,now);
+		return (B_FALSE);
+	}
 	if ((abd->abd_flags & ABD_FLAG_LINEAR) == ABD_FLAG_LINEAR) {
 		boolean_t r = abd_try_move_linear_impl(abd);
 		if (r == B_TRUE) {

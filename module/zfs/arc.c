@@ -655,6 +655,17 @@ typedef struct arc_stats {
 	kstat_named_t arcstat_loaned_bytes;
 	kstat_named_t arcstat_dbuf_redirtied;
 	kstat_named_t arcstat_arc_no_grow;
+#ifdef __APPLE__
+	kstat_named_t abd_move_try;
+	kstat_named_t abd_move_no_nol1hdr;
+	kstat_named_t abd_move_no_nullabd;
+	kstat_named_t abd_move_no_shared;
+	kstat_named_t abd_move_no_big_arc;
+	kstat_named_t abd_move_no_small_qcache;
+	kstat_named_t abd_move_no_young_buf;
+	kstat_named_t abd_move_not_yet;
+	kstat_named_t abd_move_no_refcount;
+#endif
 } arc_stats_t;
 
 static arc_stats_t arc_stats = {
@@ -1488,7 +1499,11 @@ arc_buf_is_shared(arc_buf_t *buf)
 	boolean_t shared = (buf->b_data != NULL &&
 	    buf->b_hdr->b_l1hdr.b_pabd != NULL &&
 	    abd_is_linear(buf->b_hdr->b_l1hdr.b_pabd) &&
+#ifndef __APPLE__
 	    buf->b_data == abd_to_buf(buf->b_hdr->b_l1hdr.b_pabd));
+#else
+	buf->b_data == abd_to_buf_ephemeral(buf->b_hdr->b_l1hdr.b_pabd));
+#endif
 	IMPLY(shared, HDR_SHARED_DATA(buf->b_hdr));
 	IMPLY(shared, ARC_BUF_SHARED(buf));
 	IMPLY(shared, ARC_BUF_COMPRESSED(buf) || ARC_BUF_LAST(buf));
@@ -3241,7 +3256,7 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 	ASSERT(HDR_HAS_L1HDR(hdr));
 
 	state = hdr->b_l1hdr.b_state;
-	if (GHOST_STATE(state)) {
+ 	if (GHOST_STATE(state)) {
 		ASSERT(!HDR_IO_IN_PROGRESS(hdr));
 		ASSERT3P(hdr->b_l1hdr.b_buf, ==, NULL);
 
@@ -3408,6 +3423,11 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 
 		if (mutex_tryenter(hash_lock)) {
 			uint64_t evicted = arc_evict_hdr(hdr, hash_lock);
+#ifdef __APPLE__
+			if (evicted == 0 && hdr != NULL && hdr->b_spa != 0 &&
+				hdr != marker)
+				arc_abd_try_move(hdr);
+#endif
 			mutex_exit(hash_lock);
 
 			bytes_evicted += evicted;
@@ -3419,10 +3439,6 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 			 */
 			if (evicted != 0)
 				evict_count++;
-#ifdef __APPLE__
-			else
-				arc_abd_try_move(hdr);
-#endif
 
 			/*
 			 * If arc_size isn't overflowing, signal any
@@ -5814,7 +5830,7 @@ arc_write_ready(zio_t *zio)
 			    arc_buf_size(buf));
 		}
 	} else {
-		ASSERT3P(buf->b_data, ==, abd_to_buf(zio->io_orig_abd));
+		ASSERT3P(buf->b_data, ==, abd_to_buf_ephemeral(zio->io_orig_abd));
 		ASSERT3U(zio->io_orig_size, ==, arc_buf_size(buf));
 		ASSERT3U(hdr->b_l1hdr.b_bufcnt, ==, 1);
 
@@ -7768,15 +7784,32 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
         // if all is good, call abd_try_move(hdr->p_abd)
 
-	if (!HDR_HAS_L1HDR(hdr))
-		return;
+	ARCSTAT_BUMP(abd_move_try);
 
-	if (hdr->b_l1hdr.b_pabd == NULL)
+	if (!HDR_HAS_L1HDR(hdr) || GHOST_STATE(hdr->b_l1hdr.b_state)) {
+		ARCSTAT_BUMP(abd_move_no_nol1hdr);
+		printf("a");
 		return;
+	}
+
+	if (hdr->b_l1hdr.b_pabd == NULL) {
+		ARCSTAT_BUMP(abd_move_no_nullabd);
+		printf("b");
+		return;
+	}
+
+	if (HDR_SHARED_DATA(hdr)) {
+		ARCSTAT_BUMP(abd_move_no_shared);
+		printf("c");
+		return;
+	}
 
 	// arc_c is relatively big, don't bother moving things
-	if (arc_c > arc_c_min + (arc_c_min >> arc_no_grow_shift))
+	if (arc_c > arc_c_min + (arc_c_min >> arc_no_grow_shift)) {
+		ARCSTAT_BUMP(abd_move_no_big_arc);
+		printf("d");
 		return;
+	}
 
 	// check fragmentation
 #ifdef _KERNEL
@@ -7788,25 +7821,50 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
 	const size_t totused = aused+mused+dused;
 
-	if ((qsize >> 1) < totused)
+	if ((qsize >> 1) < totused) {
+		ARCSTAT_BUMP(abd_move_no_small_qcache);
 		return;
+	}
 #endif
 
 	const hrtime_t now = gethrtime();
-	const hrtime_t fivemin = SEC2NSEC(5*60);
+	const hrtime_t fivemin = SEC2NSEC(5);
 
-	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now)
-		return;
+	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now) {
+		ARCSTAT_BUMP(abd_move_no_young_buf);
+		printf("e");
+		//return;
+	}
 
-	if (HDR_IO_IN_PROGRESS(hdr) ||
+	if (HDR_IO_IN_PROGRESS(hdr)/* ||
 	    ((hdr->b_flags & (ARC_FLAG_PREFETCH | ARC_FLAG_INDIRECT)) &&
-	    ddi_get_lbolt() - hdr->b_l1hdr.b_arc_access <
-	    arc_min_prefetch_lifespan))
+		ddi_get_lbolt() - hdr->b_l1hdr.b_arc_access <
+		arc_min_prefetch_lifespan)*/) {
+		ARCSTAT_BUMP(abd_move_not_yet);
+		printf("f");
 		return;
+	}
 
-	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 0)
+	if (HDR_L2_WRITING(hdr)) {
+		ARCSTAT_BUMP(abd_move_not_yet);
+		printf("g");
 		return;
+	}
 
+	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 0) {
+		ARCSTAT_BUMP(abd_move_no_refcount);
+		printf("h");
+		return;
+	}
+
+#ifdef _KERNEL
 	(void) abd_try_move(hdr->b_l1hdr.b_pabd);
+#else
+	printf("=");
+	if (abd_try_move(hdr->b_l1hdr.b_pabd) == B_TRUE)
+		printf("+\n");
+	else
+		printf("-\n");
+#endif
 }
 #endif

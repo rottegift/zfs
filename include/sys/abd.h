@@ -43,6 +43,7 @@ typedef enum abd_flags {
 	ABD_FLAG_OWNER	= 1 << 1,	/* does it own its data buffers? */
 	ABD_FLAG_META	= 1 << 2,	/* does this represent FS metadata? */
 	ABD_FLAG_SMALL  = 1 << 3,       /* (APPLE) : abd_alloc() went linear for a sub-chunk size */
+	ABD_FLAG_NOMOVE = 1 << 4,       /* (APPLE) : abd_to_buf() called on this abd */
 } abd_flags_t;
 
 typedef struct abd {
@@ -93,6 +94,7 @@ void abd_put(abd_t *);
  */
 
 void *abd_to_buf(abd_t *);
+void *abd_to_buf_ephemeral(abd_t *);
 void *abd_borrow_buf(abd_t *, size_t);
 void *abd_borrow_buf_copy(abd_t *, size_t);
 void abd_return_buf(abd_t *, void *, size_t);
