@@ -7886,12 +7886,14 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		return;
 	}
 
+#if 0
 	// (abd) FIXME: make it safe to move metadata
 	if (HDR_ISTYPE_METADATA(hdr)) {
 		ARCSTAT_BUMP(abd_move_no_metadata);
 		fprintf(stderr, "i");
 		return;
 	}
+#endif
 
 	// (abd) FIXME: make it safe to move all linear
 	if (abd_is_linear(hdr->b_l1hdr.b_pabd)) {
