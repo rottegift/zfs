@@ -7853,10 +7853,13 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		ARCSTAT_BUMP(abd_move_no_small_qcache);
 		return;
 	}
+
+	const hrtime_t fivemin = SEC2NSEC(5*60);
+#else
+	const hrtime_t fivemin = SEC2NSEC(11);  // small for testing in zdb
 #endif
 
 	const hrtime_t now = gethrtime();
-	const hrtime_t fivemin = SEC2NSEC(15);  // FIXME: small for testing
 
 	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now) {
 		ARCSTAT_BUMP(abd_move_no_young_buf);
@@ -8046,7 +8049,11 @@ void arc_abd_move_scan(void)
 			}
 
 			const hrtime_t timediff = now - hdr->b_l1hdr.b_pabd->abd_create_time;
-			const hrtime_t old_enough = SEC2NSEC(10);
+#ifdef _KERNEL
+			const hrtime_t old_enough = SEC2NSEC(60); // cf. test in arc_abd_try_move()
+#else
+			const hrtime_t old_enough = SEC2NSEC(5);
+#endif
 
 			if (timediff >= old_enough)
 				arc_abd_try_move(hdr);
