@@ -668,6 +668,10 @@ typedef struct arc_stats {
 	kstat_named_t abd_move_not_yet;
 	kstat_named_t abd_move_no_refcount;
 	kstat_named_t abd_move_no_linear;
+	kstat_named_t abd_scan_passes;
+	kstat_named_t abd_scan_not_one_pass;
+	kstat_named_t abd_scan_mutex_skip;
+	kstat_named_t abd_scan_completed_list;
 #endif
 } arc_stats_t;
 
@@ -759,16 +763,20 @@ static arc_stats_t arc_stats = {
 	{ "dbuf_redirtied", KSTAT_DATA_UINT64 },
 	{ "arc_no_grow", KSTAT_DATA_UINT64 },
 #ifdef __APPLE__
-	{ "arc_move_try", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_nol1hdr", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_nullabd", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_shared", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_big_arc", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_small_qcache", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_young_buf", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_not_yet", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_refcount", KSTAT_DATA_UINT64 },
-	{ "arc_move_no_linear", KSTAT_DATA_UINT64 },
+	{ "arc_move_try",              KSTAT_DATA_UINT64 },
+	{ "arc_move_no_nol1hdr",       KSTAT_DATA_UINT64 },
+	{ "arc_move_no_nullabd",       KSTAT_DATA_UINT64 },
+	{ "arc_move_no_shared",        KSTAT_DATA_UINT64 },
+	{ "arc_move_no_big_arc",       KSTAT_DATA_UINT64 },
+	{ "arc_move_no_small_qcache",  KSTAT_DATA_UINT64 },
+	{ "arc_move_no_young_buf",     KSTAT_DATA_UINT64 },
+	{ "arc_move_no_not_yet",       KSTAT_DATA_UINT64 },
+	{ "arc_move_no_refcount",      KSTAT_DATA_UINT64 },
+	{ "arc_move_no_linear",        KSTAT_DATA_UINT64 },
+	{ "abd_scan_passes",           KSTAT_DATA_UINT64 },
+	{ "abd_scan_not_one_pass",     KSTAT_DATA_UINT64 },
+	{ "abd_scan_not_mutex_skip",   KSTAT_DATA_UINT64 },
+	{ "abd_scan_completed_list",   KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -7835,8 +7843,12 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		return;
 	}
 
-	// check fragmentation
+
 #ifdef _KERNEL
+	// check fragmentation:
+	// if there is little space in zfs_qcache (zio_arena_parent) then
+	// we should not bother moving
+
 	extern vmem_t *abd_chunk_arena, *zio_metadata_arena, *zio_arena;
 	const size_t qsize = vmem_size_semi_atomic(zio_arena_parent, VMEM_ALLOC);
 	const size_t aused = vmem_size_semi_atomic(abd_chunk_arena, VMEM_ALLOC);
@@ -8004,54 +8016,69 @@ void arc_abd_move_scan(void)
 	arc_buf_hdr_t *hdr, *hdr_next;
 	hrtime_t now = gethrtime();
 	const hrtime_t end_after = now + MSEC2NSEC(1);
+	extern int zfs_multilist_num_sublists;
+	const uint16_t maxpass = MAX(4, MAX(max_ncpus, zfs_multilist_num_sublists));
 
-	for (int try = 0; try <= 3; try++) {
-		multilist_sublist_t *mls = l2arc_sublist_lock(try);
+	uint16_t pass = 0;
 
-		hdr = multilist_sublist_head(mls);
-
-		for(; hdr; hdr = hdr_next) {
-
+	for (; now <= end_after && pass < maxpass; ) {
+		pass++;
+		for (int try = 0; try <= 3; try++) {
 			if (now > end_after)
 				break;
+			multilist_sublist_t *mls = l2arc_sublist_lock(try);
 
-			now = gethrtime();
+			hdr = multilist_sublist_head(mls);
 
-			kmutex_t *hash_lock;
+			for(; hdr; hdr = hdr_next) {
 
-			hdr_next = multilist_sublist_next(mls, hdr);
+				if (now > end_after)
+					break;
 
-			hash_lock = HDR_LOCK(hdr);
-			if (!mutex_tryenter(hash_lock)) {
-				/* skip this buffer rather than waiting */
-				continue;
-			}
+				now = gethrtime();
 
-			// hash_lock mutex held
+				kmutex_t *hash_lock;
 
-			if (!HDR_HAS_L1HDR(hdr) ||
-			    GHOST_STATE(hdr->b_l1hdr.b_state) ||
-			    !HDR_IN_HASH_TABLE(hdr) ||
-			    hdr->b_l1hdr.b_pabd == NULL) {
-				mutex_exit(hash_lock);
-				continue;
-			}
+				hdr_next = multilist_sublist_next(mls, hdr);
 
-			const hrtime_t timediff = now - hdr->b_l1hdr.b_pabd->abd_create_time;
+				hash_lock = HDR_LOCK(hdr);
+				if (!mutex_tryenter(hash_lock)) {
+					/* skip this buffer rather than waiting */
+					ARCSTAT_BUMP(abd_scan_mutex_skip);
+					continue;
+				}
+
+				// hash_lock mutex held
+
+				if (!HDR_HAS_L1HDR(hdr) ||
+				    GHOST_STATE(hdr->b_l1hdr.b_state) ||
+				    !HDR_IN_HASH_TABLE(hdr) ||
+				    hdr->b_l1hdr.b_pabd == NULL) {
+					mutex_exit(hash_lock);
+					continue;
+				}
+
+				const hrtime_t timediff = now - hdr->b_l1hdr.b_pabd->abd_create_time;
 #ifdef _KERNEL
-			const hrtime_t old_enough = SEC2NSEC(60); // cf. test in arc_abd_try_move()
+				const hrtime_t old_enough = SEC2NSEC(60); // cf. test in arc_abd_try_move()
 #else
-			const hrtime_t old_enough = SEC2NSEC(5);
+				const hrtime_t old_enough = SEC2NSEC(5);
 #endif
 
-			if (timediff >= old_enough)
-				arc_abd_try_move(hdr);
+				if (timediff >= old_enough)
+					arc_abd_try_move(hdr);
 
-			mutex_exit(hash_lock);
+				mutex_exit(hash_lock);
+			}
+			multilist_sublist_unlock(mls);
+
+			if (hdr == NULL)
+				ARCSTAT_BUMP(abd_scan_completed_list);
 		}
-
-		multilist_sublist_unlock(mls);
+		ARCSTAT_BUMP(abd_scan_passes);
 	}
+	if (pass < 2)
+		ARCSTAT_BUMP(abd_scan_not_one_pass);
 }
 
 #endif
