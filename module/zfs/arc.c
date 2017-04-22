@@ -8015,14 +8015,13 @@ void arc_abd_move_scan(void)
 {
 	arc_buf_hdr_t *hdr, *hdr_next;
 	hrtime_t now = gethrtime();
-	const hrtime_t end_after = now + MSEC2NSEC(1);
+	const hrtime_t end_after = now + MSEC2NSEC(20);
 	extern int zfs_multilist_num_sublists;
 	const uint16_t maxpass = MAX(4, MAX(max_ncpus, zfs_multilist_num_sublists));
 
 	uint16_t pass = 0;
 
-	for (; now <= end_after && pass < maxpass; ) {
-		pass++;
+	for (; now <= end_after && pass < maxpass; pass++) {
 		for (int try = 0; try <= 3; try++) {
 			if (now > end_after)
 				break;
@@ -8077,7 +8076,7 @@ void arc_abd_move_scan(void)
 		}
 		ARCSTAT_BUMP(abd_scan_passes);
 	}
-	if (pass < 2)
+	if (pass < 1)
 		ARCSTAT_BUMP(abd_scan_not_one_pass);
 }
 
