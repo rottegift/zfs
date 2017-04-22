@@ -672,6 +672,7 @@ typedef struct arc_stats {
 	kstat_named_t abd_scan_not_one_pass;
 	kstat_named_t abd_scan_mutex_skip;
 	kstat_named_t abd_scan_completed_list;
+	kstat_named_t abd_scan_list_timeout;
 #endif
 } arc_stats_t;
 
@@ -777,6 +778,7 @@ static arc_stats_t arc_stats = {
 	{ "abd_scan_not_one_pass",     KSTAT_DATA_UINT64 },
 	{ "abd_scan_not_mutex_skip",   KSTAT_DATA_UINT64 },
 	{ "abd_scan_completed_list",   KSTAT_DATA_UINT64 },
+	{ "abd_scan_list_timeout",     KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -8015,24 +8017,31 @@ void arc_abd_move_scan(void)
 {
 	arc_buf_hdr_t *hdr, *hdr_next;
 	hrtime_t now = gethrtime();
-	const hrtime_t end_after = now + MSEC2NSEC(20);
 	extern int zfs_multilist_num_sublists;
 	const uint16_t maxpass = MAX(4, MAX(max_ncpus, zfs_multilist_num_sublists));
+	const hrtime_t end_sublist_delta = MSEC2NSEC(2);
+	const hrtime_t end_all_after = now + (end_sublist_delta * maxpass);
 
 	uint16_t pass = 0;
 
-	for (; now <= end_after && pass < maxpass; pass++) {
+	for (; now <= end_all_after && pass < maxpass; pass++) {
 		for (int try = 0; try <= 3; try++) {
-			if (now > end_after)
+
+			if (now > end_all_after)
 				break;
+
 			multilist_sublist_t *mls = l2arc_sublist_lock(try);
 
 			hdr = multilist_sublist_head(mls);
 
+			const hrtime_t end_sublist_after = MIN((now + end_sublist_delta), end_all_after);
+
 			for(; hdr; hdr = hdr_next) {
 
-				if (now > end_after)
+				if (now > end_sublist_after) {
+					ARCSTAT_BUMP(abd_scan_list_timeout);
 					break;
+				}
 
 				now = gethrtime();
 
