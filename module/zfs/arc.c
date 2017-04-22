@@ -281,6 +281,8 @@
 
 #ifdef __APPLE__
 #include <sys/kstat_osx.h>
+static void arc_abd_move_thr_init(void);
+static void arc_abd_move_thr_fini(void);
 #ifdef _KERNEL
 extern vmem_t *zio_arena_parent;
 extern vmem_t *heap_arena;
@@ -3438,11 +3440,6 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 
 		if (mutex_tryenter(hash_lock)) {
 			uint64_t evicted = arc_evict_hdr(hdr, hash_lock);
-#ifdef __APPLE__
-			if (evicted == 0 && hdr != NULL && hdr->b_spa != 0 &&
-				hdr != marker && bytes != ARC_EVICT_ALL)
-				arc_abd_try_move(hdr);
-#endif
 			mutex_exit(hash_lock);
 
 			bytes_evicted += evicted;
@@ -4827,8 +4824,6 @@ arc_access(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 		arc_change_state(arc_mru, hdr, hash_lock);
 
 	} else if (hdr->b_l1hdr.b_state == arc_mru) {
-		ASSERT(MUTEX_HELD(hash_lock));
-		arc_abd_try_move(hdr);
 		now = ddi_get_lbolt();
 
 		/*
@@ -4891,8 +4886,6 @@ arc_access(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 
 		ARCSTAT_BUMP(arcstat_mru_ghost_hits);
 	} else if (hdr->b_l1hdr.b_state == arc_mfu) {
-		ASSERT(MUTEX_HELD(hash_lock));
-		arc_abd_try_move(hdr);
 		/*
 		 * This buffer has been accessed more than once and is
 		 * still in the cache.  Keep it in the MFU state.
@@ -6634,11 +6627,18 @@ arc_init(void)
 		    zfs_dirty_data_max_max);
 	}
 	if (!zfs_dirty_data_max) printf("ZFS: ARC zfs_dirty_data_max is zero\n");
+
+#ifdef __APPLE__
+	arc_abd_move_thr_init();
+#endif
 }
 
 void
 arc_fini(void)
 {
+#ifdef __APPLE__
+	arc_abd_move_thr_fini();
+#endif
 	mutex_enter(&arc_reclaim_lock);
 	arc_reclaim_thread_exit = B_TRUE;
 	/*
@@ -7856,7 +7856,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 #endif
 
 	const hrtime_t now = gethrtime();
-	const hrtime_t fivemin = SEC2NSEC(5);  // small
+	const hrtime_t fivemin = SEC2NSEC(15);  // FIXME: small for testing
 
 	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now) {
 		ARCSTAT_BUMP(abd_move_no_young_buf);
@@ -7907,9 +7907,155 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	(void) abd_try_move(hdr->b_l1hdr.b_pabd);
 #else
 	if (abd_try_move(hdr->b_l1hdr.b_pabd) == B_TRUE)
-		fprintf(stderr, "+\n");
+		fprintf(stderr, "+");
 	else
 		fprintf(stderr, "-\n");
 #endif
 }
+
+
+/* move thread, like l2arc_thread() :
+ * periodically awaken, if kstat.spl.misc.spl_misc.spl_buckets_mem_free is high,
+ * then scan the lists like l2arc_write,
+ * but instead of writing we invoke arc_abd_try_move
+ */
+
+static kmutex_t arc_abd_move_thr_lock;
+static kcondvar_t arc_abd_move_thr_cv;
+static uint8_t arc_abd_move_thr_exit = 0;
+static void arc_abd_move_thread(void *notused);
+static void arc_abd_move_scan(void);
+
+static void
+arc_abd_move_thr_init(void)
+{
+	arc_abd_move_thr_exit = 0;
+
+	mutex_init(&arc_abd_move_thr_lock, NULL, MUTEX_DEFAULT, NULL);
+	cv_init(&arc_abd_move_thr_cv, NULL, CV_DEFAULT, NULL);
+
+	(void) thread_create(NULL, 0, arc_abd_move_thread, NULL, 0, &p0,
+	    TS_RUN, minclsyspri);
+}
+
+static void
+arc_abd_move_thr_fini(void)
+{
+	mutex_enter(&arc_abd_move_thr_lock);
+	cv_signal(&arc_abd_move_thr_cv);
+	arc_abd_move_thr_exit = 1;
+	while (arc_abd_move_thr_exit != 0)
+		cv_wait(&arc_abd_move_thr_cv, &arc_abd_move_thr_lock);
+	mutex_exit(&arc_abd_move_thr_lock);
+
+	mutex_destroy(&arc_abd_move_thr_lock);
+	cv_destroy(&arc_abd_move_thr_cv);
+}
+
+#ifdef _KERNEL
+#include <sys/vmem.h>
+#endif
+
+static void
+arc_abd_move_thread(void *notused)
+{
+	callb_cpr_t cpr;
+#ifdef _KERNEL
+	clock_t wait_time = SEC2NSEC(60);
+	const int64_t threshold = physmem * 5LL / 100LL;
+#else
+	clock_t wait_time = SEC2NSEC(5);
+#endif
+
+	CALLB_CPR_INIT(&cpr, &arc_abd_move_thr_lock, callb_generic_cpr, FTAG);
+
+	mutex_enter(&arc_abd_move_thr_lock);
+
+	while (arc_abd_move_thr_exit == 0) {
+		CALLB_CPR_SAFE_BEGIN(&cpr);
+		(void) cv_timedwait_hires(&arc_abd_move_thr_cv,
+		    &arc_abd_move_thr_lock, wait_time, 0, 0);
+		CALLB_CPR_SAFE_END(&cpr, &arc_abd_move_thr_lock);
+
+ 		if (arc_warm == B_FALSE) {
+			wait_time = SEC2NSEC(60);
+			continue;
+		}
+
+		wait_time = SEC2NSEC(1);
+
+#ifdef _KERNEL
+		int64_t buckets_free = vmem_buckets_size(VMEM_FREE);
+
+		if (buckets_free < threshold)
+			continue;
+#endif
+
+		arc_abd_move_scan();
+
+	}
+	arc_abd_move_thr_exit = 0;
+	cv_broadcast(&arc_abd_move_thr_cv);
+	CALLB_CPR_EXIT(&cpr); // drops arc_abd_move_thr_lock
+	thread_exit();
+}
+
+/*
+ * borrow the skeleton of l2arc_write_buffers in ARC_WARM state
+ * namely we walk from the heads of lists, invoking arc_abd_try_move on
+ * sufficiently old headers
+ */
+
+static
+void arc_abd_move_scan(void)
+{
+	arc_buf_hdr_t *hdr, *hdr_next;
+	hrtime_t now = gethrtime();
+	const hrtime_t end_after = now + MSEC2NSEC(1);
+
+	for (int try = 0; try <= 3; try++) {
+		multilist_sublist_t *mls = l2arc_sublist_lock(try);
+
+		hdr = multilist_sublist_head(mls);
+
+		for(; hdr; hdr = hdr_next) {
+
+			if (now > end_after)
+				break;
+
+			now = gethrtime();
+
+			kmutex_t *hash_lock;
+
+			hdr_next = multilist_sublist_next(mls, hdr);
+
+			hash_lock = HDR_LOCK(hdr);
+			if (!mutex_tryenter(hash_lock)) {
+				/* skip this buffer rather than waiting */
+				continue;
+			}
+
+			// hash_lock mutex held
+
+			if (!HDR_HAS_L1HDR(hdr) ||
+			    GHOST_STATE(hdr->b_l1hdr.b_state) ||
+			    !HDR_IN_HASH_TABLE(hdr) ||
+			    hdr->b_l1hdr.b_pabd == NULL) {
+				mutex_exit(hash_lock);
+				continue;
+			}
+
+			const hrtime_t timediff = now - hdr->b_l1hdr.b_pabd->abd_create_time;
+			const hrtime_t old_enough = SEC2NSEC(10);
+
+			if (timediff >= old_enough)
+				arc_abd_try_move(hdr);
+
+			mutex_exit(hash_lock);
+		}
+
+		multilist_sublist_unlock(mls);
+	}
+}
+
 #endif
