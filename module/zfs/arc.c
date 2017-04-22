@@ -7831,7 +7831,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
 	// arc_c is relatively big and growing, don't bother moving things
 	if ((arc_warm != B_TRUE || arc_no_grow == B_FALSE) &&
-	    arc_c > arc_c_min + (arc_c_min >> arc_no_grow_shift)) {
+	    arc_c > ((arc_c_max - arc_c_min) >> 2)) {
 		ARCSTAT_BUMP(abd_move_no_big_arc);
 		fprintf(stderr, "d");
 		return;
