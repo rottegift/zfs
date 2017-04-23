@@ -7791,7 +7791,10 @@ l2arc_stop(void)
 }
 
 #ifdef __APPLE__
+#undef ZDB_DEBUG
 #ifdef _KERNEL
+#define fprintf(...)
+#elif !defined(ZDB_DEBUG)
 #define fprintf(...)
 #endif
 /*
@@ -7800,19 +7803,6 @@ l2arc_stop(void)
 static void
 arc_abd_try_move(arc_buf_hdr_t *hdr)
 {
-	// only move if fragmented, so:
-	// make sure that arc_c ~ arc_c_min
-	// make sure that zfs_qcache.mem_total >> abd_chunk.mem_inuse +
-	//                zfs_file_data.mem_inuse + zfs_data.mem_inuse
-	// make sure that abd is sufficiently old
-
-	// only hand to abd if it looks safe:
-	// (cf. checks in arc_evict_hdr())
-	// verify hdr refcount
-	// check against in progress i/o
-
-        // if all is good, call abd_try_move(hdr->p_abd)
-
 	ARCSTAT_BUMP(abd_move_try);
 
 	if (!HDR_HAS_L1HDR(hdr) || GHOST_STATE(hdr->b_l1hdr.b_state) ||

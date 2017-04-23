@@ -271,8 +271,8 @@ abd_init(void)
 	ASSERT3P(abd_chunk_arena, !=, NULL);
 
 	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
-	int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
-	//int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
+	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
+	int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
 
 	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, zfs_abd_chunk_size,
 	    NULL, NULL, NULL, NULL, abd_chunk_arena, cache_debug_flags);
