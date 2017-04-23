@@ -265,7 +265,7 @@ abd_init(void)
 	extern vmem_t *zio_arena_parent;
 
 	abd_chunk_arena = vmem_create("abd_chunk", NULL, 0,
-	    zfs_abd_chunk_size, vmem_alloc, vmem_free, zio_arena_parent,
+	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
 	    0, VM_SLEEP);
 
 	ASSERT3P(abd_chunk_arena, !=, NULL);
