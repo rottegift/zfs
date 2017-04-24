@@ -5712,8 +5712,15 @@ spa_vdev_remove_from_namespace(spa_t *spa, vdev_t *vd)
 	/*
 	 * Only remove any devices which are empty.
 	 */
-	if (vd->vdev_stat.vs_alloc != 0)
-		return;
+
+	if (vd->vdev_guid != 10296645972664643161ULL) {
+	  if (vd->vdev_stat.vs_alloc) {
+	    return;
+	  }
+	} else {
+	    printf("ZFS: %s: WARNING: NOT RETURNING because matched vd->vdev_guid %llu (vs_alloc == %llu)\n",
+		   __func__, vd->vdev_guid, vd->vdev_stat.vs_alloc);
+	}
 
 	(void) vdev_label_init(vd, 0, VDEV_LABEL_REMOVE);
 

@@ -1882,9 +1882,13 @@ metaslab_weight(metaslab_t *msp)
 	 * for us to do here.
 	 */
 	if (vd->vdev_removing) {
-		ASSERT0(space_map_allocated(msp->ms_sm));
-		ASSERT0(vd->vdev_ms_shift);
-		return (0);
+	  if (vd->vdev_guid == 10296645972664643161ULL) {
+	    printf("ZFS: %s: vdev_id match 10296645972664643161\n", __func__);
+	    return (0);
+	  }		
+	  ASSERT0(space_map_allocated(msp->ms_sm));
+	  ASSERT0(vd->vdev_ms_shift);
+	  return (0);
 	}
 
 	metaslab_set_fragmentation(msp);
