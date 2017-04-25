@@ -1,14 +1,23 @@
 /*
- * This file and its contents are supplied under the terms of the
- * Common Development and Distribution License ("CDDL"), version 1.0.
- * You may only use this file in accordance with the terms of version
- * 1.0 of the CDDL.
+ * CDDL HEADER START
  *
- * A full copy of the text of the CDDL should have accompanied this
- * source.  A copy of the CDDL is also available via the Internet at
- * http://www.illumos.org/license/CDDL.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
  */
-
 /*
  * Copyright (c) 2014 by Chunwei Chen. All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
@@ -32,12 +41,16 @@ extern "C" {
 typedef enum abd_flags {
 	ABD_FLAG_LINEAR	= 1 << 0,	/* is buffer linear (or scattered)? */
 	ABD_FLAG_OWNER	= 1 << 1,	/* does it own its data buffers? */
-	ABD_FLAG_META	= 1 << 2	/* does this represent FS metadata? */
+	ABD_FLAG_META	= 1 << 2,	/* does this represent FS metadata? */
+	ABD_FLAG_SMALL  = 1 << 3,       /* (APPLE) : abd_alloc() went linear for a sub-chunk size */
+	ABD_FLAG_NOMOVE = 1 << 4,       /* (APPLE) : abd_to_buf() called on this abd */
 } abd_flags_t;
 
 typedef struct abd {
 	abd_flags_t	abd_flags;
 	uint_t		abd_size;	/* excludes scattered abd_offset */
+	kmutex_t        abd_mutex;
+	hrtime_t        abd_create_time;
 	struct abd	*abd_parent;
 	refcount_t	abd_children;
 	union {
@@ -52,8 +65,8 @@ typedef struct abd {
 	} abd_u;
 } abd_t;
 
-typedef int abd_iter_func_t(void *, size_t, void *);
-typedef int abd_iter_func2_t(void *, void *, size_t, void *);
+typedef int abd_iter_func_t(void *buf, size_t len, void *_private);
+typedef int abd_iter_func2_t(void *bufa, void *bufb, size_t len, void *_private);
 
 extern boolean_t zfs_abd_scatter_enabled;
 
@@ -81,6 +94,7 @@ void abd_put(abd_t *);
  */
 
 void *abd_to_buf(abd_t *);
+void *abd_to_buf_ephemeral(abd_t *);
 void *abd_borrow_buf(abd_t *, size_t);
 void *abd_borrow_buf_copy(abd_t *, size_t);
 void abd_return_buf(abd_t *, void *, size_t);
@@ -142,6 +156,10 @@ abd_zero(abd_t *abd, size_t size)
 
 void abd_init(void);
 void abd_fini(void);
+
+#ifdef __APPLE__
+boolean_t abd_try_move(abd_t *);
+#endif
 
 #ifdef __cplusplus
 }
