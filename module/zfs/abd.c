@@ -1261,8 +1261,8 @@ abd_try_move_impl(abd_t *abd)
 
 	if ((abd->abd_flags & ABD_FLAG_NOMOVE) == ABD_FLAG_NOMOVE) {
 		ABDSTAT_BUMP(abdstat_move_to_buf_flag_fail);
-		hrtime_t now = gethrtime();
-		hrtime_t fivemin = SEC2NSEC(5*60);
+		ASSERTV(hrtime_t now = gethrtime());
+		ASSERTV(hrtime_t fivemin = SEC2NSEC(5*60));
 		ASSERT3U((abd->abd_create_time + fivemin),<=,now);
 		return (B_FALSE);
 	}
