@@ -187,15 +187,8 @@ boolean_t zfs_abd_scatter_enabled = B_TRUE;
  * will cause the machine to panic if you change it and try to access the data
  * within a scattered ABD.
  */
-#ifdef __APPLE__
-#ifdef _KERNEL
-size_t zfs_abd_chunk_size = 1024; // original from openzfs uses 1024
-#else
+
 size_t zfs_abd_chunk_size = 1024;
-#endif
-#else
-size_t zfs_abd_chunk_size = 1024;
-#endif
 
 #ifdef _KERNEL
 extern vmem_t *zio_arena;
@@ -1069,6 +1062,8 @@ abd_iterate_func2(abd_t *dabd, abd_t *sabd, size_t doff, size_t soff,
 	int ret = 0;
 	struct abd_iter daiter, saiter;
 
+	VERIFY3P(sabd,!=,dabd);
+
 	mutex_enter(&dabd->abd_mutex);
 	mutex_enter(&sabd->abd_mutex);
 	abd_verify(dabd);
@@ -1266,8 +1261,8 @@ abd_try_move_impl(abd_t *abd)
 
 	if ((abd->abd_flags & ABD_FLAG_NOMOVE) == ABD_FLAG_NOMOVE) {
 		ABDSTAT_BUMP(abdstat_move_to_buf_flag_fail);
-		hrtime_t now = gethrtime();
-		hrtime_t fivemin = SEC2NSEC(5*60);
+		ASSERTV(hrtime_t now = gethrtime());
+		ASSERTV(hrtime_t fivemin = SEC2NSEC(5*60));
 		ASSERT3U((abd->abd_create_time + fivemin),<=,now);
 		return (B_FALSE);
 	}

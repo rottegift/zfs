@@ -659,20 +659,18 @@ typedef struct arc_stats {
 	kstat_named_t arcstat_arc_no_grow;
 #ifdef __APPLE__
 	kstat_named_t abd_move_try;
-	kstat_named_t abd_move_no_nol1hdr;
-	kstat_named_t abd_move_no_nullabd;
-	kstat_named_t abd_move_no_shared;
-	kstat_named_t abd_move_no_big_arc;
 	kstat_named_t abd_move_no_small_qcache;
-	kstat_named_t abd_move_no_young_buf;
-	kstat_named_t abd_move_not_yet;
-	kstat_named_t abd_move_no_refcount;
+	kstat_named_t abd_move_skip_young_abd;
+	kstat_named_t abd_move_buf_too_young;
+	kstat_named_t abd_move_buf_busy;
 	kstat_named_t abd_move_no_linear;
 	kstat_named_t abd_scan_passes;
 	kstat_named_t abd_scan_not_one_pass;
 	kstat_named_t abd_scan_mutex_skip;
 	kstat_named_t abd_scan_completed_list;
 	kstat_named_t abd_scan_list_timeout;
+	kstat_named_t abd_scan_big_arc;
+	kstat_named_t abd_scan_full_walk;
 #endif
 } arc_stats_t;
 
@@ -765,20 +763,18 @@ static arc_stats_t arc_stats = {
 	{ "arc_no_grow", KSTAT_DATA_UINT64 },
 #ifdef __APPLE__
 	{ "arc_move_try",              KSTAT_DATA_UINT64 },
-	{ "arc_move_no_nol1hdr",       KSTAT_DATA_UINT64 },
-	{ "arc_move_no_nullabd",       KSTAT_DATA_UINT64 },
-	{ "arc_move_no_shared",        KSTAT_DATA_UINT64 },
-	{ "arc_move_no_big_arc",       KSTAT_DATA_UINT64 },
 	{ "arc_move_no_small_qcache",  KSTAT_DATA_UINT64 },
-	{ "arc_move_no_young_buf",     KSTAT_DATA_UINT64 },
-	{ "arc_move_no_not_yet",       KSTAT_DATA_UINT64 },
-	{ "arc_move_no_refcount",      KSTAT_DATA_UINT64 },
+	{ "arc_move_skip_young_abd",   KSTAT_DATA_UINT64 },
+	{ "arc_move_buf_too_young",    KSTAT_DATA_UINT64 },
+	{ "arc_move_buf_busy",         KSTAT_DATA_UINT64 },
 	{ "arc_move_no_linear",        KSTAT_DATA_UINT64 },
 	{ "abd_scan_passes",           KSTAT_DATA_UINT64 },
 	{ "abd_scan_not_one_pass",     KSTAT_DATA_UINT64 },
 	{ "abd_scan_not_mutex_skip",   KSTAT_DATA_UINT64 },
 	{ "abd_scan_completed_list",   KSTAT_DATA_UINT64 },
 	{ "abd_scan_list_timeout",     KSTAT_DATA_UINT64 },
+	{ "abd_scan_big_arc",          KSTAT_DATA_UINT64 },
+	{ "abd_scan_full_walk",        KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -7807,13 +7803,11 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
 	if (!HDR_HAS_L1HDR(hdr) || GHOST_STATE(hdr->b_l1hdr.b_state) ||
 	    !HDR_IN_HASH_TABLE(hdr)) {
-		ARCSTAT_BUMP(abd_move_no_nol1hdr);
 		fprintf(stderr, "a");
 		return;
 	}
 
 	if (hdr->b_l1hdr.b_pabd == NULL) {
-		ARCSTAT_BUMP(abd_move_no_nullabd);
 		fprintf(stderr, "b");
 		return;
 	}
@@ -7822,19 +7816,9 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	    (hdr->b_l1hdr.b_buf != NULL &&
 		hdr->b_l1hdr.b_buf->b_data !=
 		hdr->b_l1hdr.b_pabd)) {
-		ARCSTAT_BUMP(abd_move_no_shared);
 		fprintf(stderr, "c");
 		return;
 	}
-
-	// arc_c is relatively big and growing, don't bother moving things
-	if ((arc_warm != B_TRUE || arc_no_grow == B_FALSE) &&
-	    arc_c > ((arc_c_max - arc_c_min) >> 2)) {
-		ARCSTAT_BUMP(abd_move_no_big_arc);
-		fprintf(stderr, "d");
-		return;
-	}
-
 
 #ifdef _KERNEL
 	// check fragmentation:
@@ -7864,7 +7848,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	const hrtime_t now = gethrtime();
 
 	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now) {
-		ARCSTAT_BUMP(abd_move_no_young_buf);
+		ARCSTAT_BUMP(abd_move_skip_young_abd);
 #ifdef _KERNEL
 		return;
 #endif
@@ -7874,19 +7858,18 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	    ((hdr->b_flags & (ARC_FLAG_PREFETCH | ARC_FLAG_INDIRECT)) &&
 		ddi_get_lbolt() - hdr->b_l1hdr.b_arc_access <
 		arc_min_prefetch_lifespan)) {
-		ARCSTAT_BUMP(abd_move_not_yet);
+		ARCSTAT_BUMP(abd_move_buf_too_young);
 		fprintf(stderr, "f");
 		return;
 	}
 
 	if (HDR_L2_WRITING(hdr)) {
-		ARCSTAT_BUMP(abd_move_not_yet);
+		ARCSTAT_BUMP(abd_move_buf_busy);
 		fprintf(stderr, "g");
 		return;
 	}
 
 	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 0) {
-		ARCSTAT_BUMP(abd_move_no_refcount);
 		fprintf(stderr, "h");
 		return;
 	}
@@ -7987,6 +7970,11 @@ arc_abd_move_thread(void *notused)
 			continue;
 #endif
 
+		if (arc_c > arc_c_min + ((arc_c_max - arc_c_min) >> 2)) {
+			ARCSTAT_BUMP(abd_scan_big_arc);
+			continue;
+		}
+
 		arc_abd_move_scan();
 
 	}
@@ -8077,6 +8065,8 @@ void arc_abd_move_scan(void)
 	}
 	if (pass < 1)
 		ARCSTAT_BUMP(abd_scan_not_one_pass);
+	else if (pass >= maxpass)
+		ARCSTAT_BUMP(abd_scan_full_walk);
 }
 
 #endif
