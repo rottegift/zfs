@@ -1069,6 +1069,8 @@ abd_iterate_func2(abd_t *dabd, abd_t *sabd, size_t doff, size_t soff,
 	int ret = 0;
 	struct abd_iter daiter, saiter;
 
+	VERIFY3P(sabd,!=,dabd);
+
 	mutex_enter(&dabd->abd_mutex);
 	mutex_enter(&sabd->abd_mutex);
 	abd_verify(dabd);
