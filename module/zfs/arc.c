@@ -7970,7 +7970,7 @@ arc_abd_move_thread(void *notused)
 			continue;
 #endif
 
-		if (arc_c > ((arc_c_max - arc_c_min) >> 2)) {
+		if (arc_c > arc_c_min + ((arc_c_max - arc_c_min) >> 2)) {
 			ARCSTAT_BUMP(abd_scan_big_arc);
 			continue;
 		}
