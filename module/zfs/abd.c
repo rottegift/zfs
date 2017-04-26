@@ -187,15 +187,8 @@ boolean_t zfs_abd_scatter_enabled = B_TRUE;
  * will cause the machine to panic if you change it and try to access the data
  * within a scattered ABD.
  */
-#ifdef __APPLE__
-#ifdef _KERNEL
-size_t zfs_abd_chunk_size = 1024; // original from openzfs uses 1024
-#else
+
 size_t zfs_abd_chunk_size = 1024;
-#endif
-#else
-size_t zfs_abd_chunk_size = 1024;
-#endif
 
 #ifdef _KERNEL
 extern vmem_t *zio_arena;
