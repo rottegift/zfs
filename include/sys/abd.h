@@ -150,6 +150,7 @@ abd_copy_to_buf(void* buf, abd_t *abd, size_t size)
 static inline int
 abd_cmp_buf(abd_t *abd, void *buf, size_t size)
 {
+	ASSERT3S(abd->abd_size,==,size);
 	return (abd_cmp_buf_off(abd, buf, 0, size));
 }
 
