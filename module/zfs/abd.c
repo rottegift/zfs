@@ -327,7 +327,7 @@ static inline abd_t *
 abd_alloc_struct(size_t chunkcnt)
 {
 	size_t size = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[chunkcnt]);
-	abd_t *abd = kmem_alloc(size, KM_PUSHPAGE);
+	abd_t *abd = kmem_zalloc(size, KM_PUSHPAGE);
 	ASSERT3P(abd, !=, NULL);
 	ABDSTAT_INCR(abdstat_struct_size, size);
 	abd->abd_create_time = gethrtime();
@@ -342,6 +342,13 @@ abd_free_struct(abd_t *abd)
 	size_t chunkcnt = abd_is_linear(abd) ? 0 : abd_scatter_chunkcnt(abd);
 	int size = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[chunkcnt]);
 	mutex_destroy(&abd->abd_mutex);
+	// poison the memory to catch UAF;
+	abd->abd_u.abd_scatter.abd_chunk_size = 0;
+	abd->abd_create_time = 0;
+	abd->abd_flags = 0;
+	abd->abd_parent = NULL;
+	abd->abd_size = 0;
+	abd->abd_u.abd_linear.abd_buf = NULL;
 	kmem_free(abd, size);
 	ABDSTAT_INCR(abdstat_struct_size, -size);
 }
@@ -1136,6 +1143,11 @@ abd_cmp_cb(void *bufa, void *bufb, size_t size, void *private)
 int
 abd_cmp(abd_t *dabd, abd_t *sabd, size_t size)
 {
+	ASSERT3P(sabd,!=,NULL);
+	ASSERT3P(dabd,!=,NULL);
+	ASSERT3P(sabd,!=,dabd);
+	ASSERT3S(sabd->abd_size,==,size);
+	ASSERT3S(dabd->abd_size,==,size);
 	return (abd_iterate_func2(dabd, sabd, 0, 0, size, abd_cmp_cb, NULL));
 }
 

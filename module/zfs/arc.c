@@ -671,6 +671,8 @@ typedef struct arc_stats {
 	kstat_named_t abd_scan_list_timeout;
 	kstat_named_t abd_scan_big_arc;
 	kstat_named_t abd_scan_full_walk;
+	kstat_named_t abd_scan_skip_young;
+	kstat_named_t abd_scan_skip_nothing;
 #endif
 } arc_stats_t;
 
@@ -775,6 +777,8 @@ static arc_stats_t arc_stats = {
 	{ "abd_scan_list_timeout",     KSTAT_DATA_UINT64 },
 	{ "abd_scan_big_arc",          KSTAT_DATA_UINT64 },
 	{ "abd_scan_full_walk",        KSTAT_DATA_UINT64 },
+	{ "abd_scan_skip_young",       KSTAT_DATA_UINT64 },
+	{ "abd_scan_skip_nothing",     KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -8036,23 +8040,27 @@ void arc_abd_move_scan(void)
 
 				// hash_lock mutex held
 
+				/* return if there is nothing to move */
 				if (!HDR_HAS_L1HDR(hdr) ||
 				    GHOST_STATE(hdr->b_l1hdr.b_state) ||
 				    !HDR_IN_HASH_TABLE(hdr) ||
 				    hdr->b_l1hdr.b_pabd == NULL) {
 					mutex_exit(hash_lock);
+					ARCSTAT_BUMP(abd_scan_skip_nothing);
 					continue;
 				}
 
 				const hrtime_t timediff = now - hdr->b_l1hdr.b_pabd->abd_create_time;
 #ifdef _KERNEL
-				const hrtime_t old_enough = SEC2NSEC(60); // cf. test in arc_abd_try_move()
+				const hrtime_t old_enough = SEC2NSEC(5*59); // cf. test in arc_abd_try_move()
 #else
-				const hrtime_t old_enough = SEC2NSEC(5);
+				const hrtime_t old_enough = SEC2NSEC(5); // small in order to test frequently
 #endif
 
 				if (timediff >= old_enough)
 					arc_abd_try_move(hdr);
+				else
+					ARCSTAT_BUMP(abd_scan_skip_young);
 
 				mutex_exit(hash_lock);
 			}
