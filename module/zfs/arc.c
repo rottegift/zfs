@@ -7976,7 +7976,7 @@ arc_abd_move_thread(void *notused)
 			continue;
 		}
 
-		wait_time = SEC2NSEC(1);
+		wait_time = SEC2NSEC(6);
 
 #ifdef _KERNEL
 		int64_t buckets_free = vmem_buckets_size(VMEM_FREE);
