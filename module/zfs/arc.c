@@ -283,13 +283,14 @@
 #include <sys/kstat_osx.h>
 static void arc_abd_move_thr_init(void);
 static void arc_abd_move_thr_fini(void);
+static kcondvar_t arc_abd_move_thr_cv;
 #ifdef _KERNEL
 extern vmem_t *zio_arena_parent;
 extern vmem_t *heap_arena;
 static _Atomic int64_t reclaim_shrink_target = 0;
 void IOSleep(unsigned milliseconds);
 #endif
-static void arc_abd_try_move(arc_buf_hdr_t *);
+static boolean_t arc_abd_try_move(arc_buf_hdr_t *);
 #endif
 
 #ifndef _KERNEL
@@ -671,6 +672,9 @@ typedef struct arc_stats {
 	kstat_named_t abd_scan_list_timeout;
 	kstat_named_t abd_scan_big_arc;
 	kstat_named_t abd_scan_full_walk;
+	kstat_named_t abd_scan_skip_young;
+	kstat_named_t abd_scan_skip_nothing;
+	kstat_named_t abd_move_no_shared;
 #endif
 } arc_stats_t;
 
@@ -775,6 +779,9 @@ static arc_stats_t arc_stats = {
 	{ "abd_scan_list_timeout",     KSTAT_DATA_UINT64 },
 	{ "abd_scan_big_arc",          KSTAT_DATA_UINT64 },
 	{ "abd_scan_full_walk",        KSTAT_DATA_UINT64 },
+	{ "abd_scan_skip_young",       KSTAT_DATA_UINT64 },
+	{ "abd_scan_skip_nothing",     KSTAT_DATA_UINT64 },
+	{ "abd_move_no_shared",        KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -3277,7 +3284,7 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 	ASSERT(HDR_HAS_L1HDR(hdr));
 
 	state = hdr->b_l1hdr.b_state;
- 	if (GHOST_STATE(state)) {
+	if (GHOST_STATE(state)) {
 		ASSERT(!HDR_IO_IN_PROGRESS(hdr));
 		ASSERT3P(hdr->b_l1hdr.b_buf, ==, NULL);
 
@@ -4256,9 +4263,15 @@ arc_reclaim_thread(void)
 		 */
 		evicted = arc_adjust();
 
+#ifdef __APPLE__
+		if (evicted > 64LL*1024LL*1024LL)
+			cv_signal(&arc_abd_move_thr_cv);
+#endif
+
 		int64_t free_memory = arc_available_memory();
 
 #if defined(__APPLE__) && defined(_KERNEL)
+
 		int64_t post_adjust_manual_pressure = spl_free_manual_pressure_wrapper();
 		manual_pressure = MAX(manual_pressure,post_adjust_manual_pressure);
 		spl_free_set_pressure(0);
@@ -4382,6 +4395,7 @@ arc_reclaim_thread(void)
 				if (total_freed >= huge_amount) {
 					if (zio_arena_parent != NULL)
 						vmem_qcache_reap(zio_arena_parent);
+					cv_signal(&arc_abd_move_thr_cv);
 				}
 			} else if (old_to_free > 0) {
 			  printf("ZFS: %s, (old_)to_free has returned to zero from %lld\n",
@@ -7795,8 +7809,9 @@ l2arc_stop(void)
 #endif
 /*
  * check that this header is movable, and if so ask abd to move it
+ * return B_TRUE if we have moved the abd
  */
-static void
+static boolean_t
 arc_abd_try_move(arc_buf_hdr_t *hdr)
 {
 	ARCSTAT_BUMP(abd_move_try);
@@ -7804,12 +7819,12 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	if (!HDR_HAS_L1HDR(hdr) || GHOST_STATE(hdr->b_l1hdr.b_state) ||
 	    !HDR_IN_HASH_TABLE(hdr)) {
 		fprintf(stderr, "a");
-		return;
+		return (B_FALSE);
 	}
 
 	if (hdr->b_l1hdr.b_pabd == NULL) {
 		fprintf(stderr, "b");
-		return;
+		return (B_FALSE);
 	}
 
 	if (HDR_SHARED_DATA(hdr) ||
@@ -7817,7 +7832,8 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		hdr->b_l1hdr.b_buf->b_data !=
 		hdr->b_l1hdr.b_pabd)) {
 		fprintf(stderr, "c");
-		return;
+		ARCSTAT_BUMP(abd_move_no_shared);
+		return (B_FALSE);
 	}
 
 #ifdef _KERNEL
@@ -7837,7 +7853,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 
 	if (empty <= (qsize >> 4)) {
 		ARCSTAT_BUMP(abd_move_no_small_qcache);
-		return;
+		return (B_FALSE);
 	}
 
 	const hrtime_t fivemin = SEC2NSEC(5*60);
@@ -7850,7 +7866,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 	if (hdr->b_l1hdr.b_pabd->abd_create_time + fivemin > now) {
 		ARCSTAT_BUMP(abd_move_skip_young_abd);
 #ifdef _KERNEL
-		return;
+		return (B_FALSE);
 #endif
 	}
 
@@ -7860,35 +7876,38 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		arc_min_prefetch_lifespan)) {
 		ARCSTAT_BUMP(abd_move_buf_too_young);
 		fprintf(stderr, "f");
-		return;
+		return (B_FALSE);
 	}
 
 	if (HDR_L2_WRITING(hdr)) {
 		ARCSTAT_BUMP(abd_move_buf_busy);
 		fprintf(stderr, "g");
-		return;
+		return (B_FALSE);
 	}
 
 	if (refcount_count(&hdr->b_l1hdr.b_refcnt) > 0) {
 		fprintf(stderr, "h");
-		return;
+		return (B_FALSE);
 	}
 
 	// (abd) FIXME: make it safe to move all linear
 	if (abd_is_linear(hdr->b_l1hdr.b_pabd)) {
 		ARCSTAT_BUMP(abd_move_no_linear);
 		fprintf(stderr, "j");
-		return;
+		return (B_FALSE);
 	}
 
 
 #ifdef _KERNEL
-	(void) abd_try_move(hdr->b_l1hdr.b_pabd);
+	return(abd_try_move(hdr->b_l1hdr.b_pabd));
 #else
-	if (abd_try_move(hdr->b_l1hdr.b_pabd) == B_TRUE)
+	if (abd_try_move(hdr->b_l1hdr.b_pabd) == B_TRUE) {
 		fprintf(stderr, "+");
-	else
+		return (B_TRUE);
+	} else {
 		fprintf(stderr, "-\n");
+		return (B_FALSE);
+	}
 #endif
 }
 
@@ -7900,10 +7919,9 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
  */
 
 static kmutex_t arc_abd_move_thr_lock;
-static kcondvar_t arc_abd_move_thr_cv;
 static uint8_t arc_abd_move_thr_exit = 0;
 static void arc_abd_move_thread(void *notused);
-static void arc_abd_move_scan(void);
+static boolean_t arc_abd_move_scan(void);
 
 static void
 arc_abd_move_thr_init(void)
@@ -7961,7 +7979,7 @@ arc_abd_move_thread(void *notused)
 			continue;
 		}
 
-		wait_time = SEC2NSEC(1);
+		wait_time = SEC2NSEC(6);
 
 #ifdef _KERNEL
 		int64_t buckets_free = vmem_buckets_size(VMEM_FREE);
@@ -7975,7 +7993,17 @@ arc_abd_move_thread(void *notused)
 			continue;
 		}
 
-		arc_abd_move_scan();
+		if(arc_abd_move_scan()) {
+#ifdef _KERNEL
+			/* we've moved something, so let's make everything
+			 * eligible for reaping now (new activity will update
+			 * this, probably before the next reap, which is likely
+			 * to be several seconds in the future)
+			 */
+
+			abd_kmem_depot_ws_zero();
+#endif
+		}
 
 	}
 	arc_abd_move_thr_exit = 0;
@@ -7990,76 +8018,169 @@ arc_abd_move_thread(void *notused)
  * sufficiently old headers
  */
 
-static
-void arc_abd_move_scan(void)
+/* return true if we have moved an abd */
+
+static boolean_t
+arc_abd_move_sublist(multilist_sublist_t *mls, boolean_t scan_forward, hrtime_t deadline)
 {
+
+	boolean_t moved_something = B_FALSE;
+
+	ASSERT(MUTEX_HELD(&mls->mls_lock));
+
+	hrtime_t now = gethrtime();
+
+	if (now >= deadline) {
+		ARCSTAT_BUMP(abd_scan_list_timeout);
+		return (moved_something);
+	}
+
+	boolean_t update_now = B_FALSE;
+	uint32_t steps = 0;
+
 	arc_buf_hdr_t *hdr, *hdr_next;
+
+	if (scan_forward)
+		hdr = multilist_sublist_head(mls);
+	else
+		hdr = multilist_sublist_tail(mls);
+
+
+	for(; hdr; hdr = hdr_next) {
+
+		steps++;
+
+		if (steps % 100)
+			update_now = B_TRUE;
+
+		if (update_now) {
+			update_now = B_FALSE;
+			now = gethrtime();
+			if (now > deadline) {
+				ARCSTAT_BUMP(abd_scan_list_timeout);
+				return(moved_something);
+			}
+		}
+
+		kmutex_t *hash_lock;
+
+		if (scan_forward)
+			hdr_next = multilist_sublist_next(mls, hdr);
+		else
+			hdr_next = multilist_sublist_prev(mls, hdr);
+
+		hash_lock = HDR_LOCK(hdr);
+		if (!mutex_tryenter(hash_lock)) {
+			/* skip this buffer rather than waiting */
+			ARCSTAT_BUMP(abd_scan_mutex_skip);
+			continue;
+		}
+
+		// hash_lock mutex held
+
+		/*  if there is nothing in this hdr to move */
+		if (!HDR_HAS_L1HDR(hdr) ||
+		    GHOST_STATE(hdr->b_l1hdr.b_state) ||
+		    !HDR_IN_HASH_TABLE(hdr) ||
+		    hdr->b_l1hdr.b_pabd == NULL) {
+			mutex_exit(hash_lock);
+			ARCSTAT_BUMP(abd_scan_skip_nothing);
+			continue;
+		}
+
+		const hrtime_t timediff = now - hdr->b_l1hdr.b_pabd->abd_create_time;
+#ifdef _KERNEL
+		const hrtime_t old_enough = SEC2NSEC(5*59); // cf. test in arc_abd_try_move()
+#else
+		const hrtime_t old_enough = SEC2NSEC(5); // small in order to test frequently
+#endif
+
+		if (timediff >= old_enough) {
+			if (arc_abd_try_move(hdr)) {
+				moved_something = B_TRUE;
+				update_now = B_TRUE;
+			}
+		} else {
+			ARCSTAT_BUMP(abd_scan_skip_young);
+		}
+
+		mutex_exit(hash_lock);
+	}
+
+	if (hdr == NULL) {
+		ASSERT3U(now,<=,deadline);
+		ARCSTAT_BUMP(abd_scan_completed_list);
+	}
+
+	return (moved_something);
+}
+
+static boolean_t
+arc_abd_move_scan(void)
+{
+	boolean_t moved_something = B_FALSE;
 	hrtime_t now = gethrtime();
 	extern int zfs_multilist_num_sublists;
 	const uint16_t maxpass = MAX(4, MAX(max_ncpus, zfs_multilist_num_sublists));
 	const hrtime_t end_sublist_delta = MSEC2NSEC(2);
-	const hrtime_t end_all_after = now + (end_sublist_delta * maxpass);
+	const hrtime_t end_all_after = now + (end_sublist_delta * maxpass * 2LL);
+
+	/*
+	 * We process the multilists starting with a random choice of
+	 * filedata MRU and MFU and then metadata MRU and MFU
+	 * in that order.
+	 *
+	 * We want to process filedata first because it is the most likely
+	 * to have been scattered across many 4k abd slabs and 64k qcache
+	 * slabs, each of which may be shared by other abds.
+	 *
+	 * We scan the filedata sublists from their tails since the heads are
+	 * the newest allocations and thus are least likely to benefit from
+	 * the move process (if they are even movable yet).
+	 *
+	 * Conversely we scan the metadata sublists from their heads since those
+	 * are  most likely to be "kidnapping" old slabs (they will have been
+	 * pushed to the heads from promotion from MRU or re-access from
+	 * more-tailwards in the MFU) by having holes formed around them.
+	 *
+	 * On sufficiently fast or idle systems, the choice of
+	 * scanning direction is unlikley to matter much, as the whole
+	 * sublist will be walked.y    The try_order matters more since even
+	 * on fairly quick systems, there is likely to be more scan
+	 * timeouts than full walks.
+	 */
+	// 0, 1 == meta MFU MRU 2, 3 == file MFU MRU
+	const int try_order[4] = { 2, 3, 1, 0 };
+	const boolean_t scan_fwd[4] = { B_FALSE, B_FALSE, B_TRUE, B_TRUE };
 
 	uint16_t pass = 0;
 
 	for (; now <= end_all_after && pass < maxpass; pass++) {
 		for (int try = 0; try <= 3; try++) {
 
+			const hrtime_t end_sublist_after = MIN((now + end_sublist_delta), end_all_after);
+
+			// don't even grab the lock if we can't spend 10 microseconds
+			// scanning the list
+			if (now + USEC2NSEC(10) >= end_sublist_after) {
+				ARCSTAT_BUMP(abd_scan_list_timeout);
+				break;
+			}
+
+			multilist_sublist_t *mls = l2arc_sublist_lock(try_order[try]);
+
+			if(arc_abd_move_sublist(mls, scan_fwd[try], end_sublist_after))
+				moved_something = B_TRUE;
+
+			multilist_sublist_unlock(mls);
+
+			kpreempt(KPREEMPT_SYNC);
+
+			now = gethrtime();
+
 			if (now > end_all_after)
 				break;
 
-			multilist_sublist_t *mls = l2arc_sublist_lock(try);
-
-			hdr = multilist_sublist_head(mls);
-
-			const hrtime_t end_sublist_after = MIN((now + end_sublist_delta), end_all_after);
-
-			for(; hdr; hdr = hdr_next) {
-
-				if (now > end_sublist_after) {
-					ARCSTAT_BUMP(abd_scan_list_timeout);
-					break;
-				}
-
-				now = gethrtime();
-
-				kmutex_t *hash_lock;
-
-				hdr_next = multilist_sublist_next(mls, hdr);
-
-				hash_lock = HDR_LOCK(hdr);
-				if (!mutex_tryenter(hash_lock)) {
-					/* skip this buffer rather than waiting */
-					ARCSTAT_BUMP(abd_scan_mutex_skip);
-					continue;
-				}
-
-				// hash_lock mutex held
-
-				if (!HDR_HAS_L1HDR(hdr) ||
-				    GHOST_STATE(hdr->b_l1hdr.b_state) ||
-				    !HDR_IN_HASH_TABLE(hdr) ||
-				    hdr->b_l1hdr.b_pabd == NULL) {
-					mutex_exit(hash_lock);
-					continue;
-				}
-
-				const hrtime_t timediff = now - hdr->b_l1hdr.b_pabd->abd_create_time;
-#ifdef _KERNEL
-				const hrtime_t old_enough = SEC2NSEC(60); // cf. test in arc_abd_try_move()
-#else
-				const hrtime_t old_enough = SEC2NSEC(5);
-#endif
-
-				if (timediff >= old_enough)
-					arc_abd_try_move(hdr);
-
-				mutex_exit(hash_lock);
-			}
-			multilist_sublist_unlock(mls);
-
-			if (hdr == NULL)
-				ARCSTAT_BUMP(abd_scan_completed_list);
 		}
 		ARCSTAT_BUMP(abd_scan_passes);
 	}
@@ -8067,6 +8188,6 @@ void arc_abd_move_scan(void)
 		ARCSTAT_BUMP(abd_scan_not_one_pass);
 	else if (pass >= maxpass)
 		ARCSTAT_BUMP(abd_scan_full_walk);
+	return (moved_something);
 }
-
 #endif

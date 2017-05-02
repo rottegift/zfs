@@ -1,14 +1,23 @@
 /*
- * This file and its contents are supplied under the terms of the
- * Common Development and Distribution License ("CDDL"), version 1.0.
- * You may only use this file in accordance with the terms of version
- * 1.0 of the CDDL.
+ * CDDL HEADER START
  *
- * A full copy of the text of the CDDL should have accompanied this
- * source.  A copy of the CDDL is also available via the Internet at
- * http://www.illumos.org/license/CDDL.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
  */
-
 /*
  * Copyright (c) 2014 by Chunwei Chen. All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
@@ -110,11 +119,8 @@ typedef struct abd_stats {
 	kstat_named_t abdstat_borrowed_buf_cnt;
 	kstat_named_t abdstat_move_refcount_nonzero;
 	kstat_named_t abdstat_moved_linear;
-	kstat_named_t abdstat_move_linear_fail;
 	kstat_named_t abdstat_moved_scattered_filedata;
-	kstat_named_t abdstat_move_scattered_fail_filedata;
 	kstat_named_t abdstat_moved_scattered_metadata;
-	kstat_named_t abdstat_move_scattered_fail_metadata;
 	kstat_named_t abdstat_move_to_buf_flag_fail;
 } abd_stats_t;
 
@@ -158,11 +164,8 @@ static abd_stats_t abd_stats = {
 	/* abd_try_move() statistics */
 	{ "move_refcount_nonzero",              KSTAT_DATA_UINT64 },
 	{ "moved_linear",                       KSTAT_DATA_UINT64 },
-	{ "move_linear_fail",                   KSTAT_DATA_UINT64 },
 	{ "moved_scattered_filedata",           KSTAT_DATA_UINT64 },
-	{ "move_scattered_fail_filedata",       KSTAT_DATA_UINT64 },
 	{ "moved_scattered_metadata",           KSTAT_DATA_UINT64 },
-	{ "move_scattered_fail_metadata",       KSTAT_DATA_UINT64 },
 	{ "move_to_buf_flag_fail",              KSTAT_DATA_UINT64 },
 };
 
@@ -211,6 +214,20 @@ abd_free_chunk(void *c)
 	kmem_cache_free(abd_chunk_cache, c);
 }
 
+#ifdef __APPLE__
+/* use this function during abd moving */
+static void
+abd_free_chunk_to_slab(void *c)
+{
+#ifdef _KERNEL
+	kmem_cache_free_to_slab(abd_chunk_cache, c);
+#else
+	kmem_cache_free(abd_chunk_cache, c);
+#endif
+}
+#endif
+
+
 #if defined(__APPLE__) && defined(_KERNEL)
 vmem_t *abd_chunk_arena = NULL;
 #endif
@@ -246,17 +263,19 @@ abd_init(void)
 	/* sanity check */
 	VERIFY(ISP2(zfs_abd_chunk_size)); /* must be power of two */
 
-	extern vmem_t *zio_arena_parent;
+	//extern vmem_t *zio_arena_parent;
+	extern vmem_t *spl_heap_arena;
 
 	abd_chunk_arena = vmem_create("abd_chunk", NULL, 0,
-	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
-	    0, VM_SLEEP);
+	    PAGESIZE, vmem_alloc, vmem_free, spl_heap_arena,
+	    64*1024, VM_SLEEP | VMC_NO_QCACHE | VMC_TIMEFREE);
 
 	ASSERT3P(abd_chunk_arena, !=, NULL);
 
 	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
 	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
 	int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
+	cache_debug_flags |= KMC_ARENA_SLAB; /* use large slabs */
 
 	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, zfs_abd_chunk_size,
 	    NULL, NULL, NULL, NULL, abd_chunk_arena, cache_debug_flags);
@@ -327,7 +346,7 @@ static inline abd_t *
 abd_alloc_struct(size_t chunkcnt)
 {
 	size_t size = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[chunkcnt]);
-	abd_t *abd = kmem_alloc(size, KM_PUSHPAGE);
+	abd_t *abd = kmem_zalloc(size, KM_PUSHPAGE);
 	ASSERT3P(abd, !=, NULL);
 	ABDSTAT_INCR(abdstat_struct_size, size);
 	abd->abd_create_time = gethrtime();
@@ -342,6 +361,13 @@ abd_free_struct(abd_t *abd)
 	size_t chunkcnt = abd_is_linear(abd) ? 0 : abd_scatter_chunkcnt(abd);
 	int size = offsetof(abd_t, abd_u.abd_scatter.abd_chunks[chunkcnt]);
 	mutex_destroy(&abd->abd_mutex);
+	// poison the memory to catch UAF;
+	abd->abd_u.abd_scatter.abd_chunk_size = 0;
+	abd->abd_create_time = 0;
+	abd->abd_flags = 0;
+	abd->abd_parent = NULL;
+	abd->abd_size = 0;
+	abd->abd_u.abd_linear.abd_buf = NULL;
 	kmem_free(abd, size);
 	ABDSTAT_INCR(abdstat_struct_size, -size);
 }
@@ -1136,6 +1162,11 @@ abd_cmp_cb(void *bufa, void *bufb, size_t size, void *private)
 int
 abd_cmp(abd_t *dabd, abd_t *sabd, size_t size)
 {
+	ASSERT3P(sabd,!=,NULL);
+	ASSERT3P(dabd,!=,NULL);
+	ASSERT3P(sabd,!=,dabd);
+	ASSERT3S(sabd->abd_size,==,size);
+	ASSERT3S(dabd->abd_size,==,size);
 	return (abd_iterate_func2(dabd, sabd, 0, 0, size, abd_cmp_cb, NULL));
 }
 
@@ -1143,6 +1174,7 @@ abd_cmp(abd_t *dabd, abd_t *sabd, size_t size)
 
 /*
  * make a new abd structure with key fields identical to source abd
+ * return B_TRUE if we successfully moved the abd
  */
 
 static boolean_t
@@ -1186,7 +1218,7 @@ abd_try_move_scattered_impl(abd_t *abd)
 	// release abd's old chunks to the kmem_cache
 	// and move chunks from partialabd to abd
 	for (int j = 0; j < chunkcnt; j++) {
-		abd_free_chunk(abd->abd_u.abd_scatter.abd_chunks[j]);
+		abd_free_chunk_to_slab(abd->abd_u.abd_scatter.abd_chunks[j]);
 		abd->abd_u.abd_scatter.abd_chunks[j] =
 		    partialabd->abd_u.abd_scatter.abd_chunks[j];
 	}
@@ -1255,6 +1287,8 @@ abd_try_move_linear_impl(abd_t *abd)
 	return(B_TRUE);
 }
 
+/* return B_TRUE if we successfully move the abd */
+
 static boolean_t
 abd_try_move_impl(abd_t *abd)
 {
@@ -1275,7 +1309,6 @@ abd_try_move_impl(abd_t *abd)
 			ABDSTAT_BUMP(abdstat_moved_linear);
 			return (B_TRUE);
 		} else {
-			ABDSTAT_BUMP(abdstat_move_linear_fail);
 			return (B_FALSE);
 		}
 	} else {
@@ -1287,10 +1320,6 @@ abd_try_move_impl(abd_t *abd)
 				ABDSTAT_BUMP(abdstat_moved_scattered_filedata);
 			return (B_TRUE);
 		} else {
-			if (is_metadata)
-				ABDSTAT_BUMP(abdstat_move_scattered_fail_metadata);
-			else
-				ABDSTAT_BUMP(abdstat_move_scattered_fail_filedata);
 			return (B_FALSE);
 		}
 	}
@@ -1301,5 +1330,13 @@ abd_try_move(abd_t *abd)
 {
 	return(abd_try_move_impl(abd));
 }
+
+#ifdef _KERNEL
+void
+abd_kmem_depot_ws_zero(void)
+{
+	kmem_depot_ws_zero(abd_chunk_cache);
+}
+#endif
 
 #endif
