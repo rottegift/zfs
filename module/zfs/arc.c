@@ -283,6 +283,7 @@
 #include <sys/kstat_osx.h>
 static void arc_abd_move_thr_init(void);
 static void arc_abd_move_thr_fini(void);
+static kcondvar_t arc_abd_move_thr_cv;
 #ifdef _KERNEL
 extern vmem_t *zio_arena_parent;
 extern vmem_t *heap_arena;
@@ -4244,6 +4245,7 @@ arc_reclaim_thread(void)
 			arc_shrink(t);
 			extern kmem_cache_t	*abd_chunk_cache;
 			kmem_cache_reap_now(abd_chunk_cache);
+			cv_signal(&arc_abd_move_thr_cv);
 			IOSleep(1);
 		}
 
@@ -4260,9 +4262,15 @@ arc_reclaim_thread(void)
 		 */
 		evicted = arc_adjust();
 
+#ifdef __APPLE__
+		if (evicted > 0)
+			cv_signal(&arc_abd_move_thr_cv);
+#endif
+
 		int64_t free_memory = arc_available_memory();
 
 #if defined(__APPLE__) && defined(_KERNEL)
+
 		int64_t post_adjust_manual_pressure = spl_free_manual_pressure_wrapper();
 		manual_pressure = MAX(manual_pressure,post_adjust_manual_pressure);
 		spl_free_set_pressure(0);
@@ -4386,6 +4394,7 @@ arc_reclaim_thread(void)
 				if (total_freed >= huge_amount) {
 					if (zio_arena_parent != NULL)
 						vmem_qcache_reap(zio_arena_parent);
+					cv_signal(&arc_abd_move_thr_cv);
 				}
 			} else if (old_to_free > 0) {
 			  printf("ZFS: %s, (old_)to_free has returned to zero from %lld\n",
@@ -7904,7 +7913,6 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
  */
 
 static kmutex_t arc_abd_move_thr_lock;
-static kcondvar_t arc_abd_move_thr_cv;
 static uint8_t arc_abd_move_thr_exit = 0;
 static void arc_abd_move_thread(void *notused);
 static void arc_abd_move_scan(void);
