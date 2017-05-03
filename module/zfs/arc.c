@@ -4245,7 +4245,6 @@ arc_reclaim_thread(void)
 			arc_shrink(t);
 			extern kmem_cache_t	*abd_chunk_cache;
 			kmem_cache_reap_now(abd_chunk_cache);
-			cv_signal(&arc_abd_move_thr_cv);
 			IOSleep(1);
 		}
 
@@ -4263,7 +4262,7 @@ arc_reclaim_thread(void)
 		evicted = arc_adjust();
 
 #ifdef __APPLE__
-		if (evicted > 0)
+		if (evicted > 64LL*1024LL*1024LL)
 			cv_signal(&arc_abd_move_thr_cv);
 #endif
 
