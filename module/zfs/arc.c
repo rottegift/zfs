@@ -674,6 +674,7 @@ typedef struct arc_stats {
 	kstat_named_t abd_scan_full_walk;
 	kstat_named_t abd_scan_skip_young;
 	kstat_named_t abd_scan_skip_nothing;
+	kstat_named_t abd_move_no_shared;
 #endif
 } arc_stats_t;
 
@@ -780,6 +781,7 @@ static arc_stats_t arc_stats = {
 	{ "abd_scan_full_walk",        KSTAT_DATA_UINT64 },
 	{ "abd_scan_skip_young",       KSTAT_DATA_UINT64 },
 	{ "abd_scan_skip_nothing",     KSTAT_DATA_UINT64 },
+	{ "abd_move_no_shared",        KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -7829,6 +7831,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 		hdr->b_l1hdr.b_buf->b_data !=
 		hdr->b_l1hdr.b_pabd)) {
 		fprintf(stderr, "c");
+		ARCSTAT_BUMP(abd_move_no_shared);
 		return (B_FALSE);
 	}
 
