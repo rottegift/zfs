@@ -8154,6 +8154,8 @@ arc_abd_move_scan(void)
 
 			multilist_sublist_unlock(mls);
 
+			kpreempt(KPREEMPT_SYNC);
+
 			now = gethrtime();
 
 			if (now > end_all_after)
