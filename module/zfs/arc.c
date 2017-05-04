@@ -8107,16 +8107,20 @@ arc_abd_move_scan(void)
 	extern int zfs_multilist_num_sublists;
 	const uint16_t maxpass = MAX(4, MAX(max_ncpus, zfs_multilist_num_sublists));
 	const hrtime_t end_sublist_delta = MSEC2NSEC(2);
-	const hrtime_t end_all_after = now + (end_sublist_delta * maxpass);
+	const hrtime_t end_all_after = now + (end_sublist_delta * maxpass * 2LL);
 
 	/*
 	 * We process the multilists starting with a random choice of
-	 * filedata and metadata MFU and then filedata and metadat MRU,
+	 * metadata and filedata MRU and then metadata and filedata MFU,
 	 * in that order.
+	 *
+	 * We want to process metadata first because it is the most likely
+	 * to be a kidnapper (it's invariabley smaller than the qcaching size,
+	 * and tends to be long lived and reused often).
 	 *
 	 * We scan the MRU sublists from their tails since the heads are
 	 * the newest allocations and thus are least likely to be kidnappers
-	 * and also the least like to be old enough to move yet
+	 * and also the least likely to be old enough to move yet
 	 *
 	 * We scan the MFU sublists from their heads since the heads are the
 	 * most likely to be "kidnapping" old slabs (they will have been pushed
@@ -8126,8 +8130,8 @@ arc_abd_move_scan(void)
 	 * On sufficiently fast or idle systems, the choice of
 	 * scanning direction is unlikley to matter much.
 	 */
-
-	const int try_order[4] = { 2, 0, 3, 1 }; // file-fu, meta-fu, file-ru, meta-ru
+	// 0, 1 == meta MFU MRU 2, 3 == file MFU MRU
+	const int try_order[4] = { 1, 3, 0, 2 };
 	const boolean_t scan_fwd[4] = { B_FALSE, B_FALSE, B_TRUE, B_TRUE };
 
 	uint16_t pass = 0;
@@ -8154,6 +8158,7 @@ arc_abd_move_scan(void)
 
 			if (now > end_all_after)
 				break;
+
 		}
 		ARCSTAT_BUMP(abd_scan_passes);
 	}
