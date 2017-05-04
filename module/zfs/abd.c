@@ -119,11 +119,8 @@ typedef struct abd_stats {
 	kstat_named_t abdstat_borrowed_buf_cnt;
 	kstat_named_t abdstat_move_refcount_nonzero;
 	kstat_named_t abdstat_moved_linear;
-	kstat_named_t abdstat_move_linear_fail;
 	kstat_named_t abdstat_moved_scattered_filedata;
-	kstat_named_t abdstat_move_scattered_fail_filedata;
 	kstat_named_t abdstat_moved_scattered_metadata;
-	kstat_named_t abdstat_move_scattered_fail_metadata;
 	kstat_named_t abdstat_move_to_buf_flag_fail;
 } abd_stats_t;
 
@@ -167,11 +164,8 @@ static abd_stats_t abd_stats = {
 	/* abd_try_move() statistics */
 	{ "move_refcount_nonzero",              KSTAT_DATA_UINT64 },
 	{ "moved_linear",                       KSTAT_DATA_UINT64 },
-	{ "move_linear_fail",                   KSTAT_DATA_UINT64 },
 	{ "moved_scattered_filedata",           KSTAT_DATA_UINT64 },
-	{ "move_scattered_fail_filedata",       KSTAT_DATA_UINT64 },
 	{ "moved_scattered_metadata",           KSTAT_DATA_UINT64 },
-	{ "move_scattered_fail_metadata",       KSTAT_DATA_UINT64 },
 	{ "move_to_buf_flag_fail",              KSTAT_DATA_UINT64 },
 };
 
@@ -1296,7 +1290,6 @@ abd_try_move_impl(abd_t *abd)
 			ABDSTAT_BUMP(abdstat_moved_linear);
 			return (B_TRUE);
 		} else {
-			ABDSTAT_BUMP(abdstat_move_linear_fail);
 			return (B_FALSE);
 		}
 	} else {
@@ -1308,10 +1301,6 @@ abd_try_move_impl(abd_t *abd)
 				ABDSTAT_BUMP(abdstat_moved_scattered_filedata);
 			return (B_TRUE);
 		} else {
-			if (is_metadata)
-				ABDSTAT_BUMP(abdstat_move_scattered_fail_metadata);
-			else
-				ABDSTAT_BUMP(abdstat_move_scattered_fail_filedata);
 			return (B_FALSE);
 		}
 	}
