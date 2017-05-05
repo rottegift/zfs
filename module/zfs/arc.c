@@ -8111,27 +8111,30 @@ arc_abd_move_scan(void)
 
 	/*
 	 * We process the multilists starting with a random choice of
-	 * metadata and filedata MRU and then metadata and filedata MFU,
+	 * filedata MRU and MFU and then metadata MRU and MFU
 	 * in that order.
 	 *
-	 * We want to process metadata first because it is the most likely
-	 * to be a kidnapper (it's invariabley smaller than the qcaching size,
-	 * and tends to be long lived and reused often).
+	 * We want to process filedata first because it is the most likely
+	 * to have been scattered across many 4k abd slabs and 64k qcache
+	 * slabs, each of which may be shared by other abds.
 	 *
-	 * We scan the MRU sublists from their tails since the heads are
-	 * the newest allocations and thus are least likely to be kidnappers
-	 * and also the least likely to be old enough to move yet
+	 * We scan the filedata sublists from their tails since the heads are
+	 * the newest allocations and thus are least likely to benefit from
+	 * the move process (if they are even movable yet).
 	 *
-	 * We scan the MFU sublists from their heads since the heads are the
-	 * most likely to be "kidnapping" old slabs (they will have been pushed
-	 * to the heads from promotion from MRU or reuse from more-tailwards in
-	 * the MFU).
+	 * Conversely we scan the metadata sublists from their heads since those
+	 * are  most likely to be "kidnapping" old slabs (they will have been
+	 * pushed to the heads from promotion from MRU or re-access from
+	 * more-tailwards in the MFU) by having holes formed around them.
 	 *
 	 * On sufficiently fast or idle systems, the choice of
-	 * scanning direction is unlikley to matter much.
+	 * scanning direction is unlikley to matter much, as the whole
+	 * sublist will be walked.y    The try_order matters more since even
+	 * on fairly quick systems, there is likely to be more scan
+	 * timeouts than full walks.
 	 */
 	// 0, 1 == meta MFU MRU 2, 3 == file MFU MRU
-	const int try_order[4] = { 1, 3, 0, 2 };
+	const int try_order[4] = { 2, 3, 1, 0 };
 	const boolean_t scan_fwd[4] = { B_FALSE, B_FALSE, B_TRUE, B_TRUE };
 
 	uint16_t pass = 0;
