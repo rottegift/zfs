@@ -249,11 +249,12 @@ abd_init(void)
 	/* sanity check */
 	VERIFY(ISP2(zfs_abd_chunk_size)); /* must be power of two */
 
-	extern vmem_t *zio_arena_parent;
+	//extern vmem_t *zio_arena_parent;
+	extern vmem_t *spl_heap_arena;
 
 	abd_chunk_arena = vmem_create("abd_chunk", NULL, 0,
-	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
-	    0, VM_SLEEP);
+	    PAGESIZE, vmem_alloc, vmem_free, spl_heap_arena,
+	    64*1024, VM_SLEEP | VMC_NO_QCACHE | VMC_TIMEFREE);
 
 	ASSERT3P(abd_chunk_arena, !=, NULL);
 
