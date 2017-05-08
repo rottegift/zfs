@@ -214,13 +214,21 @@ abd_free_chunk(void *c)
 	kmem_cache_free(abd_chunk_cache, c);
 }
 
-#if defined(__APPLE__) && defined(_KERNEL)
-/* use this function abd moving */
+#ifdef __APPLE__
+/* use this function during abd moving */
 static void
 abd_free_chunk_to_slab(void *c)
 {
+#ifdef _KERNEL
 	kmem_cache_free_to_slab(abd_chunk_cache, c);
+#else
+	kmem_cache_free(abd_chunk_cache, c);
+#endif
 }
+#endif
+
+
+#if defined(__APPLE__) && defined(_KERNEL)
 vmem_t *abd_chunk_arena = NULL;
 #endif
 
