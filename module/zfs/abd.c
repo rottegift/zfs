@@ -215,6 +215,12 @@ abd_free_chunk(void *c)
 }
 
 #if defined(__APPLE__) && defined(_KERNEL)
+/* use this function abd moving */
+static void
+abd_free_chunk_to_slab(void *c)
+{
+	kmem_cache_free_to_slab(abd_chunk_cache, c);
+}
 vmem_t *abd_chunk_arena = NULL;
 #endif
 
@@ -1202,7 +1208,7 @@ abd_try_move_scattered_impl(abd_t *abd)
 	// release abd's old chunks to the kmem_cache
 	// and move chunks from partialabd to abd
 	for (int j = 0; j < chunkcnt; j++) {
-		abd_free_chunk(abd->abd_u.abd_scatter.abd_chunks[j]);
+		abd_free_chunk_to_slab(abd->abd_u.abd_scatter.abd_chunks[j]);
 		abd->abd_u.abd_scatter.abd_chunks[j] =
 		    partialabd->abd_u.abd_scatter.abd_chunks[j];
 	}
