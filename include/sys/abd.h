@@ -170,6 +170,7 @@ void abd_fini(void);
 
 #ifdef __APPLE__
 boolean_t abd_try_move(abd_t *);
+void abd_kmem_depot_ws_zero(void);
 #endif
 
 #ifdef __cplusplus

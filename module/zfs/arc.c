@@ -7809,6 +7809,7 @@ l2arc_stop(void)
 #endif
 /*
  * check that this header is movable, and if so ask abd to move it
+ * return B_TRUE if we have moved the abd
  */
 static boolean_t
 arc_abd_try_move(arc_buf_hdr_t *hdr)
@@ -7920,7 +7921,7 @@ arc_abd_try_move(arc_buf_hdr_t *hdr)
 static kmutex_t arc_abd_move_thr_lock;
 static uint8_t arc_abd_move_thr_exit = 0;
 static void arc_abd_move_thread(void *notused);
-static void arc_abd_move_scan(void);
+static boolean_t arc_abd_move_scan(void);
 
 static void
 arc_abd_move_thr_init(void)
@@ -7992,7 +7993,17 @@ arc_abd_move_thread(void *notused)
 			continue;
 		}
 
-		arc_abd_move_scan();
+		if(arc_abd_move_scan()) {
+#ifdef _KERNEL
+			/* we've moved something, so let's make everything
+			 * eligible for reaping now (new activity will update
+			 * this, probably before the next reap, which is likely
+			 * to be several seconds in the future)
+			 */
+
+			abd_kmem_depot_ws_zero();
+#endif
+		}
 
 	}
 	arc_abd_move_thr_exit = 0;
@@ -8007,11 +8018,13 @@ arc_abd_move_thread(void *notused)
  * sufficiently old headers
  */
 
-/* return true if we have completed the multilist */
+/* return true if we have moved an abd */
 
 static boolean_t
 arc_abd_move_sublist(multilist_sublist_t *mls, boolean_t scan_forward, hrtime_t deadline)
 {
+
+	boolean_t moved_something = B_FALSE;
 
 	ASSERT(MUTEX_HELD(&mls->mls_lock));
 
@@ -8019,7 +8032,7 @@ arc_abd_move_sublist(multilist_sublist_t *mls, boolean_t scan_forward, hrtime_t 
 
 	if (now >= deadline) {
 		ARCSTAT_BUMP(abd_scan_list_timeout);
-		return (B_FALSE);
+		return (moved_something);
 	}
 
 	boolean_t update_now = B_FALSE;
@@ -8045,7 +8058,7 @@ arc_abd_move_sublist(multilist_sublist_t *mls, boolean_t scan_forward, hrtime_t 
 			now = gethrtime();
 			if (now > deadline) {
 				ARCSTAT_BUMP(abd_scan_list_timeout);
-				return(B_FALSE);
+				return(moved_something);
 			}
 		}
 
@@ -8065,7 +8078,7 @@ arc_abd_move_sublist(multilist_sublist_t *mls, boolean_t scan_forward, hrtime_t 
 
 		// hash_lock mutex held
 
-		/* return if there is nothing to move */
+		/*  if there is nothing in this hdr to move */
 		if (!HDR_HAS_L1HDR(hdr) ||
 		    GHOST_STATE(hdr->b_l1hdr.b_state) ||
 		    !HDR_IN_HASH_TABLE(hdr) ||
@@ -8083,8 +8096,10 @@ arc_abd_move_sublist(multilist_sublist_t *mls, boolean_t scan_forward, hrtime_t 
 #endif
 
 		if (timediff >= old_enough) {
-			if (arc_abd_try_move(hdr))
+			if (arc_abd_try_move(hdr)) {
+				moved_something = B_TRUE;
 				update_now = B_TRUE;
+			}
 		} else {
 			ARCSTAT_BUMP(abd_scan_skip_young);
 		}
@@ -8097,12 +8112,13 @@ arc_abd_move_sublist(multilist_sublist_t *mls, boolean_t scan_forward, hrtime_t 
 		ARCSTAT_BUMP(abd_scan_completed_list);
 	}
 
-	return (B_TRUE);
+	return (moved_something);
 }
 
-static void
+static boolean_t
 arc_abd_move_scan(void)
 {
+	boolean_t moved_something = B_FALSE;
 	hrtime_t now = gethrtime();
 	extern int zfs_multilist_num_sublists;
 	const uint16_t maxpass = MAX(4, MAX(max_ncpus, zfs_multilist_num_sublists));
@@ -8153,7 +8169,8 @@ arc_abd_move_scan(void)
 
 			multilist_sublist_t *mls = l2arc_sublist_lock(try_order[try]);
 
-			(void) arc_abd_move_sublist(mls, scan_fwd[try], end_sublist_after);
+			if(arc_abd_move_sublist(mls, scan_fwd[try], end_sublist_after))
+				moved_something = B_TRUE;
 
 			multilist_sublist_unlock(mls);
 
@@ -8171,5 +8188,6 @@ arc_abd_move_scan(void)
 		ARCSTAT_BUMP(abd_scan_not_one_pass);
 	else if (pass >= maxpass)
 		ARCSTAT_BUMP(abd_scan_full_walk);
+	return (moved_something);
 }
 #endif

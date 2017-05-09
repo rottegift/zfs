@@ -1173,6 +1173,7 @@ abd_cmp(abd_t *dabd, abd_t *sabd, size_t size)
 
 /*
  * make a new abd structure with key fields identical to source abd
+ * return B_TRUE if we successfully moved the abd
  */
 
 static boolean_t
@@ -1285,6 +1286,8 @@ abd_try_move_linear_impl(abd_t *abd)
 	return(B_TRUE);
 }
 
+/* return B_TRUE if we successfully move the abd */
+
 static boolean_t
 abd_try_move_impl(abd_t *abd)
 {
@@ -1326,5 +1329,13 @@ abd_try_move(abd_t *abd)
 {
 	return(abd_try_move_impl(abd));
 }
+
+#ifdef _KERNEL
+void
+abd_kmem_depot_ws_zero(void)
+{
+	kmem_depot_ws_zero(abd_chunk_cache);
+}
+#endif
 
 #endif
