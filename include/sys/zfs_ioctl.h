@@ -71,6 +71,15 @@ extern "C" {
 #define	ZFS_ACLTYPE_OFF			0
 #define	ZFS_ACLTYPE_POSIXACL		1
 
+#ifdef __APPLE__
+/*
+ * Property values for devdisk
+ */
+#define	ZFS_DEVDISK_POOLONLY		0
+#define	ZFS_DEVDISK_OFF		1
+#define	ZFS_DEVDISK_ON		2
+#endif
+
 /*
  * Field manipulation macros for the drr_versioninfo field of the
  * send stream header.

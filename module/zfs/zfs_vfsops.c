@@ -527,7 +527,6 @@ ignoreowner_changed_cb(void *arg, uint64_t newval)
 static void
 mimic_hfs_changed_cb(void *arg, uint64_t newval)
 {
-	// FIXME - what do we do in here?
 	zfsvfs_t *zfsvfs = arg;
 	struct vfsstatfs *vfsstatfs;
 	vfsstatfs = vfs_statfs(zfsvfs->z_vfs);
@@ -536,6 +535,38 @@ mimic_hfs_changed_cb(void *arg, uint64_t newval)
 	    strlcpy(vfsstatfs->f_fstypename, "zfs", MFSTYPENAMELEN);
 	} else {
 	    strlcpy(vfsstatfs->f_fstypename, "hfs", MFSTYPENAMELEN);
+	}
+}
+
+void zfs_devdisk_attach(zfsvfs_t *zfsvfs)
+{
+
+	vfs_mountedfrom(zfsvfs->z_vfs, "/dev/disk9");
+}
+
+void zfs_devdisk_detach(zfsvfs_t *zfsvfs)
+{
+	char osname[ZFS_MAX_DATASET_NAME_LEN];
+
+
+	dmu_objset_name(zfsvfs->z_os, osname);
+	vfs_mountedfrom(zfsvfs->z_vfs, osname);
+}
+
+static void
+devdisk_changed_cb(void *arg, uint64_t newval)
+{
+	zfsvfs_t *zfsvfs = arg;
+
+	switch(newval) {
+		case ZFS_DEVDISK_POOLONLY:
+			break;
+		case ZFS_DEVDISK_OFF:
+			zfs_devdisk_detach(zfsvfs);
+			break;
+		case ZFS_DEVDISK_ON:
+			zfs_devdisk_attach(zfsvfs);
+			break;
 	}
 }
 
@@ -731,6 +762,8 @@ zfs_register_callbacks(struct mount *vfsp)
 	    zfs_prop_to_name(ZFS_PROP_APPLE_IGNOREOWNER), ignoreowner_changed_cb, zfsvfs);
 	error = error ? error : dsl_prop_register(ds,
 	    zfs_prop_to_name(ZFS_PROP_APPLE_MIMIC_HFS), mimic_hfs_changed_cb, zfsvfs);
+	error = error ? error : dsl_prop_register(ds,
+	    zfs_prop_to_name(ZFS_PROP_APPLE_DEVDISK), devdisk_changed_cb, zfsvfs);
 #endif
 	dsl_pool_config_exit(dmu_objset_pool(os), FTAG);
 	if (error)
@@ -1570,7 +1603,10 @@ dprintf("%s\n", __func__);
 		//    (uint64_t)((unsigned int)MNT_AUTOMOUNTED));
 	}
 
-	vfs_mountedfrom(vfsp, osname);
+	int devdisk = ZFS_DEVDISK_POOLONLY;
+	dsl_prop_get_integer(osname, "com.apple.devdisk", &devdisk, NULL);
+	devdisk_changed_cb(zfsvfs, devdisk);
+
 #else
 	/* Grab extra reference. */
 	VERIFY(VFS_ROOT(vfsp, LK_EXCLUSIVE, &vp) == 0);
