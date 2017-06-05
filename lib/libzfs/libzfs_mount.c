@@ -846,7 +846,7 @@ zfs_mount(zfs_handle_t *zhp, const char *options, int flags)
 #ifdef __LINUX__
 	rc = do_mount(zfs_get_name(zhp), mountpoint, mntopts);
 #elif defined(__APPLE__) || defined (__FREEBSD__)
-	if (zmount(zfs_get_name(zhp), mountpoint, MS_OPTIONSTR | flags,
+	if (zmount(zhp, zfs_get_name(zhp), mountpoint, MS_OPTIONSTR | flags,
 	    MNTTYPE_ZFS, NULL, 0, mntopts, sizeof (mntopts)) != 0) {
 #elif defined(__illumos__)
 	if (mount(zfs_get_name(zhp), mountpoint, MS_OPTIONSTR | flags,

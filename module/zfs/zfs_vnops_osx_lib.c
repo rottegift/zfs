@@ -2027,12 +2027,17 @@ void zfs_setattr_generate_id(znode_t *zp, uint64_t val, char *name)
 								 ZFS_DIRENT_OBJ(-1ULL), filename) == 0) {
 
 				nameptr = filename;
+				// Might as well keep this name too.
+				strlcpy(zp->z_name_cache, filename,
+					MAXPATHLEN);
 			}
 		}
 
 		zp->z_document_id = fnv_32a_buf(&parent, sizeof(parent), FNV1_32A_INIT);
 		if (nameptr)
 			zp->z_document_id = fnv_32a_str(nameptr, zp->z_document_id);
+
+		dprintf("%s: '%s' -> %u\n", __func__, nameptr, zp->z_document_id);
 
 	} // !document_id
 }
