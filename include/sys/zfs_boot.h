@@ -14,6 +14,11 @@ int zfs_boot_update_bootinfo(spa_t *spa);
 int zfs_boot_get_path(char *, int);
 #endif /* ZFS_BOOT */
 
+int zfs_attach_devicedisk(zfsvfs_t *zfsvfs);
+int zfs_detach_devicedisk(zfsvfs_t *zfsvfs);
+int zfs_devdisk_get_path(void *, char *, int);
+
+
 #ifdef __cplusplus
 } /* extern "C" */
 

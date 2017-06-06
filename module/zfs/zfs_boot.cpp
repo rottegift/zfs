@@ -1656,6 +1656,199 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 	return (0);
 }
 
+int
+zfs_attach_devicedisk(zfsvfs_t *zfsvfs)
+{
+	ZFSPool *pool_proxy = 0;
+	IOService *resourceService = 0;
+	OSDictionary *properties = 0;
+	spa_t *spa = dmu_objset_spa(zfsvfs->z_os);
+	char osname[ZFS_MAX_DATASET_NAME_LEN];
+	ZFSBootDevice *devdisk = 0;
+
+	// Already has an attached disk
+	if (zfsvfs->z_devdisk != NULL)
+		return (0);
+
+	/* Get pool proxy */
+	if (!spa->spa_iokit_proxy ||
+	    (pool_proxy = spa->spa_iokit_proxy->proxy) == NULL) {
+		dprintf("%s no spa_pool_proxy\n", __func__);
+		return (0);
+	}
+
+	dmu_objset_name(zfsvfs->z_os, osname);
+
+	printf("%s: publishing devdisk [%s]\n", __func__, osname);
+
+	/* Create prop dict for the proxy, with 6 or more keys */
+	if ((properties = OSDictionary::withCapacity(6)) == NULL) {
+		dprintf("%s prop dict allocation failed\n", __func__);
+		return (ENOMEM);
+	}
+
+	/* Set Content Hint and Content */
+	do {
+		const OSSymbol *partUUID;
+
+		/* ZFS (BF01) partition type */
+		if ((partUUID = OSSymbol::withCString(
+		    "6A898CC3-1DD2-11B2-99A6-080020736631")) == NULL) {
+			dprintf("%s couldn't make partUUID\n", __func__);
+			return (ENOMEM);
+		}
+
+		/* Assign ZFS partiton UUID to both */
+		if (properties->setObject(kIOMediaContentKey,
+		    partUUID) == false ||
+		    properties->setObject(kIOMediaContentHintKey,
+		    partUUID) == false) {
+			dprintf("%s content hint failed\n", __func__);
+			return (ENOMEM);
+		}
+		partUUID->release();
+	} while(0);
+
+	/* XXX Set dataset name, rdonly, and UUID */
+	do {
+		OSString *nameStr;
+		OSString *uuidStr;
+		char uuid_cstr[UUID_PRINTABLE_STRING_LENGTH];
+		uuid_t uuid;
+
+		bzero(uuid, sizeof (uuid_t));
+		bzero(uuid_cstr, UUID_PRINTABLE_STRING_LENGTH);
+
+		zfs_vfs_uuid_gen(osname, uuid);
+		zfs_vfs_uuid_unparse(uuid, uuid_cstr);
+
+		nameStr = OSString::withCString(osname);
+		uuidStr = OSString::withCString(uuid_cstr);
+
+		if (properties->setObject(ZFS_BOOT_DATASET_NAME_KEY,
+		    nameStr) == false ||
+		    properties->setObject(ZFS_BOOT_DATASET_UUID_KEY,
+		    uuidStr) == false ||
+		    properties->setObject(ZFS_BOOT_DATASET_RDONLY_KEY,
+		    kOSBooleanFalse) == false) {
+			dprintf("ZFSBootDevice::%s couldn't setup"
+			    "property dict\n", __func__);
+			nameStr->release();
+			uuidStr->release();
+			return (ENOMEM);
+		}
+		nameStr->release();
+		uuidStr->release();
+	} while (0);
+
+	devdisk = new ZFSBootDevice;
+
+	if (!devdisk) {
+		printf("%s: couldn't create boot device\n", __func__);
+		return (ENOMEM);
+	}
+
+	if (devdisk->init(properties) == false) {
+		printf("%s init failed\n", __func__);
+		properties->release();
+		devdisk->release();
+		devdisk = 0;
+		return (ENXIO);
+	}
+	properties->release();
+	properties = 0;
+
+	if (devdisk->attach(pool_proxy) == false) {
+		printf("%s attach failed\n", __func__);
+		devdisk->release();
+		devdisk = 0;
+		return (ENXIO);
+	}
+
+	/* Technically should start but this doesn't do much */
+	if (devdisk->start(pool_proxy) == false) {
+		printf("%s start failed\n", __func__);
+		devdisk->detach(pool_proxy);
+		devdisk->release();
+		devdisk = 0;
+		return (ENXIO);
+	}
+
+	/* Get matching started */
+	devdisk->registerService(kIOServiceAsynchronous);
+	//bootdev->registerService(kIOServiceSynchronous);
+
+	IOMedia *media = 0;
+	do {
+		if (devdisk->getClient() != 0) {
+			media = OSDynamicCast(IOMedia,
+			    devdisk->getClient()->getClient());
+			if (media) {
+				media->retain();
+				break;
+			}
+		}
+
+		/* Sleep until media is available */
+		/*
+		 * XXX Should use waitForServiceMatching or IONotifier
+		 */
+		IOSleep(200);
+	} while (!media);
+
+	if (!media) {
+		/* XXX currently unreachable */
+		printf("%s couldn't get devdisk media\n", __func__);
+		return (ENXIO);
+	}
+
+	resourceService = IOService::getResourceService();
+	if (!resourceService) {
+		dprintf("%s missing resource service\n", __func__);
+		/* Handle error */
+		media->release();
+		return (ENXIO);
+	}
+
+	zfsvfs->z_devdisk = devdisk;
+
+	/* Drop retain from earlier */
+	media->release();
+
+	printf("%s done\n", __func__);
+	return (0);
+}
+
+int
+zfs_detach_devicedisk(zfsvfs_t *zfsvfs)
+{
+	ZFSBootDevice *devdisk = 0;
+	ZFSPool *pool_proxy = 0;
+	spa_t *spa = dmu_objset_spa(zfsvfs->z_os);
+
+	// Does not have an attached disk
+	if (zfsvfs->z_devdisk == NULL)
+		return (0);
+
+	printf("%s removing\n", __func__);
+
+	/* Get pool proxy */
+	if (!spa->spa_iokit_proxy ||
+	    (pool_proxy = spa->spa_iokit_proxy->proxy) == NULL) {
+		dprintf("%s no spa_pool_proxy\n", __func__);
+		return (0);
+	}
+
+	devdisk = (ZFSBootDevice *)zfsvfs->z_devdisk;
+	zfsvfs->z_devdisk = NULL;
+
+	devdisk->detach(pool_proxy);
+	devdisk->release();
+
+	printf("%s done\n", __func__);
+	return 0;
+}
+
 DSTATIC void
 zfs_boot_import_thread(void *arg)
 {
@@ -2411,6 +2604,31 @@ zfs_boot_get_path(char *path, int len)
 	if (bootdev) {
 		disk = OSDynamicCast(OSString,
 		    bootdev->getProperty(kIOBSDNameKey, gIOServicePlane,
+		    kIORegistryIterateRecursively));
+	}
+
+	if (disk) {
+		snprintf(path, len, "/dev/%s", disk->getCStringNoCopy());
+		return (0);
+	}
+
+	return (-1);
+}
+
+int
+zfs_devdisk_get_path(void *arg, char *path, int len)
+{
+	OSString *disk = 0;
+	ZFSBootDevice *devdisk = (ZFSBootDevice *)arg;
+
+	if (!path || len == 0) {
+		dprintf("%s: invalid argument\n", __func__);
+		return (-1);
+	}
+
+	if (devdisk) {
+		disk = OSDynamicCast(OSString,
+		    devdisk->getProperty(kIOBSDNameKey, gIOServicePlane,
 		    kIORegistryIterateRecursively));
 	}
 

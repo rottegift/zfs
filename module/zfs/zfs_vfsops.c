@@ -538,36 +538,52 @@ mimic_hfs_changed_cb(void *arg, uint64_t newval)
 	}
 }
 
+#include <sys/spa_impl.h>
+#include <sys/zfs_boot.h>
 void zfs_devdisk_attach(zfsvfs_t *zfsvfs)
 {
+	char name[ZFS_MAX_DATASET_NAME_LEN];
 
-	vfs_mountedfrom(zfsvfs->z_vfs, "/dev/disk9");
+	zfs_attach_devicedisk(zfsvfs);
+
+	if (!zfs_devdisk_get_path(zfsvfs->z_devdisk, name, sizeof(name)))
+		// Update the mount name to point to it.
+		vfs_mountedfrom(zfsvfs->z_vfs, name); // /dev/diskX
+
 }
 
 void zfs_devdisk_detach(zfsvfs_t *zfsvfs)
 {
 	char osname[ZFS_MAX_DATASET_NAME_LEN];
+	spa_t *spa;
 
+	spa = dmu_objset_spa(zfsvfs->z_os);
 
+	// If we had a devdisk, remove it
+	if ( spa->spa_iokit_proxy != NULL ) {
+
+	}
+
+	// Update the mount name
 	dmu_objset_name(zfsvfs->z_os, osname);
 	vfs_mountedfrom(zfsvfs->z_vfs, osname);
 }
 
+#include <sys/dsl_dir.h>
 static void
 devdisk_changed_cb(void *arg, uint64_t newval)
 {
 	zfsvfs_t *zfsvfs = arg;
+	int isroot;
 
-	switch(newval) {
-		case ZFS_DEVDISK_POOLONLY:
-			break;
-		case ZFS_DEVDISK_OFF:
-			zfs_devdisk_detach(zfsvfs);
-			break;
-		case ZFS_DEVDISK_ON:
-			zfs_devdisk_attach(zfsvfs);
-			break;
-	}
+	isroot = (!dmu_objset_is_snapshot(zfsvfs->z_os) &&
+		zfsvfs->z_os->os_dsl_dataset->ds_dir->dd_parent == NULL);
+
+	if ((newval == ZFS_DEVDISK_ON) ||
+		((newval == ZFS_DEVDISK_POOLONLY) && isroot))
+		zfs_devdisk_attach(zfsvfs);
+	else
+		zfs_devdisk_detach(zfsvfs);
 }
 
 #endif
@@ -1603,7 +1619,7 @@ dprintf("%s\n", __func__);
 		//    (uint64_t)((unsigned int)MNT_AUTOMOUNTED));
 	}
 
-	int devdisk = ZFS_DEVDISK_POOLONLY;
+	uint64_t devdisk = ZFS_DEVDISK_POOLONLY;
 	dsl_prop_get_integer(osname, "com.apple.devdisk", &devdisk, NULL);
 	devdisk_changed_cb(zfsvfs, devdisk);
 
@@ -3165,6 +3181,10 @@ dprintf("%s\n", __func__);
 	}
 
 #ifdef __APPLE__
+
+	// If there is a devdisk device, release it.
+	devdisk_changed_cb(zfsvfs, ZFS_DEVDISK_OFF);
+
 	if (!vfs_isrdonly(zfsvfs->z_vfs) &&
 		spa_writeable(dmu_objset_spa(zfsvfs->z_os)) &&
 		!(mntflags & MNT_FORCE)) {
