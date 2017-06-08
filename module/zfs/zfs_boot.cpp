@@ -1656,6 +1656,9 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 	return (0);
 }
 
+
+#include <IOKit/storage/IOPartitionScheme.h>
+
 int
 zfs_attach_devicedisk(zfsvfs_t *zfsvfs)
 {
@@ -1683,7 +1686,7 @@ zfs_attach_devicedisk(zfsvfs_t *zfsvfs)
 
 	/* Create prop dict for the proxy, with 6 or more keys */
 	if ((properties = OSDictionary::withCapacity(6)) == NULL) {
-		dprintf("%s prop dict allocation failed\n", __func__);
+		printf("%s prop dict allocation failed\n", __func__);
 		return (ENOMEM);
 	}
 
@@ -1694,18 +1697,19 @@ zfs_attach_devicedisk(zfsvfs_t *zfsvfs)
 		/* ZFS (BF01) partition type */
 		if ((partUUID = OSSymbol::withCString(
 		    "6A898CC3-1DD2-11B2-99A6-080020736631")) == NULL) {
-			dprintf("%s couldn't make partUUID\n", __func__);
+			printf("%s couldn't make partUUID\n", __func__);
 			return (ENOMEM);
 		}
 
-		/* Assign ZFS partiton UUID to both */
+		/* Assign ZFS partition UUID to both */
 		if (properties->setObject(kIOMediaContentKey,
 		    partUUID) == false ||
 		    properties->setObject(kIOMediaContentHintKey,
 		    partUUID) == false) {
-			dprintf("%s content hint failed\n", __func__);
+			printf("%s content hint failed\n", __func__);
 			return (ENOMEM);
 		}
+
 		partUUID->release();
 	} while(0);
 
@@ -1731,7 +1735,7 @@ zfs_attach_devicedisk(zfsvfs_t *zfsvfs)
 		    uuidStr) == false ||
 		    properties->setObject(ZFS_BOOT_DATASET_RDONLY_KEY,
 		    kOSBooleanFalse) == false) {
-			dprintf("ZFSBootDevice::%s couldn't setup"
+			printf("ZFSBootDevice::%s couldn't setup"
 			    "property dict\n", __func__);
 			nameStr->release();
 			uuidStr->release();
@@ -1755,8 +1759,6 @@ zfs_attach_devicedisk(zfsvfs_t *zfsvfs)
 		devdisk = 0;
 		return (ENXIO);
 	}
-	properties->release();
-	properties = 0;
 
 	if (devdisk->attach(pool_proxy) == false) {
 		printf("%s attach failed\n", __func__);
@@ -1804,11 +1806,18 @@ zfs_attach_devicedisk(zfsvfs_t *zfsvfs)
 
 	resourceService = IOService::getResourceService();
 	if (!resourceService) {
-		dprintf("%s missing resource service\n", __func__);
+		printf("%s missing resource service\n", __func__);
 		/* Handle error */
 		media->release();
 		return (ENXIO);
 	}
+
+	media->setProperty(kIOMediaContentHintKey, "zfs_dataset_proxy");
+
+	media->registerService(kIOServiceAsynchronous);
+
+	properties->release();
+	properties = 0;
 
 	zfsvfs->z_devdisk = devdisk;
 
@@ -2633,7 +2642,7 @@ zfs_devdisk_get_path(void *arg, char *path, int len)
 	}
 
 	if (disk) {
-		snprintf(path, len, "/dev/%s", disk->getCStringNoCopy());
+		snprintf(path, len, "/dev/%ss1", disk->getCStringNoCopy());
 		return (0);
 	}
 
@@ -3121,5 +3130,178 @@ IOReturn ZFSBootDevice::getWriteCacheState(bool *enabled)
 {
 	return kIOReturnSuccess;
 }
+
+
+/*
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+#undef super
+#define super IOPartitionScheme
+
+OSDefineMetaClassAndStructors(zfs_partition_class, IOPartitionScheme)
+
+
+// We are asked to golook for partitions
+IOService *zfs_partition_class::probe(IOService *provider, SInt32 *score)
+{
+	printf("<%s>: \n", __func__);
+
+    if (super::probe(provider, score) == 0)
+        return 0;
+
+    // Go look for any partitions, and add them to child_filesystems
+    m_child_filesystems = scan(score);
+
+    //If this filesystem has no children, then return NULL
+    printf("probe: this %p : m_child_filesystems %p: provider %p\n",
+		   this, m_child_filesystems, provider);
+
+    return m_child_filesystems ? this : NULL;
+}
+
+
+// We were picked to handle partitions
+bool zfs_partition_class::start (IOService *provider)
+{
+    IOMedia *child_filesystem;
+    OSIterator *child_filesystemIterator;
+
+	printf("<%s>: \n", __func__);
+
+	if (super::start(provider) == false)
+		return false;
+
+    if(m_child_filesystems == NULL)
+        return false;
+
+    // Create an iterator for the IOMedia objects that were found
+	// and instantiated during probe
+    child_filesystemIterator = OSCollectionIterator::withCollection(m_child_filesystems);
+    if (child_filesystemIterator == NULL)
+        return false;
+
+    // Attach and register each IOMedia object (representing found partitions)
+    while ((child_filesystem = (IOMedia*)child_filesystemIterator->getNextObject())) {
+        if (child_filesystem->attach(this)) {
+            //attachMediaObjectToDeviceTree(child_filesystem);
+            child_filesystem->registerService();
+        }
+    }
+    child_filesystemIterator->release();
+	this->registerService();
+    return true;
+}
+
+void zfs_partition_class::stop(IOService *provider)
+{
+	IOMedia *child_filesystem;
+	OSIterator *child_filesystemIterator;
+
+	printf("<%s>: \n", __func__);
+
+	// Detach the media objects we previously attached to the device tree.
+	child_filesystemIterator = OSCollectionIterator::withCollection(m_child_filesystems);
+	if (child_filesystemIterator) {
+		while ((child_filesystem = (IOMedia*)child_filesystemIterator->getNextObject())) {
+			//detachMediaObjectFromDeviceTree(child_filesystem);
+			child_filesystem->terminate();
+		}
+
+		child_filesystemIterator->release();
+	}
+
+	super::stop(provider);
+}
+
+
+// Look for partitions, if this is ZFS, we always find one.
+OSSet *zfs_partition_class::scan(SInt32 *score)
+{
+	IOMedia *media = getProvider();
+	OSSet *partitions;
+	IOStorage *parent = media->getProvider();
+
+	printf("<%s>: \n", __func__);
+
+	printf("scan : provider Content is %s\n",
+		media->getContent());
+    printf("scan : provider ContentHint is %s\n",
+		media->getContentHint());
+	printf("scan : provider Name is %s: this %p\n",
+		parent->getName(), this);
+
+	if (strcmp(media->getContentHint(), "zfs_dataset_proxy") != 0) {
+		return NULL;
+	}
+
+	partitions = OSSet::withCapacity(1);
+
+	IOMedia *newMedia;
+
+	newMedia = instantiateMediaObject();
+	if (newMedia) {
+		partitions->setObject(newMedia);
+		newMedia->release();
+	}
+
+	return partitions;
+}
+
+IOMedia *zfs_partition_class::instantiateMediaObject()
+{
+	IOMedia *newMedia;
+	IOMedia *parent = getProvider();
+
+	newMedia = new IOMedia;
+	if (newMedia) {
+
+		UInt64 partitionBase   = 0;
+		UInt64 partitionSize   = parent->getSize();
+		UInt64 mediaBlockSize  = parent->getPreferredBlockSize();
+		IOMediaAttributeMask mediaAttributes = parent->getAttributes();
+		bool isMediaWritable = parent->isWritable();
+		int index = 1;
+
+		if ( newMedia->init(partitionBase,
+				partitionSize,
+				mediaBlockSize,
+				mediaAttributes,
+				false, //it's a "partition" now
+				isMediaWritable,
+				"zfs_dataset_proxy")) {
+
+			printf("Creating partition: '%s'\n", parent->getName());
+
+			newMedia->setName(parent->getName());
+			char location[12];
+            snprintf(location, sizeof(location), "%d", (int)index);
+			newMedia->setLocation(location);
+			// Set the "Partition ID" key for this partition
+			newMedia->setProperty(kIOMediaPartitionIDKey, index, 32);
+
+			newMedia->setProperty(kIOMediaContentHintKey,
+				"6A945A3B-1DD2-11B2-99A6-080020736631");
+			newMedia->setProperty(kIOMediaContentHintKey,
+				"6A945A3B-1DD2-11B2-99A6-080020736631");
+
+		} else {
+			newMedia->release();
+			newMedia = NULL;
+		}
+	}
+
+	return newMedia;
+}
+
+
+void zfs_partition_class::free(void)
+{
+	if (m_child_filesystems)
+		m_child_filesystems->release();
+	super::free();
+}
+
+
 
 #endif /* ZFS_BOOT */
