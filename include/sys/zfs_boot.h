@@ -80,27 +80,6 @@ private:
 	bool isReadOnly;
 };
 
-#include <IOKit/storage/IOPartitionScheme.h>
-
-class zfs_partition_class : public IOPartitionScheme
-{
-	OSDeclareDefaultStructors(zfs_partition_class)
-
-protected:
-	OSSet*          m_child_filesystems;
-    virtual OSSet*      scan(SInt32 * score);
-
-public:
-    virtual IOService*  probe(IOService* provider, SInt32* score);
-	virtual bool		start (IOService* provider);
-	virtual void		stop (IOService* provider);
-	virtual IOMedia*    instantiateMediaObject();
-	virtual void        free(void);
-
-};
-
-
-
 #endif /* ZFS_BOOT */
 #endif	/* __cplusplus */
 

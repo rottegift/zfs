@@ -103,10 +103,12 @@
 #include <sys/zfs_vnops.h>
 #include <sys/systeminfo.h>
 #include <sys/zfs_mount.h>
+#include <sys/ZFSDataset.h>
 #endif /* __APPLE__ */
 
 //#define dprintf kprintf
-//#define dprintf printf
+#undef dprintf
+#define dprintf printf
 
 #ifdef __APPLE__
 unsigned int zfs_vnop_skip_unlinked_drain = 0;
@@ -538,54 +540,6 @@ mimic_hfs_changed_cb(void *arg, uint64_t newval)
 	}
 }
 
-#include <sys/spa_impl.h>
-#include <sys/zfs_boot.h>
-void zfs_devdisk_attach(zfsvfs_t *zfsvfs)
-{
-	char name[ZFS_MAX_DATASET_NAME_LEN];
-
-	zfs_attach_devicedisk(zfsvfs);
-
-	if (!zfs_devdisk_get_path(zfsvfs->z_devdisk, name, sizeof(name)))
-		// Update the mount name to point to it.
-		vfs_mountedfrom(zfsvfs->z_vfs, name); // /dev/diskX
-
-}
-
-void zfs_devdisk_detach(zfsvfs_t *zfsvfs)
-{
-	char osname[ZFS_MAX_DATASET_NAME_LEN];
-	spa_t *spa;
-
-	spa = dmu_objset_spa(zfsvfs->z_os);
-
-	// If we had a devdisk, remove it
-	if ( spa->spa_iokit_proxy != NULL ) {
-
-	}
-
-	// Update the mount name
-	dmu_objset_name(zfsvfs->z_os, osname);
-	vfs_mountedfrom(zfsvfs->z_vfs, osname);
-}
-
-#include <sys/dsl_dir.h>
-static void
-devdisk_changed_cb(void *arg, uint64_t newval)
-{
-	zfsvfs_t *zfsvfs = arg;
-	int isroot;
-
-	isroot = (!dmu_objset_is_snapshot(zfsvfs->z_os) &&
-		zfsvfs->z_os->os_dsl_dataset->ds_dir->dd_parent == NULL);
-
-	if ((newval == ZFS_DEVDISK_ON) ||
-		((newval == ZFS_DEVDISK_POOLONLY) && isroot))
-		zfs_devdisk_attach(zfsvfs);
-	else
-		zfs_devdisk_detach(zfsvfs);
-}
-
 #endif
 
 static int
@@ -778,8 +732,6 @@ zfs_register_callbacks(struct mount *vfsp)
 	    zfs_prop_to_name(ZFS_PROP_APPLE_IGNOREOWNER), ignoreowner_changed_cb, zfsvfs);
 	error = error ? error : dsl_prop_register(ds,
 	    zfs_prop_to_name(ZFS_PROP_APPLE_MIMIC_HFS), mimic_hfs_changed_cb, zfsvfs);
-	error = error ? error : dsl_prop_register(ds,
-	    zfs_prop_to_name(ZFS_PROP_APPLE_DEVDISK), devdisk_changed_cb, zfsvfs);
 #endif
 	dsl_pool_config_exit(dmu_objset_pool(os), FTAG);
 	if (error)
@@ -1619,10 +1571,6 @@ dprintf("%s\n", __func__);
 		//    (uint64_t)((unsigned int)MNT_AUTOMOUNTED));
 	}
 
-	uint64_t devdisk = ZFS_DEVDISK_POOLONLY;
-	dsl_prop_get_integer(osname, "com.apple.devdisk", &devdisk, NULL);
-	devdisk_changed_cb(zfsvfs, devdisk);
-
 #else
 	/* Grab extra reference. */
 	VERIFY(VFS_ROOT(vfsp, LK_EXCLUSIVE, &vp) == 0);
@@ -2043,6 +1991,7 @@ zfs_vfs_mount(struct mount *vfsp, vnode_t *mvp /*devvp*/,
 	int		canwrite;
 	int		rdonly = 0;
 	int		mflag = 0;
+	char *dev_name = NULL;
 
 #ifdef __APPLE__
     struct zfs_mount_args mnt_args;
@@ -2107,13 +2056,22 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 		}
 	}
 
-	if (strncmp(osname, "/dev/disk", 9) == 0 &&
-	    (vfs_flags(vfsp) & MNT_ROOTFS) == 0) {
-		printf("%s osname %s skip\n", __func__, osname);
-		error = ENODEV;
-		goto out;
+	// Convert /dev/disk to real dataset name (or pass in options?)
+	if (strncmp(osname, "/dev/disk", 9) == 0) {
+
+		dev_name = osname;
+		osname = kmem_alloc(MAXPATHLEN, KM_SLEEP); //same size as osname
+
+		error = zfs_dataset_proxy_get_osname(dev_name,
+			osname, MAXPATHLEN);
+		printf("%s: changed '%s' to '%s'\n", __func__, dev_name, osname);
+
 	}
 
+	// From here on, dev_name is /dev/disk (if any)
+	// and osname is dataset name
+
+#endif
 
 	if (mnt_args.struct_size == sizeof(mnt_args)) {
 
@@ -2156,8 +2114,6 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 	}
 
 	vfs_setflags(vfsp, (uint64_t)flags);
-
-#endif
 
 #ifdef illumos
 	if (mvp->v_type != VDIR)
@@ -2383,6 +2339,10 @@ out:
 		//dprintf("%s: setting vfs flags\n", __func__);
 		/* Indicate to VFS that we support ACLs. */
 		vfs_setextendedsecurity(vfsp);
+
+		// Set /dev/disk name if we have one, otherwise, datasetname
+		vfs_mountedfrom(vfsp, dev_name ? dev_name : osname);
+
 	}
 
 	if (error)
@@ -2390,6 +2350,9 @@ out:
 
 	if (osname)
 		kmem_free(osname, MAXPATHLEN);
+
+	if (dev_name)
+		kmem_free(dev_name, MAXPATHLEN);
 
 	if (options)
 		kmem_free(options, mnt_args.optlen);
@@ -2406,7 +2369,7 @@ zfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 	uint64_t log_blksize;
 	uint64_t log_blkcnt;
 
-    dprintf("vfs_getattr\n");
+//    dprintf("vfs_getattr\n");
 
 	ZFS_ENTER(zfsvfs);
 
@@ -3181,9 +3144,8 @@ dprintf("%s\n", __func__);
 	}
 
 #ifdef __APPLE__
-
-	// If there is a devdisk device, release it.
-	devdisk_changed_cb(zfsvfs, ZFS_DEVDISK_OFF);
+	char osname[MAXNAMELEN];
+	dmu_objset_name(zfsvfs->z_os, osname);
 
 	if (!vfs_isrdonly(zfsvfs->z_vfs) &&
 		spa_writeable(dmu_objset_spa(zfsvfs->z_os)) &&
@@ -3195,7 +3157,6 @@ dprintf("%s\n", __func__);
 			int error;
 			uint64_t value;
 
-			dmu_objset_name(zfsvfs->z_os, osname);
 			dprintf("ZFS: '%s' Updating spotlight LASTUNMOUNT property\n",
 				osname);
 
@@ -3290,6 +3251,9 @@ dprintf("%s\n", __func__);
 			VN_RELE(svp);
 	}
 #endif
+
+	// If it was mounted with /dev/diskX, destroy that now
+	spa_iokit_dataset_proxy_destroy(osname);
 
     dprintf("freevfs\n");
 	zfs_freevfs(zfsvfs->z_vfs);

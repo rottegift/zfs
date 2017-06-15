@@ -6822,6 +6822,8 @@ manual_mount(int argc, char **argv)
 	uint64_t zfs_version = 0;
 #endif
 
+	return 0; // Fix this, if it is needed.
+
 	openlog("mount_zfs", LOG_CONS | LOG_PERROR, LOG_AUTH);
 	syslog(LOG_NOTICE, "zfs/mount_zfs %s\n", __func__);
 
@@ -6896,9 +6898,9 @@ manual_mount(int argc, char **argv)
 			syslog(LOG_NOTICE, "no automount\n");
 			return (1);
 		}
-
-		ret = zmount(dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
-		    NULL, 0, mntopts, sizeof (mntopts));
+// fixme
+//		ret = zmount(zhp, dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
+//		    NULL, 0, mntopts, sizeof (mntopts));
 		syslog(LOG_NOTICE, "%s: zmount %s on %s returned %d\n", __func__,
 		    dataset, path, ret);
 		return (ret);
@@ -6929,7 +6931,7 @@ manual_mount(int argc, char **argv)
 	/* check for legacy mountpoint and complain appropriately */
 	ret = 0;
 	if (strcmp(mountpoint, ZFS_MOUNTPOINT_LEGACY) == 0) {
-		if (zmount(dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
+		if (zmount(zhp, dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
 		    NULL, 0, mntopts, sizeof (mntopts)) != 0) {
 #ifdef __APPLE__
 			if (errno == ENOTSUP && zfs_version > ZPL_VERSION) {

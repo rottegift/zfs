@@ -255,32 +255,17 @@ void expand_disk_to_zfs(char *devname, int len)
 		return;
 	}
 
-	if (IOObjectConformsTo(service, kIOMediaClass)) {
-
-		io_service_t parent;
-		io_service_t grandparent;
-
-		if (IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent) ==
-			kIOReturnSuccess) {
-
-			if (IORegistryEntryGetParentEntry(parent, kIOServicePlane,
-					&grandparent) == kIOReturnSuccess) {
-
-				// Should use ZFS_BOOT_DATASET_NAME_KEY here
-				cfstr = IORegistryEntryCreateCFProperty(grandparent,
-					CFSTR("zfs_dataset_name"), kCFAllocatorDefault, 0);
-				if (cfstr) {
-					result = MYCFStringCopyUTF8String(cfstr);
-					CFRelease(cfstr);
-				}
-				IOObjectRelease(grandparent);
-			}
-			IOObjectRelease(parent);
-		}
+	cfstr = IORegistryEntryCreateCFProperty(service,
+		CFSTR("ZFS Dataset"), kCFAllocatorDefault, 0);
+	if (cfstr) {
+		result = MYCFStringCopyUTF8String(cfstr);
+		CFRelease(cfstr);
 	}
+
 	IOObjectRelease(service);
 
 	if (result) {
+		fprintf(stderr, "%s: '%s' '%s'\r\n", __func__, devname, result);
 		strlcpy(devname, result, len);
 		free(result);
 	}

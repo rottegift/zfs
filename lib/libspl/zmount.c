@@ -33,10 +33,11 @@
 
 #include <sys/mount.h>
 #include <sys/zfs_mount.h>
+#include <libzfs_impl.h>
 
 int
-zmount(const char *spec, const char *dir, int mflag, char *fstype,
-    char *dataptr, int datalen, char *optptr, int optlen)
+zmount(zfs_handle_t *zhp, const char *spec, const char *dir, int mflag,
+	char *fstype, char *dataptr, int datalen, char *optptr, int optlen)
 {
 	int rv;
 	struct zfs_mount_args mnt_args;
@@ -50,8 +51,32 @@ zmount(const char *spec, const char *dir, int mflag, char *fstype,
 	assert(datalen == 0);
 	assert(optptr != NULL);
 	assert(optlen > 0);
+	zfs_cmd_t zc = { "\0" };
 
+
+	/*
+	 * Figure out if we want this mount as a /dev/diskX mount, if so
+	 * ask kernel to create one for us, then use it to mount.
+	 */
+
+	// Use dataset name by default
 	mnt_args.fspec = spec;
+
+	if (1) {
+
+		(void)strlcpy(zc.zc_name, zhp->zfs_name, sizeof(zc.zc_name));
+		zc.zc_value[0] = 0;
+
+		rv = zfs_ioctl(zhp->zfs_hdl, ZFS_IOC_PROXY_DATASET, &zc);
+
+		fprintf(stderr, "proxy datashet returns %d '%s'\n",
+			rv, zc.zc_value);
+
+		// Mount using /dev/diskX
+		if (rv == 0)
+			mnt_args.fspec = zc.zc_value;
+	}
+
 	mnt_args.mflag = mflag;
 	mnt_args.optptr = optptr;
 	mnt_args.optlen = optlen;
