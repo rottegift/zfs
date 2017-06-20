@@ -41,6 +41,10 @@
 #endif
 #define	dprintf		IOLog
 
+
+//
+// This function broke in the move to IOBlockStorageDevice, fixme
+//
 int
 zfs_dataset_proxy_get_osname(const char *in, char *out, int len)
 {
@@ -303,7 +307,9 @@ spa_iokit_dataset_proxy_destroy(char *osname)
 	return (0);
 }
 
-OSDefineMetaClassAndStructors(ZFSDataset, IOMedia);
+#define super IOBlockStorageDevice
+//OSDefineMetaClassAndStructors(ZFSDataset, IOMedia);
+OSDefineMetaClassAndStructors(ZFSDataset, IOBlockStorageDevice);
 
 #if 0
 /* XXX Only for debug tracing */
@@ -398,17 +404,14 @@ ZFSDataset::stop(IOService *provider)
 }
 
 bool
-ZFSDataset::init(UInt64 base, UInt64 size,
-    UInt64 preferredBlockSize,
-    IOMediaAttributeMask attributes,
-    bool isWhole, bool isWritable,
-    const char *contentHint,
-    OSDictionary *properties)
+ZFSDataset::init(OSDictionary *properties)
 {
-	DLOGFUNC();
-	return (super::init(base, size, preferredBlockSize,
-	    attributes, isWhole, isWritable, contentHint,
-	    properties));
+	dprintf("%s\n", __func__);
+	if (super::init(properties) == false)
+        return (false);
+
+	super::setProperty(kIOMediaContentHintKey, "zfs_dataset_proxy");
+	return true;
 }
 
 void
@@ -449,9 +452,7 @@ ZFSDataset::init(UInt64 base, UInt64 size,
     const char *contentHint,
     OSDictionary *properties)
 #endif
-	if (dataset->init(/* base */ 0, size, DEV_BSIZE,
-	    /* attributes */ 0, /* isWhole */ true, isWritable,
-	    kZFSContentHint, /* properties */ NULL) == false) {
+	if (dataset->init(NULL) == false) {
 		dprintf("%s init failed\n", __func__);
 		dataset->release();
 		return (NULL);
@@ -466,6 +467,7 @@ ZFSDataset::init(UInt64 base, UInt64 size,
 	return (dataset);
 }
 
+#if 0
 void
 ZFSDataset::read(IOService *client,
     UInt64 byteStart, IOMemoryDescriptor *buffer,
@@ -657,6 +659,8 @@ ZFSDataset::getAttributes() const
 	DLOGFUNC();
 	return (super::getAttributes());
 }
+#endif
+
 
 bool
 ZFSDataset::setDatasetName(const char *name)
@@ -696,4 +700,270 @@ ZFSDataset::setDatasetName(const char *name)
 	kmem_free(newname, len);
 
 	return (true);
+}
+
+
+
+
+
+
+
+IOReturn
+ZFSDataset::doAsyncReadWrite(
+    IOMemoryDescriptor *buffer, UInt64 block, UInt64 nblks,
+    IOStorageAttributes *attributes, IOStorageCompletion *completion)
+{
+	IODirection direction;
+	IOByteCount actualByteCount = block * nblks;
+
+	// Return errors for incoming I/O if we have been terminated.
+	if (isInactive() == true) {
+		dprintf("asyncReadWrite notActive fail\n");
+		return (kIOReturnNotAttached);
+	}
+
+#if 0
+	// These variables are set in zvol_first_open(), which should have been
+	// called already.
+	if (!zv->zv_objset || !zv->zv_dbuf) {
+		dprintf("asyncReadWrite no objset nor dbuf\n");
+		return (kIOReturnNotAttached);
+	}
+
+	// Ensure the start block is within the disk capacity.
+	if ((block)*(ZVOL_BSIZE) >= zv->zv_volsize) {
+		dprintf("asyncReadWrite start block outside volume\n");
+		return (kIOReturnBadArgument);
+	}
+
+	// Shorten the read, if beyond the end
+	if (((block + nblks)*(ZVOL_BSIZE)) > zv->zv_volsize) {
+		dprintf("asyncReadWrite block shortening needed\n");
+		return (kIOReturnBadArgument);
+	}
+#endif
+
+	// Get the buffer direction, whether this is a read or a write.
+	direction = buffer->getDirection();
+	if ((direction != kIODirectionIn) && (direction != kIODirectionOut)) {
+		dprintf("asyncReadWrite kooky direction\n");
+		return (kIOReturnBadArgument);
+	}
+
+	retain();
+
+	if (direction == kIODirectionIn) {
+
+//		if (zvol_read_iokit(zv, (block*(ZVOL_BSIZE)),
+//		    actualByteCount, &iomem)) {
+//
+//			actualByteCount = 0;
+//		}
+
+	} else {
+
+//		if (zvol_write_iokit(zv, (block*(ZVOL_BSIZE)),
+//		    actualByteCount, &iomem)) {
+//			actualByteCount = 0;
+//		}
+
+	}
+
+	release();
+
+
+	// Call the completion function.
+	(completion->action)(completion->target, completion->parameter,
+	    kIOReturnSuccess, actualByteCount);
+	return (kIOReturnSuccess);
+}
+
+UInt32
+ZFSDataset::doGetFormatCapacities(UInt64* capacities,
+    UInt32 capacitiesMaxCount) const
+{
+	dprintf("formatCap\n");
+
+	/*
+	 * Ensure that the array is sufficient to hold all our formats
+	 * (we require one element).
+	 */
+	if ((capacities != NULL) && (capacitiesMaxCount < 1))
+		return (0);
+		/* Error, return an array size of 0. */
+
+	/*
+	 * The caller may provide a NULL array if it wishes to query the number
+	 * of formats that we support.
+	 */
+//	if (capacities != NULL)
+//		capacities[0] = zv->zv_volsize;
+
+//	dprintf("returning capacity[0] size %llu\n", zv->zv_volsize);
+
+	return (1);
+}
+
+char *
+ZFSDataset::getProductString(void)
+{
+	//dprintf("getProduct %p\n", zv);
+
+	//if (zv) return (zv->zv_name);
+
+	return ((char *)"ZFSDataset");
+}
+
+IOReturn
+ZFSDataset::reportBlockSize(UInt64 *blockSize)
+{
+	dprintf("reportBlockSize %llu\n", *blockSize);
+
+	if (blockSize) *blockSize = 512;
+
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::reportMaxValidBlock(UInt64 *maxBlock)
+{
+	dprintf("reportMaxValidBlock %llu\n", *maxBlock);
+
+//if (maxBlock) *maxBlock = ((zv->zv_volsize / (ZVOL_BSIZE)) - 1);
+
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::reportMediaState(bool *mediaPresent,
+    bool *changedState)
+{
+	dprintf("reportMediaState\n");
+	if (mediaPresent) *mediaPresent = true;
+	if (changedState) *changedState = false;
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::reportPollRequirements(bool *pollRequired,
+    bool *pollIsExpensive)
+{
+	dprintf("reportPollReq\n");
+	if (pollRequired) *pollRequired = false;
+	if (pollIsExpensive) *pollIsExpensive = false;
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::reportRemovability(bool *isRemovable)
+{
+	dprintf("reportRemova\n");
+	if (isRemovable) *isRemovable = false;
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::doEjectMedia(void)
+{
+	dprintf("ejectMedia\n");
+	// this->m_provider->doEjectMedia(this);
+	//this->m_provider->doEjectMedia(zv);
+/* XXX */
+	// Only 10.6 needs special work to eject
+	//if ((version_major == 10) && (version_minor == 8))
+	//	destroyBlockStorageDevice(zvol);
+	//}
+
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::doFormatMedia(UInt64 byteCapacity)
+{
+	dprintf("doFormat\n");
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::doLockUnlockMedia(bool doLock)
+{
+	dprintf("doLockUnlock\n");
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::doSynchronizeCache(void)
+{
+	dprintf("doSync\n");
+	return (kIOReturnSuccess);
+}
+
+char *
+ZFSDataset::getVendorString(void)
+{
+	dprintf("getVendor\n");
+	return ((char *)"ZFS Dataset");
+}
+
+char *
+ZFSDataset::getRevisionString(void)
+{
+	dprintf("getRevision\n");
+	return ((char *)ZFS_META_VERSION);
+}
+
+char *
+ZFSDataset::getAdditionalDeviceInfoString(void)
+{
+	dprintf("getAdditional\n");
+	return ((char *)"ZFS dataset");
+}
+
+IOReturn
+ZFSDataset::reportEjectability(bool *isEjectable)
+{
+	dprintf("reportEjecta\n");
+	/*
+	 * Which do we prefer? If you eject it, you can't get volume back until
+	 * you import it again.
+	 */
+
+	if (isEjectable) *isEjectable = false;
+	return (kIOReturnSuccess);
+}
+
+/* XXX deprecated function */
+IOReturn
+ZFSDataset::reportLockability(bool *isLockable)
+{
+	dprintf("reportLocka\n");
+	if (isLockable) *isLockable = true;
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::reportWriteProtection(bool *isWriteProtected)
+{
+	dprintf("reportWritePro: %d\n", *isWriteProtected);
+
+	if (!isWriteProtected) return (kIOReturnSuccess);
+
+	*isWriteProtected = false;
+
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::getWriteCacheState(bool *enabled)
+{
+	dprintf("getCacheState\n");
+	if (enabled) *enabled = true;
+	return (kIOReturnSuccess);
+}
+
+IOReturn
+ZFSDataset::setWriteCacheState(bool enabled)
+{
+	dprintf("setWriteCache\n");
+	return (kIOReturnSuccess);
 }

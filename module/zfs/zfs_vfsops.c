@@ -2064,6 +2064,7 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 
 		error = zfs_dataset_proxy_get_osname(dev_name,
 			osname, MAXPATHLEN);
+		if (error) strcpy(osname, "BOOM"); // FIXME
 		printf("%s: changed '%s' to '%s'\n", __func__, dev_name, osname);
 
 	}

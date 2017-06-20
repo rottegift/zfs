@@ -58,21 +58,27 @@
 			<key>IOResourceMatch</key>
 			<string>IOBSD</string>
 		</dict>
-	  <key>ZFSDatasetScheme</key>
+	  <key>ZFSDataset</key>
 	  <dict>
 		<key>CFBundleIdentifier</key>
 		<string>net.lundman.zfs</string>
 		<key>IOClass</key>
-		<string>zfs_partition_class</string>
+		<string>ZFSDataset</string>
 		<key>IOMatchCategory</key>
 		<string>IOStorage</string>
 		<key>IOProviderClass</key>
 		<string>IOMedia</string>
 		<key>IOPropertyMatch</key>
-		<dict>
-		  <key>Whole</key>
-		  <true/>
-		</dict>
+		<array>
+		  <dict>
+            <key>Content Hint</key>
+            <string>zfs_dataset_proxy</string>
+          </dict>
+		  <dict>
+			<key>Whole</key>
+			<true/>
+		  </dict>
+		</array>
 	  </dict>
 	</dict>
 	<key>NSHumanReadableCopyright</key>

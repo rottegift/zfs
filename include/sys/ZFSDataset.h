@@ -44,20 +44,16 @@ int spa_iokit_dataset_proxy_destroy(char *osname);
 } /* extern "C" */
 
 #include <IOKit/storage/IOMedia.h>
-
-#ifdef super
-#undef super
-#endif
-#define super IOMedia
+#include <IOKit/storage/IOBlockStorageDevice.h>
 
 /* XXX Should be UUID */
-#define	kZFSContentHint		"ZFS"
+#define	kZFSContentHint		"zfs_dataset_proxy"
 
 #define	kZFSIOMediaPrefix	"ZFS "
 #define	kZFSIOMediaSuffix	" Media"
 #define	kZFSDatasetNameKey	"ZFS Dataset"
 
-class ZFSDataset : public IOMedia
+class ZFSDataset : public IOBlockStorageDevice
 {
 	OSDeclareDefaultStructors(ZFSDataset)
 public:
@@ -82,53 +78,37 @@ public:
 	virtual bool start(IOService *provider);
 	virtual void stop(IOService *provider);
 
-	virtual bool init(UInt64 base, UInt64 size,
-	    UInt64 preferredBlockSize,
-	    IOMediaAttributeMask attributes,
-	    bool isWhole, bool isWritable,
-	    const char *contentHint = 0,
-	    OSDictionary *properties = 0);
+	virtual bool init(OSDictionary *properties);
 	virtual void free();
 
 	static ZFSDataset * withDatasetName(const char *name);
 
-	virtual void read(IOService *client,
-	    UInt64 byteStart, IOMemoryDescriptor *buffer,
-	    IOStorageAttributes *attributes,
-	    IOStorageCompletion *completion);
-	virtual void write(IOService *client,
-	    UInt64 byteStart, IOMemoryDescriptor *buffer,
-	    IOStorageAttributes *attributes,
-	    IOStorageCompletion *completion);
-
-	virtual IOReturn synchronize(IOService *client,
-	    UInt64 byteStart, UInt64 byteCount,
-	    IOStorageSynchronizeOptions options = 0);
-	virtual IOReturn unmap(IOService *client,
-	    IOStorageExtent *extents, UInt32 extentsCount,
-	    IOStorageUnmapOptions options = 0);
-
-	virtual IOStorage *copyPhysicalExtent(IOService *client,
-	    UInt64 *byteStart, UInt64 *byteCount);
-
-	virtual void unlockPhysicalExtents(IOService *client);
-
-	virtual IOReturn setPriority(IOService *client,
-	    IOStorageExtent *extents, UInt32 extentsCount,
-	    IOStoragePriority priority);
-
-	virtual UInt64 getPreferredBlockSize() const;
-	virtual UInt64 getSize() const;
-	virtual UInt64 getBase() const;
-
-	virtual bool isEjectable() const;
-	virtual bool isFormatted() const;
-	virtual bool isWhole() const;
-	virtual bool isWritable() const;
-
-	virtual const char * getContent() const;
-	virtual const char * getContentHint() const;
-	virtual IOMediaAttributeMask getAttributes() const;
+	virtual IOReturn doEjectMedia(void);
+	virtual IOReturn doFormatMedia(UInt64 byteCapacity);
+	virtual UInt32 doGetFormatCapacities(UInt64 * capacities,
+		UInt32 capacitiesMaxCount) const;
+	virtual char *getVendorString(void);
+	virtual char *getProductString(void);
+	virtual char *getRevisionString(void);
+	virtual char *getAdditionalDeviceInfoString(void);
+	virtual IOReturn reportBlockSize(UInt64 *blockSize);
+	virtual IOReturn reportEjectability(bool *isEjectable);
+	virtual IOReturn reportLockability(bool *isLockable);
+	virtual IOReturn reportMaxValidBlock(UInt64 *maxBlock);
+	virtual IOReturn reportMediaState(bool *mediaPresent,
+		bool *changedState);
+	virtual IOReturn reportRemovability(bool *isRemovable);
+	virtual IOReturn reportWriteProtection(bool *isWriteProtected);
+	virtual IOReturn doAsyncReadWrite(IOMemoryDescriptor *buffer,
+		UInt64 block, UInt64 nblks,
+		IOStorageAttributes *attributes,
+		IOStorageCompletion *completion);
+	virtual IOReturn reportPollRequirements(bool *pollRequired,
+		bool *pollIsExpensive);
+	virtual IOReturn doLockUnlockMedia(bool doLock);
+	virtual IOReturn doSynchronizeCache(void);
+	virtual IOReturn getWriteCacheState(bool *enabled);
+	virtual IOReturn setWriteCacheState(bool enabled);
 
 protected:
 private:
