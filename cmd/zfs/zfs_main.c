@@ -6950,7 +6950,7 @@ manual_mount(int argc, char **argv)
 			syslog(LOG_NOTICE, "mountroot\n");
 		}
 
-		ret = zmount(dataset, path, MS_OPTIONSTR | flags,
+		ret = zmount(NULL, dataset, path, MS_OPTIONSTR | flags,
 		    MNTTYPE_ZFS, NULL, 0, mntopts, sizeof (mntopts));
 #if 0
 		//ret = zmount(proxy, path, MS_OPTIONSTR | flags,
@@ -6988,45 +6988,7 @@ manual_mount(int argc, char **argv)
 	/* check for legacy mountpoint and complain appropriately */
 	ret = 0;
 	if (strcmp(mountpoint, ZFS_MOUNTPOINT_LEGACY) == 0) {
-#if 0
-#ifdef __APPLE__
-		bzero(proxy, sizeof (proxy));
-		if (get_proxy_bsdname(dataset, proxy,
-		    sizeof (proxy)) != 0) {
-			(void) fprintf(stderr,
-			    gettext("no proxy available\n"));
-
-			if ((error = manual_proxy(dataset)) != 0) {
-				fprintf(stderr, "%s proxy error %d\n",
-				    __func__, error);
-				zfs_close(zhp);
-				return (1);
-			}
-
-			/* should wait for proxy to come online */
-			delay(hz);
-			if (get_proxy_bsdname(dataset, proxy,
-			    sizeof (proxy)) != 0) {
-			}
-		}
-
-		(void) fprintf(stderr, "got proxy %s\n", proxy);
-
-		if ((error = zmount(proxy, path, MS_OPTIONSTR | flags,
-		    MNTTYPE_ZFS, NULL, 0, mntopts,
-		    sizeof (mntopts))) != 0) {
-			fprintf(stderr, "%s mount error %d\n",
-			    __func__, error);
-			zfs_close(zhp);
-			return (1);
-		}
-
-		/* Mounted proxy */
-		zfs_close(zhp);
-		return (0);
-#endif /* __APPLE__ */
-#endif
-		if (zmount(dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
+		if (zmount(zhp, dataset, path, MS_OPTIONSTR | flags, MNTTYPE_ZFS,
 		    NULL, 0, mntopts, sizeof (mntopts)) != 0) {
 #ifdef __APPLE__
 

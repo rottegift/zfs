@@ -52,6 +52,8 @@ zmount(zfs_handle_t *zhp, const char *spec, const char *dir, int mflag,
 	assert(optptr != NULL);
 	assert(optlen > 0);
 	zfs_cmd_t zc = { "\0" };
+	int devdisk = ZFS_DEVDISK_POOLONLY;
+	int ispool = 0;  // the pool dataset, that is
 
 
 	/*
@@ -62,19 +64,38 @@ zmount(zfs_handle_t *zhp, const char *spec, const char *dir, int mflag,
 	// Use dataset name by default
 	mnt_args.fspec = spec;
 
-	if (1) {
+	/* Lookup the dataset property devdisk, and depending on its
+	 * setting, we need to create a /dev/diskX for the mount
+	 */
+	if (zhp) {
 
-		(void)strlcpy(zc.zc_name, zhp->zfs_name, sizeof(zc.zc_name));
-		zc.zc_value[0] = 0;
+		devdisk = zfs_prop_get_int(zhp,	ZFS_PROP_APPLE_DEVDISK);
 
-		rv = zfs_ioctl(zhp->zfs_hdl, ZFS_IOC_PROXY_DATASET, &zc);
+		if (zhp && zhp->zpool_hdl &&
+			!strcmp(zpool_get_name(zhp->zpool_hdl),
+				zfs_get_name(zhp)))
+			ispool = 1;
 
-		fprintf(stderr, "proxy datashet returns %d '%s'\n",
-			rv, zc.zc_value);
+		if ((devdisk == ZFS_DEVDISK_ON) ||
+			((devdisk == ZFS_DEVDISK_POOLONLY) &&
+				ispool)) {
 
-		// Mount using /dev/diskX
-		if (rv == 0)
-			mnt_args.fspec = zc.zc_value;
+			(void)strlcpy(zc.zc_name, zhp->zfs_name, sizeof(zc.zc_name));
+			zc.zc_value[0] = 0;
+
+			rv = zfs_ioctl(zhp->zfs_hdl, ZFS_IOC_PROXY_DATASET, &zc);
+
+			fprintf(stderr, "proxy dataset returns %d '%s'\n",
+				rv, zc.zc_value);
+
+			// Mount using /dev/diskX, use temporary buffer to give it full
+			// name
+			if (rv == 0) {
+				snprintf(zc.zc_name, sizeof(zc.zc_name),
+					"/dev/%s", zc.zc_value);
+				mnt_args.fspec = zc.zc_name;
+			}
+		}
 	}
 
 	mnt_args.mflag = mflag;
@@ -88,9 +109,12 @@ zmount(zfs_handle_t *zhp, const char *spec, const char *dir, int mflag,
 	 * do the same.
 	 */
 	rpath = realpath(dir, NULL);
-printf("%s calling mount with fstype %s, %s %s, fspec %s, mflag %d,"
-    " optptr %s, optlen %d\n", __func__, fstype, (rpath ? "rpath" : "dir"),
-    (rpath ? rpath : dir), spec, mflag, optptr, optlen);
+
+	printf("%s calling mount with fstype %s, %s %s, fspec %s, mflag %d,"
+		" optptr %s, optlen %d, devdisk %d, ispool %d\n",
+		__func__, fstype, (rpath ? "rpath" : "dir"),
+		(rpath ? rpath : dir), mnt_args.fspec, mflag, optptr, optlen,
+		devdisk, ispool);
 
 	rv = mount(fstype, rpath ? rpath : dir, 0, &mnt_args);
 

@@ -2219,26 +2219,19 @@ int
 zfs_vfs_mount(struct mount *vfsp, vnode_t *mvp /*devvp*/,
               user_addr_t data, vfs_context_t context)
 {
-	cred_t		*cr =  (cred_t *)vfs_context_ucred(context);
 	char		*osname = NULL;
 	char		*options = NULL;
 	uint64_t	flags = vfs_flags(vfsp);
 	int		error = 0;
-	int		canwrite;
 	int		rdonly = 0;
 	int		mflag = 0;
-	char *dev_name = NULL;
-
-#ifdef __APPLE__
 	char		*proxy = NULL;
     struct zfs_mount_args mnt_args;
 	size_t		osnamelen = 0;
 	uint32_t	cmdflags = 0;
 
-dprintf("%s\n", __func__);
 	cmdflags = (uint32_t) vfs_flags(vfsp) & MNT_CMDFLAGS;
 	rdonly = vfs_isrdonly(vfsp);
-dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 
 	if (!data) {
 		/*
@@ -2265,7 +2258,6 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 		if (vfs_context_is64bit(context)) {
 			if ( (error = ddi_copyin((void *)data,
 			    (caddr_t)&mnt_args, sizeof(mnt_args), 0)) ) {
-				//cmn_err(CE_NOTE, "%s: error on mnt_args copyin %d",
 				printf("%s: error on mnt_args copyin %d\n",
 				    __func__, error);
 				goto out;
@@ -2274,7 +2266,6 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 			user32_addr_t tmp;
 			if ( (error = ddi_copyin((void *)data,
 			    (caddr_t)&tmp, sizeof(tmp), 0)) ) {
-				//cmn_err(CE_NOTE, "%s: error on mnt_args copyin32 %d",
 				printf("%s: error on mnt_args copyin32 %d\n",
 				    __func__, error);
 				goto out;
@@ -2286,9 +2277,8 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 		// Copy over the string
 		if ( (error = ddi_copyinstr((const void *)mnt_args.fspec, osname,
 		    MAXPATHLEN, &osnamelen)) ) {
-			//cmn_err(CE_NOTE, "%s: error on osname copyin %d",
 			printf("%s: error on osname copyin %d\n",
-			__func__, error);
+				__func__, error);
 			if (!mvp)
 				goto out;
 		}
@@ -2299,10 +2289,16 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 		dprintf("%s proxy string alloc failed\n", __func__);
 		goto out;
 	}
+	*proxy = 0;
 
-	/* Only for non-root mounts */
+	/* Translate /dev/disk path into dataset name
+	 * After this;
+	 * "proxy" will have "/dev/disk" (IF given)
+	 * "osname" has the dataset name as usual
+	 */
 	if ((flags & MNT_ROOTFS) == 0) {
 		if (strncmp(osname, "/dev/disk", 9) == 0) {
+			strlcpy(proxy, osname, MAXPATHLEN);
 			error = zfs_osx_proxy_get_osname(osname,
 			    osname, MAXPATHLEN);
 			if (error != 0) {
@@ -2312,27 +2308,6 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 				goto out;
 			}
 			printf("%s got new osname %s\n", __func__, osname);
-		} else {
-			error = zfs_osx_proxy_create(osname);
-			/* Ignore EBUSY as this means the proxy exists */
-			if (error == EBUSY) error = 0;
-
-			if (error) {
-				printf("%s error %d from proxy_create\n",
-				    __func__, error);
-				goto out;
-			}
-		}
-	}
-
-	if (strncmp(osname, "/dev/disk", 9) == 0) {
-		snprintf(proxy, MAXPATHLEN, "%s", osname);
-	} else {
-		error = zfs_osx_proxy_get_bsdname(osname,
-		    proxy, MAXPATHLEN);
-		if (error) {
-			dprintf("%s couldn't get proxy bsd name\n", __func__);
-			goto out;
 		}
 	}
 
@@ -2344,18 +2319,18 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 
 		error = ddi_copyin((const void *)mnt_args.optptr, (caddr_t)options,
 						   mnt_args.optlen, 0);
-	//dprintf("vfs_mount: fspec '%s' : mflag %04llx : optptr %p : optlen %d :"
-	printf("%s: fspec '%s' : osname '%s' : mflag %04x : optptr %p : optlen %d :"
-	    " options %s\n", __func__,
-	    mnt_args.fspec,
-	    osname,
-	    mnt_args.mflag,
-	    mnt_args.optptr,
-	    mnt_args.optlen,
-	    options);
-	}
 
-//	(void) dnlc_purge_vfsp(vfsp, 0);
+		printf("%s: fspec '%s' : osname '%s' : proxy '%s' : mflag %04x :"
+			" optptr %p : optlen %d : options %s\n",
+			__func__,
+			mnt_args.fspec,
+			osname,
+			proxy && *proxy ? proxy : "",
+			mnt_args.mflag,
+			mnt_args.optptr,
+			mnt_args.optlen,
+			options);
+	}
 
 	if (mflag & MS_RDONLY) {
 		dprintf("%s: adding MNT_RDONLY\n", __func__);
@@ -2401,111 +2376,12 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 	if ((uap->flags & MS_DATA) && uap->datalen > 0)
 #endif
 
-#if __FreeBSD__
-	if (!prison_allow(td->td_ucred, PR_ALLOW_MOUNT_ZFS))
-		return (EPERM);
-
-	if (vfs_getopt(vfsp->mnt_optnew, "from", (void **)&osname, NULL))
-		return (EINVAL);
-#endif	/* ! illumos */
-
-#ifdef __FreeBSD__
-	/*
-	 * If full-owner-access is enabled and delegated administration is
-	 * turned on, we must set nosuid.
-	 */
-#if 0
-	if (zfs_super_owner &&
-	    dsl_deleg_access(osname, ZFS_DELEG_PERM_MOUNT, cr) != ECANCELED) {
-		secpolicy_fs_mount_clearopts(cr, vfsp);
-	}
-#endif
-
-	/*
-	 * Check for mount privilege?
-	 *
-	 * If we don't have privilege then see if
-	 * we have local permission to allow it
-	 */
-	error = secpolicy_fs_mount(cr, mvp, vfsp);
-	if (error) {
-		if (dsl_deleg_access(osname, ZFS_DELEG_PERM_MOUNT, cr) != 0) {
-			cmn_err(CE_NOTE, "%s: mount perm error",
-			    __func__);
-			goto out;
-		}
-
-#if 0
-		if (!(vfsp->vfs_flag & MS_REMOUNT)) {
-			vattr_t		vattr;
-
-			/*
-			 * Make sure user is the owner of the mount point
-			 * or has sufficient privileges.
-			 */
-
-			vattr.va_mask = AT_UID;
-
-			vn_lock(mvp, LK_SHARED | LK_RETRY);
-			if (VOP_GETATTR(mvp, &vattr, cr)) {
-				VOP_UNLOCK(mvp, 0);
-				goto out;
-			}
-
-			if (secpolicy_vnode_owner(mvp, cr, vattr.va_uid) != 0 &&
-			    VOP_ACCESS(mvp, VWRITE, cr, td) != 0) {
-				VOP_UNLOCK(mvp, 0);
-				goto out;
-			}
-			VOP_UNLOCK(mvp, 0);
-		}
-#endif
-		secpolicy_fs_mount_clearopts(cr, vfsp);
-	}
-
-	/*
-	 * Refuse to mount a filesystem if we are in a local zone and the
-	 * dataset is not visible.
-	 */
-	if (!INGLOBALZONE(curthread) &&
-	    (!zone_dataset_visible(osname, &canwrite) || !canwrite)) {
-		error = EPERM;
-		goto out;
-	}
-#endif /* __FreeBSD__ */
-
 #ifdef SECLABEL
 	error = zfs_mount_label_policy(vfsp, osname);
 	if (error)
 		goto out;
 #endif
 
-#ifndef __APPLE__
-	vfsp->vfs_flag |= MNT_NFS4ACLS;
-
-	/*
-	 * When doing a remount, we simply refresh our temporary properties
-	 * according to those options set in the current VFS options.
-	 */
-	if (vfsp->vfs_flag & MS_REMOUNT) {
-		/* refresh mount options */
-		zfs_unregister_callbacks(vfsp->vfs_data);
-		error = zfs_register_callbacks(vfsp);
-		goto out;
-	}
-
-	/* Initial root mount: try hard to import the requested root pool. */
-	if ((vfsp->vfs_flag & MNT_ROOTFS) != 0 &&
-	    (vfsp->vfs_flag & MNT_UPDATE) == 0) {
-		char pname[MAXNAMELEN];
-
-		error = getpoolname(osname, pname);
-		if (error == 0)
-			error = spa_import_rootpool(pname);
-		if (error)
-			goto out;
-	}
-#else
 	/*
 	 * When doing a remount, we simply refresh our temporary properties
 	 * according to those options set in the current VFS options.
@@ -2550,18 +2426,6 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 			}
 		}
 
-/*
-		printf("%s: would do remount\n", __func__);
-
-		zfs_unregister_callbacks(zfsvfs);
-		error = zfs_register_callbacks(vfsp);
-
-		if (error) {
-			//cmn_err(CE_NOTE, "%s: remount returned %d",
-			printf("%s: remount returned %d",
-			    __func__, error);
-		}
-*/
 		goto out;
 	}
 
@@ -2571,15 +2435,10 @@ dprintf("%s cmdflags %u rdonly %d\n", __func__, cmdflags, rdonly);
 		goto out;
 	}
 
-//dprintf("%s: calling zfs_domount\n", __func__);
-#endif
-
 	error = zfs_domount(vfsp, 0, osname, context);
 	if (error) {
-		//cmn_err(CE_NOTE, "%s: zfs_domount returned %d\n",
 		printf("%s: zfs_domount returned %d\n",
 		    __func__, error);
-	error = 0;
 		goto out;
 	}
 
@@ -2601,12 +2460,11 @@ out:
 		ASSERT(zfsvfs);
 #endif
 
-		//dprintf("%s: setting vfs flags\n", __func__);
 		/* Indicate to VFS that we support ACLs. */
 		vfs_setextendedsecurity(vfsp);
 
 		// Set /dev/disk name if we have one, otherwise, datasetname
-		vfs_mountedfrom(vfsp, dev_name ? dev_name : osname);
+		vfs_mountedfrom(vfsp, proxy && *proxy ? proxy : osname);
 
 	}
 
@@ -3526,9 +3384,6 @@ dprintf("%s\n", __func__);
 			VN_RELE(svp);
 	}
 #endif
-
-	// If it was mounted with /dev/diskX, destroy that now
-	spa_iokit_dataset_proxy_destroy(osname);
 
     dprintf("freevfs\n");
 	zfs_freevfs(zfsvfs->z_vfs);

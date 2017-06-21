@@ -1932,7 +1932,7 @@ get_proxy_bsdname(const char *osname, char *bsdname, int len)
 	range = CFRangeMake(0, outlen);
 
 	/* Now copy the string out */
-	bzero(bsdname, sizeof (bsdname));
+	bzero(bsdname, len);
 	snprintf(bsdname, (5+1), "/dev/"); // null terminated
 	outlen = CFStringGetBytes(bsdstr, range,
 	    CFStringGetSystemEncoding(), /* lossByte */ 0,

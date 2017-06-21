@@ -1555,9 +1555,6 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 		uuidStr->release();
 	} while (0);
 
-	/* Install vfc_mountroot handler */
-	spl_hijack_mountroot((void *)zfs_vfs_mountroot);
-
 	/* Create proxy device */
 	error = zfs_osx_proxy_create(zfs_bootfs);
 	if (error == 0) {

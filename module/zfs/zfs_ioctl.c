@@ -5415,35 +5415,26 @@ out:
  * outputs:
  * zc_cookie		real errno
  */
+#include <sys/ZFSDatasetScheme.h>
 static int
 zfs_ioc_osx_proxy_dataset(zfs_cmd_t *zc)
 {
-	//nvlist_t *config;
 	int error;
 	const char *osname;
-
-//	if ((error = get_nvlist(zc->zc_nvlist_conf, zc->zc_nvlist_conf_size,
-//	    zc->zc_iflags, &config)) != 0)
-//		return (error);
 
 	/* XXX Get osname */
 	osname = zc->zc_name;
 
-//	error = spa_iokit_dataset_proxy_create(config);
-	error = spa_iokit_dataset_proxy_create(osname,
-		zc->zc_value, sizeof(zc->zc_value));
+	/* Create new virtual disk, and return /dev/disk name */
+	error = zfs_osx_proxy_create(osname);
 
-//	if (config == NULL)
-//		return (SET_ERROR(EINVAL));
-	if (error) {
-		zc->zc_cookie = ENXIO;
-		return (SET_ERROR(ENXIO));
-	}
+	if (!error)
+		error = zfs_osx_proxy_get_bsdname(osname,
+			zc->zc_value, sizeof(zc->zc_value));
+	if (error)
+		printf("%s: Created virtual disk '%s' for '%s'\n", __func__,
+			zc->zc_value, osname);
 
-//	error = put_nvlist(zc, config);
-//	nvlist_free(config);
-
-	zc->zc_cookie = 0;
 	return (error);
 }
 
