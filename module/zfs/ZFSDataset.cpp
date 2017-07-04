@@ -383,7 +383,7 @@ ZFSDataset::setDatasetName(const char *name)
 	}
 	prevDict->retain();
 	unlockForArbitration();
-	
+
 	/* Clone existing dictionary */
 	if (prevDict) {
 		if ((newDict = OSDictionary::withDictionary(prevDict)) == NULL) {
@@ -573,7 +573,7 @@ dprintf("[%s] readonly %lld isWritable %d guid %016llx"
     isWritable, guid, size, ref_size, avail_size);
 #endif
 
-	if (dataset->init(/* base */ 0, size, DEV_BSIZE,
+    if (dataset->init(/* base */ 0, size, DEV_BSIZE,
 	    /* attributes */ 0, /* isWhole */ false, isWritable,
 	    kZFSContentHint, /* properties */ NULL) == false) {
 		dprintf("init failed");
@@ -628,6 +628,23 @@ ZFSDataset::read(IOService *client,
 		ASSERT3U(done, <=, total);
 	}
 	ASSERT3U(done, ==, total);
+
+
+
+	if (byteStart == 0 && total >= 512) {
+		unsigned char data[] = { 0xff,
+0xff, 0xff, 0xee, 0xff, 0xff, 0xff, 0x01, 0x00, 0x00, 0x00, 0xff, 0xff, 0xdf, 0x01, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0xaa} ;
+		printf("hack %p + 0x1bf\n", cur);
+
+		buffer->writeBytes(0x1bf, (void *)data, sizeof(data));
+	}
+
+
+
+
+
 
 	//if (!completion || !completion->action) {
 	if (!completion) {

@@ -619,9 +619,9 @@ orderHoles(const OSMetaClassBase *obj1, const OSMetaClassBase *obj2,
 	if (num1->isEqualTo(num2)) return (0);
 
 	if (num1->unsigned32BitValue() < num2->unsigned32BitValue()) {
-		return (1);       
+		return (1);
 	} else {
-		return (-1);       
+		return (-1);
 	}
 }
 
