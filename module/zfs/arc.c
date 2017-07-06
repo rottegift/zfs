@@ -3954,9 +3954,12 @@ arc_flush(spa_t *spa, boolean_t retry)
 	(void) arc_flush_state(arc_mfu_ghost, guid, ARC_BUFC_METADATA, retry);
 }
 
-void
+int64_t
 arc_shrink(int64_t to_free)
 {
+	int64_t shrank = 0;
+	int64_t arc_c_before = arc_c;
+	int64_t arc_adjust_evicted = 0;
 
 	if (arc_c > arc_c_min) {
 
@@ -3974,8 +3977,12 @@ arc_shrink(int64_t to_free)
 		ASSERT((int64_t)arc_p >= 0);
 	}
 
+	shrank = arc_c_before - arc_c;
+
 	if (arc_size > arc_c)
-		(void) arc_adjust();
+		arc_adjust_evicted = arc_adjust();
+
+	return (shrank + arc_adjust_evicted);
 }
 
 typedef enum free_memory_reason_t {
@@ -4244,10 +4251,11 @@ arc_reclaim_thread(void)
 		if (reclaim_shrink_target > 0) {
 			int64_t t = reclaim_shrink_target;
 			reclaim_shrink_target = 0;
-			arc_shrink(t);
+			evicted = arc_shrink(t);
 			extern kmem_cache_t	*abd_chunk_cache;
 			kmem_cache_reap_now(abd_chunk_cache);
 			IOSleep(1);
+			goto lock_and_sleep;
 		}
 
 		int64_t pre_adjust_free_memory = MIN(spl_free_wrapper(), arc_available_memory());
@@ -4367,7 +4375,7 @@ arc_reclaim_thread(void)
 				int64_t old_arc_size = (int64_t)arc_size;
 #endif // __APPLE__
 #endif // _KERNEL
-				arc_shrink(to_free);
+				(void) arc_shrink(to_free);
 #ifdef _KERNEL
 #ifdef	__APPLE__
 				int64_t new_arc_size = (int64_t)arc_size;
@@ -4419,6 +4427,11 @@ arc_reclaim_thread(void)
 			arc_no_grow = B_FALSE;
 		}
 
+#ifdef __APPLE__
+#ifdef _KERNEL
+	lock_and_sleep:
+#endif
+#endif
                mutex_enter(&arc_reclaim_lock);
 
 		/*
@@ -4586,7 +4599,6 @@ arc_adapt(int bytes, arc_state_t *state)
 				return;
 			} else {
 				reclaim_shrink_target += bytes;
-				cv_signal(&arc_reclaim_thread_cv);
 			}
 		} else {
 			/*
@@ -6058,14 +6070,16 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 	available_memory =
 	    MIN(available_memory, vmem_size(heap_arena, VMEM_FREE));
 #endif
-
-	if (freemem > physmem * arc_lotsfree_percent / 100)
-		return (0);
-
 	if (txg > last_txg) {
 		last_txg = txg;
 		page_load = 0;
 	}
+
+	if (freemem > physmem * arc_lotsfree_percent / 100) {
+		page_load = 0;
+		return (0);
+	}
+
 	/*
 	 * If we are in pageout, we know that memory is already tight,
 	 * the arc is already going to be evicting, so we just want to
@@ -6098,6 +6112,7 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 	if(spl_free_manual_pressure_wrapper() != 0) {
 	  cv_signal(&arc_reclaim_thread_cv);
 	  kpreempt(KPREEMPT_SYNC);
+	  page_load = 0;
 	}
 
 	if(!spl_minimal_physmem_p() && page_load > 0) {
@@ -6106,6 +6121,8 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 		 "page_load = %llu, txg = %llu, reserve = %llu\n",
 		 __func__, available_memory, page_load, txg, reserve);
 	  cv_signal(&arc_reclaim_thread_cv);
+	  kpreempt(KPREEMPT_SYNC);
+	  page_load = 0;
 	  return (SET_ERROR(EAGAIN));
 	}
 
@@ -6115,6 +6132,8 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 		 "page_load = %llu, txg = %llu, reserve = %lld\n",
 		 __func__, available_memory, page_load, txg, reserve);
 	  cv_signal(&arc_reclaim_thread_cv);
+	  kpreempt(KPREEMPT_SYNC);
+	  page_load = 0;
 	  return (SET_ERROR(EAGAIN));
 	}
 
@@ -6125,7 +6144,6 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 
 	if(!spl_minimal_physmem_p()) {
 	  page_load += reserve/8;
-	  cv_signal(&arc_reclaim_thread_cv);
 	  return (0);
 	}
 
