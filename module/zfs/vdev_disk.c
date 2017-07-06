@@ -627,7 +627,9 @@ skip_open:
 //	vd->vdev_wholedisk = ldi_is_wholedisk(vd->vd_lh);
 #endif
 
+#if 0
 	if (vd->vdev_wholedisk == 1) {
+#endif
 		int wce = 1;
 
 /* Gets information about the disk if it has GPT partitions */
@@ -647,9 +649,12 @@ skip_open:
 		 * Since we own the whole disk, try to enable disk write
 		 * caching.  We ignore errors because it's OK if we can't do it.
 		 */
-#if 1
+#if 0
 		// wce is maybe a problem (smd)
 		wce = 0;
+#else
+		// always enable wce
+		wce = 1;
 #endif
 		int err = ldi_ioctl(dvd->vd_lh, DKIOCSETWCE, (intptr_t)&wce,
 		    FKIOCTL, kcred, NULL);
@@ -657,8 +662,9 @@ skip_open:
 		if (err) {
 			printf("ZFS: %s: DIOCSETWCE errno = %d\n", __func__, err);
 		}
-
-	}
+#if 0
+	} // wholedisk
+#endif
 
 	/*
 	 * Clear the nowritecache bit, so that on a vdev_reopen() we will
