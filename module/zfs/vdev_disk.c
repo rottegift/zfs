@@ -647,8 +647,17 @@ skip_open:
 		 * Since we own the whole disk, try to enable disk write
 		 * caching.  We ignore errors because it's OK if we can't do it.
 		 */
-		(void) ldi_ioctl(dvd->vd_lh, DKIOCSETWCE, (intptr_t)&wce,
+#if 1
+		// wce is maybe a problem (smd)
+		wce = 0;
+#endif
+		int err = ldi_ioctl(dvd->vd_lh, DKIOCSETWCE, (intptr_t)&wce,
 		    FKIOCTL, kcred, NULL);
+
+		if (err) {
+			printf("ZFS: %s: DIOCSETWCE errno = %d\n", __func__, err);
+		}
+
 	}
 
 	/*
