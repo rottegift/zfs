@@ -660,7 +660,7 @@ skip_open:
 		    FKIOCTL, kcred, NULL);
 
 		if (err) {
-			printf("ZFS: %s: DIOCSETWCE errno = %d\n", __func__, err);
+			printf("ZFS: %s: DIOCSETWCE on %s errno = %d\n", __func__, vd->vdev_path, err);
 		}
 #if 0
 	} // wholedisk
