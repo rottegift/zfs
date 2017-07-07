@@ -4337,10 +4337,61 @@ arc_reclaim_thread(void)
 			if (free_memory <= (arc_c >> arc_no_grow_shift) + SPA_MAXBLOCKSIZE) {
 				arc_no_grow = B_TRUE;
 				/*
-				 * Wait at least zfs_grow_retry (default 60) seconds
-				 * before considering growing.
+				 * Absorb occasional low memory conditions, as they
+				 * may be caused by a single sequentially writing thread
+				 * pushing a lot of dirty data into the ARC.
+				 *
+				 * In particular, we want to quickly
+				 * begin re-growing the ARC if we are
+				 * not in chronic high pressure.
+				 * However, if we're in chronic high
+				 * pressure, we want to reduce reclaim
+				 * thread work by keeping arc_no_grow set.
+				 *
+				 * If growtime is in the past, then set it to last
+				 * half a second (which is the length of the
+				 * cv_timedwait_hires() call below; if this works,
+				 * that value should be a parameter, #defined or constified.
+				 *
+				 * If growtime is in the future, then make sure that it
+				 * is no further than 60 seconds into the future.
+				 * If it's in the nearer future, then grow growtime by
+				 * an exponentially increasing value starting with 500msec.
+				 *
 				 */
-				growtime = gethrtime() + SEC2NSEC(arc_grow_retry);
+				const hrtime_t curtime = gethrtime();
+				const hrtime_t agr = SEC2NSEC(arc_grow_retry);
+				static int grow_pass = 0;
+
+				if (growtime == 0) {
+					growtime = curtime + MSEC2NSEC(500);
+					grow_pass = 0;
+				} else {
+					// check for 500ms not being enough
+					ASSERT3U(growtime,>,curtime);
+					if (growtime <= curtime)
+						growtime = curtime + MSEC2NSEC(500);
+
+					// growtime is in the future!
+					const hrtime_t difference = growtime - curtime;
+
+					if (difference >= agr) {
+						// cap at arc_grow_retry seconds from now
+						growtime = curtime + agr - 1LL;
+						grow_pass = 0;
+					} else {
+						hrtime_t grow_by =
+						    MSEC2NSEC(500) * (1LL << grow_pass);
+
+						if (grow_by > (agr >> 1))
+							grow_by = agr >> 1;
+
+						growtime += grow_by;
+
+						if (grow_pass < 10) // add 512 seconds maximum
+							grow_pass++;
+					}
+				}
 			}
 #else
 	        if (free_memory < 0) {
