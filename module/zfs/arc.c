@@ -4677,7 +4677,18 @@ arc_is_overflowing(void)
 	uint64_t overflow = MAX(SPA_MAXBLOCKSIZE,
 	    arc_c >> zfs_arc_overflow_shift);
 
-	return (arc_size >= arc_c + overflow);
+	//return (arc_size >= arc_c + overflow);
+
+	if (!(arc_size >= arc_c + overflow))
+		return (B_FALSE);
+
+#ifdef _KERNEL
+	extern uint64_t vmem_xnu_useful_bytes_free(void);
+
+	return (vmem_xnu_useful_bytes_free() <= overflow);
+#else
+	return (B_FALSE);
+#endif
 }
 
 static abd_t *
