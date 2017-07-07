@@ -4150,6 +4150,29 @@ arc_kmem_reap_now(void)
 	extern kmem_cache_t	*abd_chunk_cache;
 	extern vmem_t           *abd_chunk_arena;
 
+	static hrtime_t last_reap = 0;
+	const hrtime_t reap_interval = SEC2NSEC(60);
+	const hrtime_t curtime = gethrtime();
+	boolean_t reap_now = B_FALSE;
+
+	if (curtime - last_reap > reap_interval) {
+		reap_now = B_TRUE;
+	} else {
+#ifdef _KERNEL
+		extern uint64_t vmem_xnu_useful_bytes_free(void);
+		const uint64_t reap_now_threshold = 2ULL * SPA_MAXBLOCKSIZE;
+		if (vmem_xnu_useful_bytes_free() < reap_now_threshold)
+			reap_now = B_TRUE;
+#else
+		reap_now = B_FALSE;
+#endif
+	}
+
+	if (reap_now == B_FALSE)
+		return;
+	else
+		last_reap = curtime;
+
 #ifdef _KERNEL
 	if (arc_meta_used >= arc_meta_limit) {
 		/*
