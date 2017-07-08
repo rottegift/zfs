@@ -284,6 +284,7 @@
 static void arc_abd_move_thr_init(void);
 static void arc_abd_move_thr_fini(void);
 static kcondvar_t arc_abd_move_thr_cv;
+static _Atomic boolean_t arc_reclaim_in_loop = B_FALSE;
 #ifdef _KERNEL
 extern vmem_t *zio_arena_parent;
 extern vmem_t *heap_arena;
@@ -675,9 +676,11 @@ typedef struct arc_stats {
 	kstat_named_t abd_scan_skip_young;
 	kstat_named_t abd_scan_skip_nothing;
 	kstat_named_t abd_move_no_shared;
+	kstat_named_t arc_reclaim_waiters_count_total;
 	kstat_named_t arc_reclaim_waiters_count;
 	kstat_named_t arc_reclaim_waiters_early_wakeup;
 	kstat_named_t arc_reclaim_waiters_early_broadcast;
+	kstat_named_t arc_reclaim_waiters_loop_timeout;
 #endif
 } arc_stats_t;
 
@@ -786,8 +789,10 @@ static arc_stats_t arc_stats = {
 	{ "abd_scan_skip_nothing",     KSTAT_DATA_UINT64 },
 	{ "abd_move_no_shared",        KSTAT_DATA_UINT64 },
 	{ "arc_reclaim_waiters_cnt",   KSTAT_DATA_UINT64 },
+	{ "arc_reclaim_waiters_cur",   KSTAT_DATA_UINT64 },
 	{ "arc_reclaim_waiters_sig",   KSTAT_DATA_UINT64 },
 	{ "arc_reclaim_waiters_bcst",  KSTAT_DATA_UINT64 },
+	{ "arc_reclaim_waiters_tout",  KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -4034,7 +4039,7 @@ arc_available_memory(void)
 	// of pressure terms
 	lowest = spl_free_wrapper();
 	r = FMR_SPL_FREE;
-	if(spl_free_fast_pressure_wrapper() != FALSE) {
+	if(spl_free_fast_pressure_wrapper() != FALSE && arc_reclaim_in_loop == B_FALSE) {
 		// wake up arc_reclaim_thread() if it is sleeping
 		cv_signal(&arc_reclaim_thread_cv);
 	}
@@ -4257,6 +4262,7 @@ arc_reclaim_thread(void)
 
 	mutex_enter(&arc_reclaim_lock);
 	while (!arc_reclaim_thread_exit) {
+		arc_reclaim_in_loop = B_TRUE;
 		uint64_t evicted = 0;
 
 		/*
@@ -4537,6 +4543,9 @@ arc_reclaim_thread(void)
 			 * up any threads before we go to sleep.
 			 */
 			cv_broadcast(&arc_reclaim_waiters_cv);
+#ifdef __APPLE__
+			arc_reclaim_in_loop = B_FALSE;
+#endif
 
 			/*
 			 * Block until signaled, or after one second (we
@@ -4615,7 +4624,7 @@ arc_adapt(int bytes, arc_state_t *state)
 	ASSERT((int64_t)arc_p >= 0);
 
 #if !(defined(__APPLE__) && defined(_KERNEL))
-	if (arc_reclaim_needed()) {
+	if (arc_reclaim_needed() && arc_reclaim_in_loop == B_FALSE) {
 		cv_signal(&arc_reclaim_thread_cv);
 		return;
 	}
@@ -4673,7 +4682,7 @@ arc_adapt(int bytes, arc_state_t *state)
 	// if we need a reclaim, we do not grow the ARC here.
 
 	extern boolean_t spl_arc_reclaim_needed(size_t, kmem_cache_t **);
-	if (spl_arc_reclaim_needed((size_t)bytes, z)) {
+	if (spl_arc_reclaim_needed((size_t)bytes, z) && arc_reclaim_in_loop == B_FALSE) {
 		cv_signal(&arc_reclaim_thread_cv);
 		return;
 	}
@@ -4841,12 +4850,38 @@ arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
 		 * thread). As long as that is a rare occurrence, it
 		 * shouldn't cause any harm.
 		 */
+#ifndef __APPLE__
 		if (arc_is_overflowing()) {
 			cv_signal(&arc_reclaim_thread_cv);
-			ARCSTAT_BUMP(arc_reclaim_waiters_count);
 			cv_wait(&arc_reclaim_waiters_cv, &arc_reclaim_lock);
-			ARCSTAT_BUMPDOWN(arc_reclaim_waiters_count);
 		}
+#else
+		if (arc_is_overflowing()) {
+			static _Atomic int32_t waiters = 0;
+			waiters++;
+
+			for (hrtime_t start = gethrtime(); arc_is_overflowing();) {
+
+				if (arc_reclaim_in_loop == B_FALSE)
+					cv_signal(&arc_reclaim_thread_cv);
+
+				if (waiters == 1)
+					break;
+
+				ARCSTAT_BUMP(arc_reclaim_waiters_count_total);
+				ARCSTAT_BUMP(arc_reclaim_waiters_count);
+				(void) cv_timedwait_hires(&arc_reclaim_waiters_cv,
+				    &arc_reclaim_lock, USEC2NSEC(500), 0, 0);
+				ARCSTAT_BUMPDOWN(arc_reclaim_waiters_count);
+
+				if (gethrtime() > start + MSEC2NSEC(30)) {
+					ARCSTAT_BUMP(arc_reclaim_waiters_loop_timeout);
+					break;
+				}
+			}
+			waiters--;
+		}
+#endif
 
 		mutex_exit(&arc_reclaim_lock);
 	}
@@ -6221,7 +6256,7 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 	// the return from here is used to block all writes, so we don't want to return 1
 	// except in exceptional cases - smd
 
-	if(spl_free_manual_pressure_wrapper() != 0) {
+	if(spl_free_manual_pressure_wrapper() != 0 && arc_reclaim_in_loop == B_FALSE) {
 	  cv_signal(&arc_reclaim_thread_cv);
 	  kpreempt(KPREEMPT_SYNC);
 	  page_load = 0;
@@ -6232,7 +6267,8 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 	  printf("ZFS: %s: !spl_minimal_physmem_p(), available_memory == %lld, "
 		 "page_load = %llu, txg = %llu, reserve = %llu\n",
 		 __func__, available_memory, page_load, txg, reserve);
-	  cv_signal(&arc_reclaim_thread_cv);
+	  if (arc_reclaim_in_loop == B_FALSE)
+		  cv_signal(&arc_reclaim_thread_cv);
 	  kpreempt(KPREEMPT_SYNC);
 	  page_load = 0;
 	  return (SET_ERROR(EAGAIN));
@@ -6243,7 +6279,8 @@ arc_memory_throttle(uint64_t reserve, uint64_t txg)
 	  printf("ZFS: %s: arc_reclaim_needed(), available_memory == %lld, "
 		 "page_load = %llu, txg = %llu, reserve = %lld\n",
 		 __func__, available_memory, page_load, txg, reserve);
-	  cv_signal(&arc_reclaim_thread_cv);
+	  if (arc_reclaim_in_loop == B_FALSE)
+		  cv_signal(&arc_reclaim_thread_cv);
 	  kpreempt(KPREEMPT_SYNC);
 	  page_load = 0;
 	  return (SET_ERROR(EAGAIN));
