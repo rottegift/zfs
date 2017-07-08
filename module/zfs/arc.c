@@ -675,6 +675,9 @@ typedef struct arc_stats {
 	kstat_named_t abd_scan_skip_young;
 	kstat_named_t abd_scan_skip_nothing;
 	kstat_named_t abd_move_no_shared;
+	kstat_named_t arc_reclaim_waiters_count;
+	kstat_named_t arc_reclaim_waiters_early_wakeup;
+	kstat_named_t arc_reclaim_waiters_early_broadcast;
 #endif
 } arc_stats_t;
 
@@ -782,6 +785,9 @@ static arc_stats_t arc_stats = {
 	{ "abd_scan_skip_young",       KSTAT_DATA_UINT64 },
 	{ "abd_scan_skip_nothing",     KSTAT_DATA_UINT64 },
 	{ "abd_move_no_shared",        KSTAT_DATA_UINT64 },
+	{ "arc_reclaim_waiters_cnt",   KSTAT_DATA_UINT64 },
+	{ "arc_reclaim_waiters_sig",   KSTAT_DATA_UINT64 },
+	{ "arc_reclaim_waiters_bcst",  KSTAT_DATA_UINT64 },
 #endif
 };
 
@@ -4479,6 +4485,8 @@ arc_reclaim_thread(void)
 						vmem_qcache_reap(zio_arena_parent);
 					cv_signal(&arc_abd_move_thr_cv);
 				}
+				if (arc_shrink_freed > 0)
+					evicted += arc_shrink_freed;
 			} else if (old_to_free > 0) {
 			  printf("ZFS: %s, (old_)to_free has returned to zero from %lld\n",
 				 __func__, old_to_free);
@@ -4522,7 +4530,7 @@ arc_reclaim_thread(void)
 		 * be helpful and could potentially cause us to enter an
 		 * infinite loop.
 		 */
-		if (arc_size <= arc_c || evicted == 0) {
+	       if (!arc_is_overflowing() || evicted == 0) {
 			/*
 			 * We're either no longer overflowing, or we
 			 * can't evict anything more, so we should wake
@@ -4539,7 +4547,19 @@ arc_reclaim_thread(void)
 			(void) cv_timedwait_hires(&arc_reclaim_thread_cv,
 			    &arc_reclaim_lock, MSEC2NSEC(500), MSEC2NSEC(1), 0);
 			CALLB_CPR_SAFE_END(&cpr, &arc_reclaim_lock);
-		}
+#ifdef __APPLE__
+	       } else if (evicted >= SPA_MAXBLOCKSIZE * ARCSTAT(arc_reclaim_waiters_count)) {
+		       // we evicted plenty of buffers, so let's wake up
+		       // all the waiters rather than having them stall
+		       ARCSTAT_BUMP(arc_reclaim_waiters_early_broadcast);
+		       cv_broadcast(&arc_reclaim_waiters_cv);
+	       } else if (ARCSTAT(arc_reclaim_waiters_count) > 0) {
+		       // we evicted some buffers but are still overflowing,
+		       // so wake up only one waiter
+		       ARCSTAT_BUMP(arc_reclaim_waiters_early_wakeup);
+		       cv_signal(&arc_reclaim_waiters_cv);
+#endif
+	       }
 	}
 
 	arc_reclaim_thread_exit = B_FALSE;
@@ -4823,7 +4843,9 @@ arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
 		 */
 		if (arc_is_overflowing()) {
 			cv_signal(&arc_reclaim_thread_cv);
+			ARCSTAT_BUMP(arc_reclaim_waiters_count);
 			cv_wait(&arc_reclaim_waiters_cv, &arc_reclaim_lock);
+			ARCSTAT_BUMPDOWN(arc_reclaim_waiters_count);
 		}
 
 		mutex_exit(&arc_reclaim_lock);
