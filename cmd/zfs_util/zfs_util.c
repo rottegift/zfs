@@ -717,7 +717,7 @@ main(int argc, char **argv)
 				nameBuf.nameRef.attr_dataoffset);
 
 			printf("volname [%s]\n", volname);
-			write(1, volname, sizeof(volname));
+			write(1, volname, strlen(volname));
 			ret = FSUR_RECOGNIZED;
 			break;
 

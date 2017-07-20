@@ -676,6 +676,10 @@ ZFSDatasetScheme::start(IOService *provider)
 	    kIORegistryIterateParents);
 	if (pool_name) {
 		setProperty(kZFSPoolNameKey, pool_name);
+		setProperty("IOClass", "IOGUIDPartitionScheme");
+		setProperty("Content Mask", "GUID_partition_scheme");
+		// This makes the partitions work, naughty though
+		provider->setProperty("Content", "GUID_partition_scheme");
 	}
 
 	registerService(kIOServiceAsynchronous);
@@ -884,6 +888,13 @@ ZFSDatasetScheme::addDataset(const char *osname)
 	dataset->setLocation(location);
 	dataset->setProperty(kIOMediaBaseKey, 0ULL, 64);
 	dataset->setProperty(kIOMediaPartitionIDKey, part_id, 32);
+
+	//dataset->setProperty("Content", "ZFS synthesized mount");
+
+	// This sets the "diskutil list -> TYPE" field
+	dataset->setProperty("Content", "ZFS Dataset");
+	// This matches with Info.plist, so it calls zfs.util for NAME
+	dataset->setProperty("Content Hint","6A898CC3-1DD2-11B2-99A6-080020736631");
 
 	if (dataset->attach(this) == false) {
 		dprintf("attach failed");
