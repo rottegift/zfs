@@ -1193,7 +1193,14 @@ ldi_iokit_io_intr(void *target, void *parameter,
 	/* In debug builds, verify buffer pointers */
 	ASSERT3U(lbp, !=, 0);
 	ASSERT3U(iobp, !=, 0);
+
+	if (!iobp || !lbp) {
+		dprintf("%s missing a buffer\n", __func__);
+		return;
+	}
+
 	ASSERT3U(iobp->iomem, !=, 0);
+
 	if (actualByteCount == 0 ||
 	    actualByteCount != lbp->b_bcount ||
 	    status != kIOReturnSuccess) {
@@ -1203,10 +1210,6 @@ ldi_iokit_io_intr(void *target, void *parameter,
 		dprintf("%s status %d %d %s\n", __func__, status,
 		    ldi_zfs_handle->errnoFromReturn(status),
 		    ldi_zfs_handle->stringFromReturn(status));
-	}
-	if (!iobp || !lbp) {
-		dprintf("%s missing a buffer\n", __func__);
-		return;
 	}
 #endif
 
