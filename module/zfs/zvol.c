@@ -2437,6 +2437,8 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 	return (error);
 }
 
+boolean_t zvol_disable_unmap = B_FALSE;
+
 int
 zvol_unmap(zvol_state_t *zv, uint64_t off, uint64_t bytes)
 {
@@ -2453,6 +2455,9 @@ zvol_unmap(zvol_state_t *zv, uint64_t off, uint64_t bytes)
 
 	if (zv == NULL)
 		return (ENXIO);
+
+	if (zvol_disable_unmap != B_FALSE)
+		return (0);
 
 #ifdef VERBOSE_UNMAP
 	printf("ZFS: unmap requested %llx -> %llx, length %llx\n",
