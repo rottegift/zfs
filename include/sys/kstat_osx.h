@@ -146,6 +146,9 @@ typedef struct osx_kstat {
 	kstat_named_t zio_dva_throttle_enabled;
 
 	kstat_named_t zvol_disable_unmap;
+
+	kstat_named_t zfs_scan_min_time_ms;
+	kstat_named_t zfs_resilver_min_time_ms;
 } osx_kstat_t;
 
 
@@ -245,6 +248,9 @@ extern uint64_t zfs_vdev_queue_depth_pct;
 extern boolean_t zio_dva_throttle_enabled;
 
 extern boolean_t zvol_disable_unmap;
+
+extern int zfs_scan_min_time_ms;
+extern int zfs_resilver_min_time_ms;
 
 int        kstat_osx_init(void);
 void       kstat_osx_fini(void);
