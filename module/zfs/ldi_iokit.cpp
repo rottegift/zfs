@@ -1208,20 +1208,19 @@ ldi_iokit_io_intr(void *target, void *parameter,
 
 	ASSERT3U(ldi_zfs_handle, !=, 0);
 
-	if (!ldi_zfs_handle) {
-	  printf("%s missing ldi_zfs_handle\n", __func__);
-	  return;
-	}
-
 	if (actualByteCount == 0 ||
 	    actualByteCount != lbp->b_bcount ||
 	    status != kIOReturnSuccess) {
 		printf("%s %s %llx / %llx\n", __func__,
 		    "actualByteCount != lbp->b_bcount",
 		    actualByteCount, lbp->b_bcount);
-		printf("%s status %d %d %s\n", __func__, status,
-		    ldi_zfs_handle->errnoFromReturn(status),
-		    ldi_zfs_handle->stringFromReturn(status));
+		if (ldi_zfs_handle)
+		  printf("%s status %d %d %s\n", __func__, status,
+			 ldi_zfs_handle->errnoFromReturn(status),
+			 ldi_zfs_handle->stringFromReturn(status));
+		else
+		  printf("%s status %d ldi_zfs_handle is NULL\n",
+			 __func__, status);
 	}
 #endif
 
