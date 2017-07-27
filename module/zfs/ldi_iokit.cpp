@@ -1201,6 +1201,11 @@ ldi_iokit_io_intr(void *target, void *parameter,
 
 	ASSERT3U(iobp->iomem, !=, 0);
 
+	if (!iobp->iomem) {
+	  dprintf("%s missing iobp->iomem\n", __func__);
+	  return;
+	}
+
 	if (actualByteCount == 0 ||
 	    actualByteCount != lbp->b_bcount ||
 	    status != kIOReturnSuccess) {
