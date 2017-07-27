@@ -281,6 +281,7 @@ const attribute_set_t zfs_attributes = {
 		ATTR_CMN_EXTENDED_SECURITY |
 		ATTR_CMN_UUID |
 		ATTR_CMN_GRPUUID |
+		ATTR_CMN_FILEID |
 		ATTR_CMN_PARENTID ,
 
 		ATTR_VOL_FSTYPE	|
@@ -2687,6 +2688,8 @@ zfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 			ATTR_CMN_EXTENDED_SECURITY |
 			ATTR_CMN_UUID |
 			ATTR_CMN_GRPUUID |
+			ATTR_CMN_DOCUMENT_ID |
+			ATTR_CMN_GEN_COUNT |
 			0;
 		fsap->f_attributes.validattr.volattr =
 			ATTR_VOL_FSTYPE	|
@@ -2749,6 +2752,9 @@ zfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 			ATTR_CMN_EXTENDED_SECURITY |
 			ATTR_CMN_UUID |
 			ATTR_CMN_GRPUUID |
+			ATTR_CMN_DOCUMENT_ID |
+			ATTR_CMN_GEN_COUNT |
+
 			0;
 		fsap->f_attributes.nativeattr.volattr =
 			ATTR_VOL_FSTYPE	|
