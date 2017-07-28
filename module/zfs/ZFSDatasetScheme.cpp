@@ -780,8 +780,7 @@ out:
 	return (ret_id);
 }
 
-void
-ZFSDatasetScheme::returnPartitionID(uint32_t part_id)
+void ZFSDatasetScheme::returnPartitionID(uint32_t part_id)
 {
 	OSNumber *id_num = OSNumber::withNumber(part_id, 32);
 
@@ -790,6 +789,7 @@ ZFSDatasetScheme::returnPartitionID(uint32_t part_id)
 
 	if (lockForArbitration(false) == false) {
 		dprintf("service is terminated");
+		OSSafeReleaseNULL(id_num);
 		return;
 	}
 
@@ -836,11 +836,10 @@ ZFSDatasetScheme::returnPartitionID(uint32_t part_id)
 
 		/* Add a new OSNum to hole list */
 		_holes->setObject(id_num);
+		OSSafeReleaseNULL(id_num);
 	}
 
 	unlockForArbitration();
-	/* Either was retained by setObject, or unused */
-	OSSafeReleaseNULL(id_num);
 }
 
 bool

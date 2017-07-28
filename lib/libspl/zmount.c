@@ -76,10 +76,10 @@ zmount(zfs_handle_t *zhp, const char *spec, const char *dir, int mflag,
 				zfs_get_name(zhp)))
 			ispool = 1;
 
-		if ((devdisk == ZFS_DEVDISK_ON) ||
-			((devdisk == ZFS_DEVDISK_POOLONLY) &&
-				ispool)) {
-
+//		if ((devdisk == ZFS_DEVDISK_ON) ||
+//			((devdisk == ZFS_DEVDISK_POOLONLY) &&
+//				ispool)) {
+		if (1) {
 			(void)strlcpy(zc.zc_name, zhp->zfs_name, sizeof(zc.zc_name));
 			zc.zc_value[0] = 0;
 
