@@ -107,8 +107,6 @@
 #endif /* __APPLE__ */
 
 //#define dprintf kprintf
-#undef dprintf
-#define dprintf printf
 
 #ifdef __APPLE__
 unsigned int zfs_vnop_skip_unlinked_drain = 0;

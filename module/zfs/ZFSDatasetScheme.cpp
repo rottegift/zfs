@@ -80,7 +80,15 @@ dprintf("pool_name [%s] from %s", pool_name, osname);
 	}
 
 	if (!scheme) {
-		iter = IOService::getMatchingServices(matching);
+		int i;
+		for (i = 0; i < 12; i++) { // up to 6s
+			iter = IOService::getMatchingServices(matching);
+			if (iter) break;
+			IOSleep(500);
+		}
+
+		if (i) dprintf("%s: tried %d times\n", __func__, i);
+
 		if (!iter) {
 			dprintf("couldn't get iterator");
 			kmem_free(pool_name, len);
@@ -619,9 +627,9 @@ orderHoles(const OSMetaClassBase *obj1, const OSMetaClassBase *obj2,
 	if (num1->isEqualTo(num2)) return (0);
 
 	if (num1->unsigned32BitValue() < num2->unsigned32BitValue()) {
-		return (1);       
+		return (1);
 	} else {
-		return (-1);       
+		return (-1);
 	}
 }
 
