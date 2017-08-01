@@ -719,7 +719,8 @@ ZFSDatasetScheme::start(IOService *provider)
 		setProperty(kZFSPoolNameKey, pool_name);
 	}
 
-	registerService(kIOServiceAsynchronous);
+	//registerService(kIOServiceAsynchronous);
+	registerService(kIOServiceSynchronous);
 
 	return (true);
 }
