@@ -210,6 +210,15 @@ vdev_file_io_start(zio_t *zio)
     vdev_t *vd = zio->io_vd;
     vdev_file_t *vf = vd->vdev_tsd;
     ssize_t resid = 0;
+#ifdef DEBUG
+    uint64_t zio_size_in = zio->io_size;
+    uint64_t abd_size_in = zio->io_abd->abd_size;
+
+    if (zio_size_in != abd_size_in) {
+	    printf("%s: (pseudo) Assertion: zio_size_in %llx != abd_size_in %llx\n",
+		__func__, zio_size_in, abd_size_in);
+    }
+#endif
 
 
     if (zio->io_type == ZIO_TYPE_IOCTL) {
@@ -239,6 +248,9 @@ vdev_file_io_start(zio_t *zio)
 	ASSERT(zio->io_type == ZIO_TYPE_READ || zio->io_type == ZIO_TYPE_WRITE);
 	zio->io_target_timestamp = zio_handle_io_delay(zio);
 
+	ASSERT3S(zio->io_size,==,zio_size_in);
+	ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
+
     if (!vnode_getwithvid(vf->vf_vnode, vf->vf_vid)) {
 
 		/*
@@ -248,23 +260,41 @@ vdev_file_io_start(zio_t *zio)
 
 		void *data;
 		if (zio->io_type == ZIO_TYPE_READ) {
+			ASSERT3S(zio->io_size,==,zio_size_in);
+			ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
+			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
-				abd_borrow_buf(zio->io_abd, zio->io_size);
+				abd_borrow_buf(zio->io_abd, zio->io_abd->abd_size);
 		} else {
+			ASSERT3S(zio->io_size,==,zio_size_in);
+			ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
+			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
-				abd_borrow_buf_copy(zio->io_abd, zio->io_size);
+				abd_borrow_buf_copy(zio->io_abd, zio->io_abd->abd_size);
 		}
+
+	ASSERT3S(zio->io_size,==,zio_size_in);
 
         zio->io_error = vn_rdwr(zio->io_type == ZIO_TYPE_READ ?
                            UIO_READ : UIO_WRITE, vf->vf_vnode, data,
                            zio->io_size, zio->io_offset, UIO_SYSSPACE,
                            0, RLIM64_INFINITY, kcred, &resid);
+
+	ASSERT3S(zio->io_size,==,zio_size_in);
+	ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
+
         vnode_put(vf->vf_vnode);
 
+	ASSERT3S(zio->io_size,==,zio_size_in);
+
 		if (zio->io_type == ZIO_TYPE_READ) {
-			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
+			ASSERT3S(zio->io_size,==,zio_size_in);
+			ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
+			abd_return_buf_copy(zio->io_abd, data, zio->io_abd->abd_size);
 		} else {
-			abd_return_buf(zio->io_abd, data, zio->io_size);
+			ASSERT3S(zio->io_size,==,zio_size_in);
+			ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
+			abd_return_buf(zio->io_abd, data, zio->io_abd->abd_size);
 		}
     }
 
