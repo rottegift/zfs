@@ -405,7 +405,17 @@ zio_checksum_error_impl(spa_t *spa, blkptr_t *bp, enum zio_checksum checksum,
 			zil_chain_t zilc;
 			uint64_t nused;
 
+#ifdef __APPLE__
+#ifdef DEBUG
+			if ((size_t)abd->abd_size != sizeof (zil_chain_t)) {
+				printf("%s: (pseudo) Assertion: abd->abd_size == %x != %lx\n",
+				    __func__, abd->abd_size, sizeof (zil_chain_t));
+			}
+#endif
+			abd_copy_to_buf_off(&zilc, abd, 0, sizeof (zil_chain_t));
+#else
 			abd_copy_to_buf(&zilc, abd, sizeof (zil_chain_t));
+#endif
 
 			eck = zilc.zc_eck;
 			eck_offset = offsetof(zil_chain_t, zc_eck) +
