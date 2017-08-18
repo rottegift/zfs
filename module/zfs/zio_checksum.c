@@ -407,7 +407,7 @@ zio_checksum_error_impl(spa_t *spa, blkptr_t *bp, enum zio_checksum checksum,
 
 #ifdef __APPLE__
 #ifdef DEBUG
-			if ((size_t)abd->abd_size != sizeof (zil_chain_t)) {
+			if (__builtin_expect(((size_t)abd->abd_size != sizeof (zil_chain_t)), 0)) {
 				printf("%s: (pseudo) Assertion: abd->abd_size == %x != %lx\n",
 				    __func__, abd->abd_size, sizeof (zil_chain_t));
 			}
