@@ -3474,7 +3474,7 @@ zio_vdev_io_done(zio_t *zio)
  */
 static void
 zio_vsd_default_cksum_finish(zio_cksum_report_t *zcr,
-    const void *good_buf)
+    const abd_t *good_buf)
 {
 	/* no processing needed */
 	zfs_ereport_finish_checksum(zcr, good_buf, zcr->zcr_cbdata, B_FALSE);
@@ -4065,25 +4065,18 @@ zio_done(zio_t *zio)
 			zio_cksum_report_t *zcr = zio->io_cksum_report;
 			uint64_t align = zcr->zcr_align;
 			uint64_t asize = P2ROUNDUP(psize, align);
-			char *abuf = NULL;
 			abd_t *adata = zio->io_abd;
 
 			if (asize != psize) {
-				adata = abd_alloc_linear(asize, B_TRUE);
+				adata = abd_alloc(asize, B_TRUE);
 				abd_copy(adata, zio->io_abd, psize);
 				abd_zero_off(adata, psize, asize - psize);
 			}
 
-			if (adata != NULL)
-				abuf = abd_borrow_buf_copy(adata, asize);
-
 			zio->io_cksum_report = zcr->zcr_next;
 			zcr->zcr_next = NULL;
-			zcr->zcr_finish(zcr, abuf);
+			zcr->zcr_finish(zcr, adata);
 			zfs_ereport_free_checksum(zcr);
-
-			if (adata != NULL)
-				abd_return_buf(adata, abuf, asize);
 
 			if (asize != psize)
 				abd_free(adata);

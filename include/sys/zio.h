@@ -327,7 +327,7 @@ typedef struct zio_prop {
 typedef struct zio_cksum_report zio_cksum_report_t;
 
 typedef void zio_cksum_finish_f(zio_cksum_report_t *rep,
-    const void *good_data);
+    const abd_t *good_data);
 typedef void zio_cksum_free_f(void *cbdata, size_t size);
 
 struct zio_bad_cksum;				/* defined in zio_checksum.h */
@@ -619,7 +619,7 @@ extern void zfs_ereport_start_checksum(spa_t *spa, vdev_t *vd,
     zbookmark_phys_t *zb, struct zio *zio, uint64_t offset, uint64_t length,
     void *arg, struct zio_bad_cksum *info);
 extern void zfs_ereport_finish_checksum(zio_cksum_report_t *report,
-    const void *good_data, const void *bad_data, boolean_t drop_if_identical);
+    const abd_t *good_data, const abd_t *bad_data, boolean_t drop_if_identical);
 
 extern void zfs_ereport_send_interim_checksum(zio_cksum_report_t *report);
 extern void zfs_ereport_free_checksum(zio_cksum_report_t *report);
