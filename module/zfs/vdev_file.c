@@ -213,6 +213,11 @@ vdev_file_io_start(zio_t *zio)
 #ifdef DEBUG
     uint64_t zio_size_in = zio->io_size;
     uint64_t abd_size_in = zio->io_abd->abd_size;
+
+    if (unlikely(zio_size_in != abd_size_in)) {
+	    printf("%s: (pseudo) Assertion: zio_size_in %llx != abd_size_in %llx\n",
+		__func__, zio_size_in, abd_size_in);
+    }
 #endif
 
 
@@ -257,17 +262,15 @@ vdev_file_io_start(zio_t *zio)
 		if (zio->io_type == ZIO_TYPE_READ) {
 			ASSERT3S(zio->io_size,==,zio_size_in);
 			ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
-			ASSERT3S(zio->io_abd->abd_size,==,zio->io_size);
+			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
-				abd_borrow_buf(zio->io_abd, zio->io_size);
-			ASSERT3S(zio->io_abd->abd_size,==,zio_size_in);
+				abd_borrow_buf(zio->io_abd, zio->io_abd->abd_size);
 		} else {
 			ASSERT3S(zio->io_size,==,zio_size_in);
 			ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
-			ASSERT3S(zio->io_abd->abd_size,==,zio->io_size);
+			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
-				abd_borrow_buf_copy(zio->io_abd, zio->io_size);
-			ASSERT3S(zio->io_abd->abd_size,==,zio_size_in);
+				abd_borrow_buf_copy(zio->io_abd, zio->io_abd->abd_size);
 		}
 
 	ASSERT3S(zio->io_size,==,zio_size_in);
@@ -286,10 +289,12 @@ vdev_file_io_start(zio_t *zio)
 
 		if (zio->io_type == ZIO_TYPE_READ) {
 			ASSERT3S(zio->io_size,==,zio_size_in);
-			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
+			ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
+			abd_return_buf_copy(zio->io_abd, data, zio->io_abd->abd_size);
 		} else {
 			ASSERT3S(zio->io_size,==,zio_size_in);
-			abd_return_buf(zio->io_abd, data, zio->io_size);
+			ASSERT3S(zio->io_abd->abd_size,==,abd_size_in);
+			abd_return_buf(zio->io_abd, data, zio->io_abd->abd_size);
 		}
     }
 
