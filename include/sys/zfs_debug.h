@@ -104,9 +104,6 @@ extern void zfs_dbgmsg_print(const char *tag);
 
 #ifndef _KERNEL
 extern int dprintf_find_string(const char *string);
-#ifndef unlikely
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#endif
 #endif
 
 #ifdef	__cplusplus
