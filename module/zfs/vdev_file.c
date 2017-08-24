@@ -214,7 +214,7 @@ vdev_file_io_start(zio_t *zio)
     uint64_t zio_size_in = zio->io_size;
     uint64_t abd_size_in = zio->io_abd->abd_size;
 
-    if (unlikely(zio_size_in != abd_size_in)) {
+    if (zio_size_in != abd_size_in) {
 	    printf("%s: (pseudo) Assertion: zio_size_in %llx != abd_size_in %llx\n",
 		__func__, zio_size_in, abd_size_in);
     }
