@@ -541,8 +541,14 @@ abd_alloc_linear(size_t size, boolean_t is_metadata)
 
 	if (is_metadata) {
 		abd->abd_u.abd_linear.abd_buf = zio_buf_alloc(size);
+#ifdef DEBUG
+		bzero(abd->abd_u.abd_linear.abd_buf, size);
+#endif
 	} else {
 		abd->abd_u.abd_linear.abd_buf = zio_data_buf_alloc(size);
+#ifdef DEBUG
+		bzero(abd->abd_u.abd_linear.abd_buf, size);
+#endif
 	}
 
 	ABDSTAT_BUMP(abdstat_linear_cnt);
@@ -821,6 +827,9 @@ abd_borrow_buf(abd_t *abd, size_t n)
 		mutex_enter(&abd->abd_mutex);
 	} else {
 		buf = zio_buf_alloc(n);
+#ifdef DEBUG
+		bzero(buf, n);
+#endif
 	}
 	(void) refcount_add_many(&abd->abd_children, n, buf);
 	mutex_exit(&abd->abd_mutex);
