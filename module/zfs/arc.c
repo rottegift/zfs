@@ -2197,6 +2197,9 @@ arc_buf_fill(arc_buf_t *buf, spa_t *spa, uint64_t dsobj, arc_fill_flags_t flags)
 	 */
  	if (encrypted) {
 		ASSERT(HDR_HAS_RABD(hdr));
+#ifdef DEBUG
+		bzero(buf->b_data, HDR_GET_PSIZE(hdr));
+#endif
 		abd_copy_to_buf(buf->b_data, hdr->b_crypt_hdr.b_rabd,
 		    HDR_GET_PSIZE(hdr));
  		goto byteswap;
@@ -2246,6 +2249,9 @@ arc_buf_fill(arc_buf_t *buf, spa_t *spa, uint64_t dsobj, arc_fill_flags_t flags)
 
 	if (hdr_compressed == compressed) {
 		if (!arc_buf_is_shared(buf)) {
+#ifdef DEBUG
+			bzero(buf->b_data, arc_buf_size(buf));
+#endif
 			abd_copy_to_buf(buf->b_data, hdr->b_l1hdr.b_pabd,
 			    arc_buf_size(buf));
 		}
@@ -6139,7 +6145,7 @@ top:
 			 * For authenticated bp's, we do not ask the ZIO layer
 			 * to authenticate them since this will cause the entire
 			 * IO to fail if the key isn't loaded. Instead, we
-             * defer authentication until arc_buf_fill(), which will
+			 * defer authentication until arc_buf_fill(), which will
 			 * verify the data when the key is available.
 			 */
 			if (BP_IS_AUTHENTICATED(bp))
