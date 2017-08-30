@@ -2247,8 +2247,7 @@ vdev_raidz_combrec(zio_t *zio, int total_errors, int data_errors)
 				rc = &rm->rm_col[c];
 				ASSERT3S(rc->rc_abd->abd_size,>=,rc->rc_size);
 				ASSERT3S(orig[i]->abd_size,>=,rc->rc_size);
-				abd_copy_from_buf_off(rc->rc_abd, orig[i], 0,
-				    rc->rc_size);
+				abd_copy_off(rc->rc_abd, orig[i], 0, 0, rc->rc_size);
 			}
 
 			do {
