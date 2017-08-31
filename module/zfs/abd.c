@@ -610,7 +610,7 @@ abd_free(abd_t *abd)
 abd_t *
 abd_alloc_sametype(abd_t *sabd, size_t size)
 {
-	//VERIFY_ABD_MAGIC(sabd);
+	VERIFY_ABD_MAGIC(sabd);
 
 	boolean_t is_metadata = (sabd->abd_flags & ABD_FLAG_META) != 0;
 	if (abd_is_linear(sabd)) {
