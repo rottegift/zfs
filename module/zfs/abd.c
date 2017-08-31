@@ -1101,7 +1101,7 @@ abd_copy_to_buf_off(void *buf, abd_t *abd, size_t off, size_t size)
 	VERIFY_BUF_NOMAGIC(buf);
 	VERIFY_ABD_MAGIC(abd);
 
-	ASSERT3S(size, >, 0);
+	ASSERT3S(size, >=, 0);
 	ASSERT3S(off, >=, 0);
 	ASSERT3S((size_t)abd->abd_size, >=, off+size);
 	ASSERT3S((size_t)abd->abd_size, >, 0);
