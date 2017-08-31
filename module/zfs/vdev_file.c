@@ -253,7 +253,8 @@ vdev_file_io_start(zio_t *zio)
 		    ASSERT3U(zio->io_abd->abd_size,>=,zio->io_size);
 		    // cf. zio_write_phys()
 #ifdef DEBUG
-		    printf("%s: trimming zio->io_abd from 0x%x to 0x%llx\n",
+		    // this dprintf can be very noisy
+		    dprintf("%s: trimming zio->io_abd from 0x%x to 0x%llx\n",
 			__func__, zio->io_abd->abd_size, zio->io_size);
 #endif
 		    abd_t *tabd = abd_alloc_sametype(zio->io_abd, zio->io_size);
