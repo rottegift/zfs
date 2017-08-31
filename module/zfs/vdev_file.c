@@ -246,7 +246,6 @@ vdev_file_io_start(zio_t *zio)
 		*/
 
 		void *data;
-		ASSERT3S(zio->io_abd->abd_size,==,zio->io_size);
 		if (zio->io_type == ZIO_TYPE_READ) {
 			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
