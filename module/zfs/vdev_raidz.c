@@ -678,7 +678,8 @@ vdev_raidz_generate_parity_p(raidz_map_t *rm)
 		p = abd_to_buf(rm->rm_col[VDEV_RAIDZ_P].rc_abd);
 
 		if (c == rm->rm_firstdatacol) {
-			abd_copy_to_buf(p, src, rm->rm_col[c].rc_size);
+			ASSERT3U(src->abd_size,>=,rm->rm_col[c].rc_size);
+			abd_copy_to_buf_off(p, src, rm->rm_col[c].rc_size);
 		} else {
 			struct pqr_struct pqr = { p, NULL, NULL };
 			(void) abd_iterate_func(src, 0, rm->rm_col[c].rc_size,
