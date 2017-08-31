@@ -926,7 +926,6 @@ abd_release_ownership_of_buf(abd_t *abd)
 
 	abd->abd_flags &= ~ABD_FLAG_OWNER;
 	/* Disable this flag since we no longer own the data buffer */
-	boolean_t is_metadata = (abd->abd_flags & ABD_FLAG_META) != 0;
 	abd->abd_flags &= ~ABD_FLAG_META;
 
 	ABDSTAT_BUMPDOWN(abdstat_linear_cnt);
