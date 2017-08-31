@@ -136,16 +136,16 @@
 
 #ifdef DEBUG
 #ifdef _KERNEL
-#define VERIFY_BUF_NOMAGIC(x) do {					\
+#define VERIFY_BUF_NOMAGIC(x, size) do {				\
 		const __uint128_t m = ((abd_t *)(x))->abd_magic;	\
-		if (m == ABD_DEBUG_MAGIC) {				\
+		if (#size >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
 			panic("VERIFY_BUF_NOMAGIC(" #x ") failed\n");	\
 		}							\
 	} while (0)
 #else
-#define VERIFY_BUF_NOMAGIC(x) do {					\
+#define VERIFY_BUF_NOMAGIC(x, size) do {				\
 		const __uint128_t m = ((abd_t *)(x))->abd_magic;	\
-		if (m == ABD_DEBUG_MAGIC) {				\
+		if (#size >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
 			char *__buf = alloca(256);			\
 			(void) snprintf(__buf, 256,			\
 			    "VERIFY_BUF_NOMAGIC(%s) failed", #x );	\
@@ -739,7 +739,7 @@ abd_get_from_buf(void *buf, size_t size)
 {
 	abd_t *abd = abd_alloc_struct(0);
 
-	VERIFY_BUF_NOMAGIC(buf);
+	VERIFY_BUF_NOMAGIC(buf, size);
 
 	VERIFY3U(size, <=, SPA_MAXBLOCKSIZE);
 
@@ -862,7 +862,7 @@ abd_return_buf(abd_t *abd, void *buf, size_t n)
 {
 	mutex_enter(&abd->abd_mutex);
 	abd_verify(abd);
-	VERIFY_BUF_NOMAGIC(buf);
+	VERIFY_BUF_NOMAGIC(buf, n);
 	ASSERT3U((size_t)abd->abd_size, >=, n);
 	if (abd_is_linear(abd)) {
 		mutex_exit(&abd->abd_mutex);
@@ -883,7 +883,7 @@ void
 abd_return_buf_copy(abd_t *abd, void *buf, size_t n)
 {
 	VERIFY_ABD_MAGIC(abd);
-	VERIFY_BUF_NOMAGIC(buf);
+	VERIFY_BUF_NOMAGIC(buf, n);
 
 	if (!abd_is_linear(abd)) {
 		abd_copy_from_buf(abd, buf, n);
@@ -1098,7 +1098,7 @@ abd_copy_to_buf_off(void *buf, abd_t *abd, size_t off, size_t size)
 {
 	struct buf_arg ba_ptr = { buf };
 
-	VERIFY_BUF_NOMAGIC(buf);
+	VERIFY_BUF_NOMAGIC(buf, off+size);
 	VERIFY_ABD_MAGIC(abd);
 
 	ASSERT3S(size, >=, 0);
@@ -1130,7 +1130,7 @@ abd_cmp_buf_off(abd_t *abd, const void *buf, size_t off, size_t size)
 {
 	struct buf_arg ba_ptr = { (void *) buf };
 
-	VERIFY_BUF_NOMAGIC(buf);
+	VERIFY_BUF_NOMAGIC(buf, off+size);
 	VERIFY_ABD_MAGIC(abd);
 
 	ASSERT3S(size, >, 0);
@@ -1160,7 +1160,7 @@ abd_copy_from_buf_off(abd_t *abd, const void *buf, size_t off, size_t size)
 {
 	struct buf_arg ba_ptr = { (void *) buf };
 
-	VERIFY_BUF_NOMAGIC(buf);
+	VERIFY_BUF_NOMAGIC(buf, off+size);
 	VERIFY_ABD_MAGIC(abd);
 
 	ASSERT3S(size, >, 0);
