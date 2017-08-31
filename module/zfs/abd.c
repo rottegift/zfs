@@ -1098,6 +1098,7 @@ abd_copy_to_buf_off(void *buf, abd_t *abd, size_t off, size_t size)
 {
 	struct buf_arg ba_ptr = { buf };
 
+	VERIFY3P(buf,!=,NULL);
 	VERIFY_BUF_NOMAGIC(buf, off+size);
 	VERIFY_ABD_MAGIC(abd);
 
