@@ -707,7 +707,6 @@ vdev_raidz_generate_parity_pq(raidz_map_t *rm)
 
 		if (c == rm->rm_firstdatacol) {
 			ASSERT(ccnt == pcnt || ccnt == 0);
-			ASSERT(rm->rm_col[c].rc_size > 0);
 			/*
 			 * Guard against zero size, which in DEBUG will
 			 * cause an ASSERTion in abd_copy_to_buf
@@ -715,7 +714,14 @@ vdev_raidz_generate_parity_pq(raidz_map_t *rm)
 			if (rm->rm_col[c].rc_size > 0) {
 				abd_copy_to_buf(p, src, rm->rm_col[c].rc_size);
 				(void) memcpy(q, p, rm->rm_col[c].rc_size);
+#ifndef DEBUG
 			}
+#else
+			} else {
+				printf("%s: rm->rm_col[c].rc_size == %llx, skipped copy\n",
+				    __func__, rm->rm_col[c].rc_size);
+			}
+#endif
 
 			for (i = ccnt; i < pcnt; i++) {
 				p[i] = 0;
