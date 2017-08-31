@@ -3362,6 +3362,7 @@ zio_vdev_io_start(zio_t *zio)
 	    P2PHASE(zio->io_size, align) != 0) {
 		/* Transform logical writes to be a full physical block size. */
 		uint64_t asize = P2ROUNDUP(zio->io_size, align);
+		VERIFY3P(zio->io_abd,!=,NULL);
 		abd_t *abuf = abd_alloc_sametype(zio->io_abd, asize);
 		ASSERT(vd == vd->vdev_top);
 		if (zio->io_type == ZIO_TYPE_WRITE) {
