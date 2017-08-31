@@ -759,7 +759,7 @@ vdev_raidz_generate_parity_pqr(raidz_map_t *rm)
 		if (c == rm->rm_firstdatacol) {
 			ASSERT3S(src->abd_size,>=,rm->rm_col[c].rc_size);
 			ASSERT(ccnt == pcnt || ccnt == 0);
-			abd_copy_to_buf(p, src, rm->rm_col[c].rc_size);
+			abd_copy_to_buf_off(p, src, 0, rm->rm_col[c].rc_size);
 			(void) memcpy(q, p, rm->rm_col[c].rc_size);
 			(void) memcpy(r, p, rm->rm_col[c].rc_size);
 
