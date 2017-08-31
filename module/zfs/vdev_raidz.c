@@ -435,7 +435,7 @@ vdev_raidz_cksum_report(zio_t *zio, zio_cksum_report_t *zcr, void *arg)
 
 		ASSERT3S(tmp->abd_size,>=,col->rc_size);
 		ASSERT3S(col->rc_abd->abd_size,>=,col->rc_size);
-		abd_copy(tmp, col->rc_abd, col->rc_size);
+		abd_copy_off(tmp, col->rc_abd, 0, 0, col->rc_size);
 		abd_put(col->rc_abd);
 		col->rc_abd = tmp;
 
