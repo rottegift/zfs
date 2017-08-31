@@ -105,29 +105,20 @@
 #ifdef DEBUG
 #ifdef _KERNEL
 #define VERIFY_ABD_MAGIC(x) do {	      \
-		const __uint128_t y = (x)->abd_magic;	\
+		const uint64_t y = (x)->abd_magic;	\
 		if (y != ABD_DEBUG_MAGIC) {		\
-			const uint64_t yhi = y >> 64;	\
-			const uint64_t ylo = (uint64_t) y;    \
-			const uint64_t maghi = ABD_DEBUG_MAGIC >> 64;	\
-			const uint64_t maglo = (uint64_t) ABD_DEBUG_MAGIC; \
-			panic("VERIFY_ABD_MAGIC(" #x ") failed (0x%llx %llx != 0x%llx %llx)\n", \
-			    yhi, ylo, maghi, maglo);			\
+			panic("VERIFY_ABD_MAGIC(" #x ") failed (0x%llx != 0x%llx )\n", \
+			    y, ABD_DEBUG_MAGIC);			\
 		}							\
 	} while (0)
 #else
-#define VERIFY_ABD_MAGIC(x) do { \
-	  const __uint128_t y = (x)->abd_magic; \
+#define VERIFY_ABD_MAGIC(x) do {	     \
+	  const uint64_t y = (x)->abd_magic; \
 	  if (y != ABD_DEBUG_MAGIC) {		     \
-		  const uint64_t yhi = y >> 64;			\
-		  const uint64_t ylo = (uint64_t) y;		     \
-		  const uint64_t maghi = ABD_DEBUG_MAGIC >> 64;	     \
-		  const uint64_t maglo = (uint64_t) ABD_DEBUG_MAGIC;	\
 		  char * __buf = alloca(256);				\
 		  (void) snprintf(__buf, 256,				\
-		      "VERIFY_ABD_MAGIC(%s) failed (0x%llx %llx  != 0x%llx %llx)", \
-		      #x,						\
-		      yhi, ylo, maghi, maglo);				\
+		      "VERIFY_ABD_MAGIC(%s) failed (0x%llx != 0x%llx)", \
+		      #x, y, ABD_DEBUG_MAGIC);				\
 		  __assert_c99(__buf, __FILE__, __LINE__, __func__);	\
 	  }								\
 	} while (0)
@@ -137,14 +128,14 @@
 #ifdef DEBUG
 #ifdef _KERNEL
 #define VERIFY_BUF_NOMAGIC(x, size) do {				\
-		const __uint128_t m = ((abd_t *)(x))->abd_magic;	\
+		const uint64_t m = ((abd_t *)(x))->abd_magic;		\
 		if ((size) >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
 			panic("VERIFY_BUF_NOMAGIC(" #x ", 0x%lx) failed\n", size); \
 		}							\
 	} while (0)
 #else
 #define VERIFY_BUF_NOMAGIC(x, size) do {				\
-		const __uint128_t m = ((abd_t *)(x))->abd_magic;	\
+		const uint64_t m = ((abd_t *)(x))->abd_magic;		\
 		if ((size) >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
 			char *__buf = alloca(256);			\
 			(void) snprintf(__buf, 256,			\
