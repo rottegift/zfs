@@ -246,6 +246,8 @@ vdev_file_io_start(zio_t *zio)
 		*/
 
 		void *data;
+		uint64_t zio_size_in = zio->io_size;
+
 		if (zio->io_type == ZIO_TYPE_READ) {
 			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
@@ -262,6 +264,8 @@ vdev_file_io_start(zio_t *zio)
                            0, RLIM64_INFINITY, kcred, &resid);
 
         vnode_put(vf->vf_vnode);
+
+	ASSERT3U(zio-io_size,==,zio_size_in);
 
 		if (zio->io_type == ZIO_TYPE_READ) {
 			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
