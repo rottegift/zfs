@@ -264,9 +264,9 @@ vdev_file_io_start(zio_t *zio)
         vnode_put(vf->vf_vnode);
 
 		if (zio->io_type == ZIO_TYPE_READ) {
-			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
-		} else {
 			abd_return_buf(zio->io_abd, data, zio->io_size);
+		} else {
+			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
 		}
     }
 
