@@ -708,14 +708,9 @@ vdev_raidz_generate_parity_pq(raidz_map_t *rm)
 		if (c == rm->rm_firstdatacol) {
 			ASSERT(ccnt == pcnt || ccnt == 0);
 			ASSERT(rm->rm_col[c].rc_size > 0);
-			/*
-			 * Guard against zero size, which in DEBUG will
-			 * cause an ASSERTion in abd_copy_to_buf
-			 */
-			if (rm->rm_col[c].rc_size > 0) {
-				abd_copy_to_buf(p, src, rm->rm_col[c].rc_size);
-				(void) memcpy(q, p, rm->rm_col[c].rc_size);
-			}
+
+			abd_copy_to_buf_off(p, src, 0, rm->rm_col[c].rc_size);
+			(void) memcpy(q, p, rm->rm_col[c].rc_size);
 
 			for (i = ccnt; i < pcnt; i++) {
 				p[i] = 0;
