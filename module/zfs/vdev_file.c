@@ -249,7 +249,7 @@ vdev_file_io_start(zio_t *zio)
 		if (zio->io_type == ZIO_TYPE_READ) {
 			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
-				abd_borrow_buf(zio->io_abd, zio->io_size);
+				abd_borrow_buf_copy(zio->io_abd, zio->io_size);
 		} else {
 			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
@@ -264,7 +264,7 @@ vdev_file_io_start(zio_t *zio)
         vnode_put(vf->vf_vnode);
 
 		if (zio->io_type == ZIO_TYPE_READ) {
-			abd_return_buf(zio->io_abd, data, zio->io_size);
+			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
 		} else {
 			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
 		}
