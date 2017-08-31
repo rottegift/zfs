@@ -138,17 +138,17 @@
 #ifdef _KERNEL
 #define VERIFY_BUF_NOMAGIC(x, size) do {				\
 		const __uint128_t m = ((abd_t *)(x))->abd_magic;	\
-		if (#size >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
-			panic("VERIFY_BUF_NOMAGIC(" #x ") failed\n");	\
+		if ((size) >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
+			panic("VERIFY_BUF_NOMAGIC(" #x ", 0x%lx) failed\n", size); \
 		}							\
 	} while (0)
 #else
 #define VERIFY_BUF_NOMAGIC(x, size) do {				\
 		const __uint128_t m = ((abd_t *)(x))->abd_magic;	\
-		if (#size >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
+		if ((size) >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
 			char *__buf = alloca(256);			\
 			(void) snprintf(__buf, 256,			\
-			    "VERIFY_BUF_NOMAGIC(%s) failed", #x );	\
+			    "VERIFY_BUF_NOMAGIC(%s, 0x%lx)) failed", #x, size); \
 			__assert_c99(__buf, __FILE__, __LINE__, __func__); \
 		}							\
 	} while (0)
@@ -1160,6 +1160,7 @@ abd_copy_from_buf_off(abd_t *abd, const void *buf, size_t off, size_t size)
 {
 	struct buf_arg ba_ptr = { (void *) buf };
 
+	VERIFY3P(buf,!=,NULL);
 	VERIFY_BUF_NOMAGIC(buf, off+size);
 	VERIFY_ABD_MAGIC(abd);
 
