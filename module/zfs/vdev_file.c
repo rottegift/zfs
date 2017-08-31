@@ -265,7 +265,7 @@ vdev_file_io_start(zio_t *zio)
 
         vnode_put(vf->vf_vnode);
 
-	ASSERT3U(zio-io_size,==,zio_size_in);
+	ASSERT3U(zio->io_size,==,zio_size_in);
 
 		if (zio->io_type == ZIO_TYPE_READ) {
 			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
