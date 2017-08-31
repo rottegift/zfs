@@ -245,8 +245,24 @@ vdev_file_io_start(zio_t *zio)
 	    TQ_PUSHPAGE), !=, 0);
 		*/
 
+	    /*
+	     * deal with mismatch between abd_size and io_size :
+	     * make a new abd
+	     */
+	    if (zio->io_abd->abd_size != zio->io_size) {
+		    ASSERT3U(zio->io_abd->abd_size,>=,zio->io_size);
+		    // cf. zio_write_phys()
+#ifdef DEBUG
+		    printf("%s: trimming zio->io_abd from 0x%x to 0x%llx\n",
+			__func__, zio->io_abd->abd_size, zio->io_size);
+#endif
+		    abd_t *tabd = abd_alloc_sametype(zio->io_abd, zio->io_size);
+		    abd_copy_off(tabd, zio->io_abd, 0, 0, zio->io_size);
+
+		    zio_push_transform(zio, tabd, zio->io_size, zio->io_size, NULL);
+	    }
+
 		void *data;
-		uint64_t zio_size_in = zio->io_size;
 
 		if (zio->io_type == ZIO_TYPE_READ) {
 			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
@@ -264,8 +280,6 @@ vdev_file_io_start(zio_t *zio)
                            0, RLIM64_INFINITY, kcred, &resid);
 
         vnode_put(vf->vf_vnode);
-
-	ASSERT3U(zio->io_size,==,zio_size_in);
 
 		if (zio->io_type == ZIO_TYPE_READ) {
 			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
