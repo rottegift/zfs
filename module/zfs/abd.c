@@ -152,6 +152,7 @@
 
 typedef struct abd_stats {
 	kstat_named_t abdstat_struct_size;
+	kstat_named_t abdstat_struct_cnt;
 	kstat_named_t abdstat_scatter_cnt;
 	kstat_named_t abdstat_scatter_data_size;
 	kstat_named_t abdstat_scatter_chunk_waste;
@@ -175,6 +176,8 @@ typedef struct abd_stats {
 static abd_stats_t abd_stats = {
 	/* Amount of memory occupied by all of the abd_t struct allocations */
 	{ "struct_size",			KSTAT_DATA_UINT64 },
+	/* Number of allocated abd_t structs */
+	{ "struct_cnt",			        KSTAT_DATA_UINT64 },
 	/*
 	 * The number of scatter ABDs which are currently allocated, excluding
 	 * ABDs which don't own their data (for instance the ones which were
@@ -399,6 +402,7 @@ abd_alloc_struct(size_t chunkcnt)
 	abd_t *abd = kmem_zalloc(size, KM_PUSHPAGE);
 	ASSERT3P(abd, !=, NULL);
 	ABDSTAT_INCR(abdstat_struct_size, size);
+	ABDSTAT_BUMP(abdstat_struct_cnt);
 #ifdef DEBUG
 	abd->abd_magic = ABD_DEBUG_MAGIC;
 #endif
@@ -429,6 +433,7 @@ abd_free_struct(abd_t *abd)
 	mutex_destroy(&abd->abd_mutex);
 	kmem_free(abd, size);
 	ABDSTAT_INCR(abdstat_struct_size, -size);
+	ABDSTAT_BUMPDOWN(abdstat_struct_cnt);
 }
 
 /*
