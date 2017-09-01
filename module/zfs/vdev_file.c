@@ -213,7 +213,7 @@ _Atomic uint64_t zfs_vdev_file_size_mismatch_cnt = 0;
  * zio transformer for shrinking an abd
  */
 static void
-vdev_file_shrink_abd(zio_t *zio, abd_t *data, uint64_t size)
+vdev_file_io_start_shrink_abd(zio_t *zio, abd_t *data, uint64_t size)
 {
 	ASSERT3U(zio->io_size, ==, size);
 	ASSERT3U(zio->io_size, <=, data->abd_size);
@@ -289,8 +289,8 @@ vdev_file_io_start(zio_t *zio)
 		    abd_t *tabd = abd_alloc_sametype(zio->io_abd, zio->io_size);
 		    abd_copy_off(tabd, zio->io_abd, 0, 0, zio->io_size);
 
-		    VERIFY3U(zio->io_size,>,0);
-		    zio_push_transform(zio, tabd, zio->io_size, zio->io_abd->abd_size, vdev_file_shrink_abd);
+		    VERIFY3U(zio->io_abd->abd_size,>,0); // bufsize != 0 to return abd in zio_pop_transforms
+		    zio_push_transform(zio, tabd, zio->io_size, zio->io_abd->abd_size, vdev_file_io_start_shrink_abd);
 	    }
 
 		void *data;
