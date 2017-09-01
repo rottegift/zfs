@@ -180,6 +180,8 @@ osx_kstat_t osx_kstat = {
 
 	{"zfs_scan_min_time_ms",KSTAT_DATA_UINT64  },
 	{"zfs_resilver_min_time_ms",KSTAT_DATA_UINT64  },
+
+	{"zfs_vdev_file_size_mismatch_cnt",KSTAT_DATA_UINT64  },
 };
 
 
@@ -577,6 +579,8 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 
 		ks->zfs_scan_min_time_ms.value.ui64 = (uint64_t) zfs_scan_min_time_ms;
 		ks->zfs_resilver_min_time_ms.value.ui64 = (uint64_t) zfs_resilver_min_time_ms;
+
+		ks->zfs_vdev_file_size_mismatch_cnt.value.ui64 = zfs_vdev_file_size_mismatch_cnt;
 	}
 
 	return 0;
