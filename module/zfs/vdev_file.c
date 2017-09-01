@@ -279,7 +279,7 @@ vdev_file_io_start(zio_t *zio)
 	     */
 	    if (zio->io_abd->abd_size != zio->io_size) {
 		    zfs_vdev_file_size_mismatch_cnt++;
-		    ASSERT3U(zio->io_abd->abd_size,>,zio->io_size);
+		    VERIFY3U(zio->io_abd->abd_size,>,zio->io_size);
 		    // cf. zio_write_phys()
 #ifdef DEBUG
 		    // this dprintf can be very noisy
@@ -289,7 +289,7 @@ vdev_file_io_start(zio_t *zio)
 		    abd_t *tabd = abd_alloc_sametype(zio->io_abd, zio->io_size);
 		    abd_copy_off(tabd, zio->io_abd, 0, 0, zio->io_size);
 
-		    ASSERT3U(zio->io_size,>,0);
+		    VERIFY3U(zio->io_size,>,0);
 		    zio_push_transform(zio, tabd, zio->io_size, zio->io_abd->abd_size, vdev_file_shrink_abd);
 	    }
 
