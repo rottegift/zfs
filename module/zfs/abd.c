@@ -899,6 +899,9 @@ abd_take_ownership_of_buf(abd_t *abd, boolean_t is_metadata)
 	abd->abd_flags |= ABD_FLAG_OWNER;
 	if (is_metadata) {
 		abd->abd_flags |= ABD_FLAG_META;
+		ABDSTAT_INCR(abdstat_is_metadata_linear, abd->abd_size);
+	} else {
+		ABDSTAT_INCR(abdstat_is_file_data_linear, abd->abd_size);
 	}
 
 	ABDSTAT_BUMP(abdstat_linear_cnt);
