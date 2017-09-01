@@ -209,29 +209,6 @@ vdev_file_close(vdev_t *vd)
  */
 _Atomic uint64_t zfs_vdev_file_size_mismatch_cnt = 0;
 
-/*
- * zio transformer for shrinking an abd
- */
-static void
-vdev_file_io_start_shrink_abd(zio_t *zio, abd_t *data, uint64_t size)
-{
-	ASSERT3U(zio->io_size, ==, size);
-	ASSERT3U(zio->io_size, <=, data->abd_size);
-	VERIFY3U(zio->io_abd, !=, NULL);
-	ASSERT3U(zio->io_abd->abd_size, >=, size);
-
-	if (zio->io_type == ZIO_TYPE_READ) {
-		VERIFY3P(zio->io_abd,!=,NULL);
-		dprintf("ZFS: %s: copying - zio->io_size=0x%llx, zio->io_abd->abd_size=0x%x, data->abd_size=0x%x\n",
-		    __func__, zio->io_size, zio->io_abd->abd_size, data->abd_size);
-		abd_copy_off(data, zio->io_abd, 0, 0, size);
-	} else {
-		printf("ZFS: %s: not copying - zio->io_size=0x%llx, zio->io_abd->abd_size=0x%x, data->abd_size=0x%x\n",
-		    __func__, zio->io_size, zio->io_abd->abd_size, data->abd_size);
-	}
-
-}
-
 static void
 vdev_file_io_start(zio_t *zio)
 {
@@ -273,36 +250,25 @@ vdev_file_io_start(zio_t *zio)
 	    TQ_PUSHPAGE), !=, 0);
 		*/
 
-	    /*
-	     * deal with mismatch between abd_size and io_size :
-	     * make a new abd
-	     */
+#ifdef DEBUG
 	    if (zio->io_abd->abd_size != zio->io_size) {
 		    zfs_vdev_file_size_mismatch_cnt++;
-		    VERIFY3U(zio->io_abd->abd_size,>,zio->io_size);
-		    // cf. zio_write_phys()
-#ifdef DEBUG
+
 		    // this dprintf can be very noisy
 		    printf("ZFS: %s: trimming zio->io_abd from 0x%x to 0x%llx\n",
 			__func__, zio->io_abd->abd_size, zio->io_size);
-#endif
-		    abd_t *tabd = abd_alloc_sametype(zio->io_abd, zio->io_size);
-		    abd_copy_off(tabd, zio->io_abd, 0, 0, zio->io_size);
-
-		    VERIFY3U(zio->io_abd->abd_size,>,0); // bufsize != 0 to return abd in zio_pop_transforms
-		    zio_push_transform(zio, tabd, zio->io_size, zio->io_abd->abd_size, vdev_file_io_start_shrink_abd);
 	    }
-
+#endif
 		void *data;
 
 		if (zio->io_type == ZIO_TYPE_READ) {
 			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
-				abd_borrow_buf(zio->io_abd, zio->io_size);
+				abd_borrow_buf(zio->io_abd, zio->io_abd->abd_size);
 		} else {
 			ASSERT3S(zio->io_abd->abd_size,>=,zio->io_size);
 			data =
-				abd_borrow_buf_copy(zio->io_abd, zio->io_size);
+				abd_borrow_buf_copy(zio->io_abd, zio->io_abd->abd_size);
 		}
 
 		zio->io_error = vn_rdwr(zio->io_type == ZIO_TYPE_READ ?
@@ -313,10 +279,18 @@ vdev_file_io_start(zio_t *zio)
         vnode_put(vf->vf_vnode);
 
 		if (zio->io_type == ZIO_TYPE_READ) {
-			abd_return_buf_copy(zio->io_abd, data, zio->io_size);
+			if (zio->io_abd->abd_size == zio->io_size) {
+				abd_return_buf_copy(zio->io_abd, data, zio->io_size);
+			} else {
+				VERIFY3S(zio->io_abd->abd_size,>=,zio->io_size);
+				abd_return_buf_copy_off(zio->io_abd, data,
+				    0, zio->io_size, zio->io_abd->abd_size);
+			}
 		} else {
-			abd_return_buf(zio->io_abd, data, zio->io_size);
+			VERIFY3S(zio->io_abd->abd_size,>=,zio->io_size);
+			abd_return_buf_off(zio->io_abd, data, 0, zio->io_size, zio->io_abd->abd_size);
 		}
+
     }
 
     if (resid != 0 && zio->io_error == 0)
