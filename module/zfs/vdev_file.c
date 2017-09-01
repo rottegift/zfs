@@ -204,6 +204,11 @@ vdev_file_close(vdev_t *vd)
 	vd->vdev_tsd = NULL;
 }
 
+/*
+ * count the number of mismatches of zio->io_size and zio->io_abd->abd_size below
+ */
+_Atomic uint64_t zfs_vdev_file_size_mismatch_cnt = 0;
+
 static void
 vdev_file_io_start(zio_t *zio)
 {
@@ -250,7 +255,8 @@ vdev_file_io_start(zio_t *zio)
 	     * make a new abd
 	     */
 	    if (zio->io_abd->abd_size != zio->io_size) {
-		    ASSERT3U(zio->io_abd->abd_size,>=,zio->io_size);
+		    zfs_vdev_file_size_mismatch_cnt++;
+		    ASSERT3U(zio->io_abd->abd_size,>,zio->io_size);
 		    // cf. zio_write_phys()
 #ifdef DEBUG
 		    // this dprintf can be very noisy
@@ -260,6 +266,7 @@ vdev_file_io_start(zio_t *zio)
 		    abd_t *tabd = abd_alloc_sametype(zio->io_abd, zio->io_size);
 		    abd_copy_off(tabd, zio->io_abd, 0, 0, zio->io_size);
 
+		    ASSERT3U(zio->io_size,>,0);
 		    zio_push_transform(zio, tabd, zio->io_size, zio->io_size, NULL);
 	    }
 
