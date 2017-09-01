@@ -222,11 +222,11 @@ vdev_file_io_start_shrink_abd(zio_t *zio, abd_t *data, uint64_t size)
 
 	if (zio->io_type == ZIO_TYPE_READ) {
 		VERIFY3P(zio->io_abd,!=,NULL);
-		dprintf("%s: copying - zio->io_size=0x%llx, zio->io_abd->abd_size=0x%x, data->abd_size=0x%x\n",
+		dprintf("ZFS: %s: copying - zio->io_size=0x%llx, zio->io_abd->abd_size=0x%x, data->abd_size=0x%x\n",
 		    __func__, zio->io_size, zio->io_abd->abd_size, data->abd_size);
 		abd_copy_off(data, zio->io_abd, 0, 0, size);
 	} else {
-		printf("%s: not copying - zio->io_size=0x%llx, zio->io_abd->abd_size=0x%x, data->abd_size=0x%x\n",
+		printf("ZFS: %s: not copying - zio->io_size=0x%llx, zio->io_abd->abd_size=0x%x, data->abd_size=0x%x\n",
 		    __func__, zio->io_size, zio->io_abd->abd_size, data->abd_size);
 	}
 
@@ -283,7 +283,7 @@ vdev_file_io_start(zio_t *zio)
 		    // cf. zio_write_phys()
 #ifdef DEBUG
 		    // this dprintf can be very noisy
-		    printf("%s: trimming zio->io_abd from 0x%x to 0x%llx\n",
+		    printf("ZFS: %s: trimming zio->io_abd from 0x%x to 0x%llx\n",
 			__func__, zio->io_abd->abd_size, zio->io_size);
 #endif
 		    abd_t *tabd = abd_alloc_sametype(zio->io_abd, zio->io_size);
