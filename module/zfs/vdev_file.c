@@ -209,6 +209,26 @@ vdev_file_close(vdev_t *vd)
  */
 _Atomic uint64_t zfs_vdev_file_size_mismatch_cnt = 0;
 
+/*
+ * zio transformer for shrinking an abd
+ */
+static void
+vdev_file_shrink_abd(zio_t *zio, abd_t *data, uint64_t size)
+{
+	ASSERT3U(zio->io_size, >, size);
+	ASSERT3U(zio->io_size, <=, data->abd_size);
+	VERIFY3U(zio->io_abd, !=, NULL);
+	ASSERT3U(zio->io_abd->abd_size, >=, size);
+
+	if (zio->io_type == ZIO_TYPE_READ) {
+		VERIFY3P(zio->io_abd,!=,NULL);
+		printf("%s: copying - zio->io_size=0x%llx, zio->io_abd->abd_size=0x%x, data->abd_size=0x%x\n",
+		    __func__, zio->io_size, zio->io_abd->abd_size, data->abd_size);
+		abd_copy_off(data, zio->io_abd, 0, 0, size);
+	}
+
+}
+
 static void
 vdev_file_io_start(zio_t *zio)
 {
@@ -267,7 +287,7 @@ vdev_file_io_start(zio_t *zio)
 		    abd_copy_off(tabd, zio->io_abd, 0, 0, zio->io_size);
 
 		    ASSERT3U(zio->io_size,>,0);
-		    zio_push_transform(zio, tabd, zio->io_size, zio->io_size, NULL);
+		    zio_push_transform(zio, tabd, zio->io_size, zio->io_abd->abd_size, vdev_file_shrink_abd);
 	    }
 
 		void *data;
