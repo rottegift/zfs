@@ -1206,7 +1206,8 @@ ldi_iokit_io_intr(void *target, void *parameter,
 	  return;
 	}
 
-	ASSERT3U(ldi_zfs_handle, !=, 0);
+	// this is very very very noisy in --enable-boot
+	//ASSERT3U(ldi_zfs_handle, !=, 0);
 
 	if (actualByteCount == 0 ||
 	    actualByteCount != lbp->b_bcount ||
