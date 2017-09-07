@@ -6139,7 +6139,7 @@ top:
 			 * For authenticated bp's, we do not ask the ZIO layer
 			 * to authenticate them since this will cause the entire
 			 * IO to fail if the key isn't loaded. Instead, we
-             * defer authentication until arc_buf_fill(), which will
+			 * defer authentication until arc_buf_fill(), which will
 			 * verify the data when the key is available.
 			 */
 			if (BP_IS_AUTHENTICATED(bp))
