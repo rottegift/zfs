@@ -8557,7 +8557,7 @@ l2arc_write_buffers(spa_t *spa, l2arc_dev_t *dev, uint64_t target_sz)
 
 			ASSERT3U(HDR_GET_PSIZE(hdr), >, 0);
 			ASSERT3U(arc_hdr_size(hdr), >, 0);
-			ASSERT(hdr->b_l1hdr.b_pabd !=  NULL ||
+			ASSERT(hdr->b_l1hdr.b_pabd != NULL ||
 			    HDR_HAS_RABD(hdr));
 			uint64_t psize = HDR_GET_PSIZE(hdr);
 			uint64_t asize = vdev_psize_to_asize(dev->l2ad_vdev,
@@ -8579,8 +8579,8 @@ l2arc_write_buffers(spa_t *spa, l2arc_dev_t *dev, uint64_t target_sz)
 			ASSERT(HDR_HAS_L1HDR(hdr));
 
 			ASSERT3U(HDR_GET_PSIZE(hdr), >, 0);
-            ASSERT(hdr->b_l1hdr.b_pabd != NULL ||
-                HDR_HAS_RABD(hdr));
+			ASSERT(hdr->b_l1hdr.b_pabd != NULL ||
+			    HDR_HAS_RABD(hdr));
 
 			/*
  			 * If this header has b_rabd, we can use this since it
