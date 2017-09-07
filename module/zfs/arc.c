@@ -1908,13 +1908,6 @@ arc_buf_try_copy_decompressed_data(arc_buf_t *buf)
 	 * There were no decompressed bufs, so there should not be a
 	 * checksum on the hdr either.
 	 */
-	if (!copied && hdr->b_l1hdr.b_freeze_cksum != NULL) {
-		printf("ZFS: %s: verifying checksum\n", __func__);
-		arc_cksum_verify(buf);
-	}
-	if (hdr->b_l1hdr.b_freeze_cksum == NULL && copied) {
-		printf("ZFS: %s: NULL freeze but copied\n", __func__);
-	}
 #ifdef DEBUG
 	if (zfs_flags & ZFS_DEBUG_MODIFY)
 		EQUIV(!copied, hdr->b_l1hdr.b_freeze_cksum == NULL);
