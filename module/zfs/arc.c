@@ -8130,7 +8130,7 @@ l2arc_read_done(zio_t *zio)
 	 * move it and free the buffer.
 	 */
 	if (cb->l2rcb_abd != NULL) {
-		ASSERT3U(arc_hdr_size(hdr), <, zio->io_size);
+		ASSERT3U(arc_hdr_size(hdr), <=, zio->io_size);
 		ASSERT3U(arc_hdr_size(hdr), <=, hdr->b_l1hdr.b_pabd->abd_size);
 		ASSERT3U(arc_hdr_size(hdr), <=, cb->l2rcb_abd->abd_size);
 		if (zio->io_error == 0) {
