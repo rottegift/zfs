@@ -8377,7 +8377,8 @@ l2arc_apply_transforms(spa_t *spa, arc_buf_hdr_t *hdr, uint64_t asize,
 
 	ASSERT((HDR_GET_COMPRESS(hdr) != ZIO_COMPRESS_OFF &&
 	    !HDR_COMPRESSION_ENABLED(hdr)) ||
-	    HDR_ENCRYPTED(hdr) || HDR_SHARED_DATA(hdr));
+	    HDR_ENCRYPTED(hdr) || HDR_SHARED_DATA(hdr) || psize != asize);
+	ASSERT3U(psize, <=, asize);
 
 	/*
 	 * If this is just a shared buffer, we simply copy the data. Otherwise
