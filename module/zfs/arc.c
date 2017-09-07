@@ -6696,11 +6696,11 @@ arc_write_ready(zio_t *zio)
 	 * written. Therefore, if they're allowed then we allocate one and copy
 	 * the data into it; otherwise, we share the data directly if we can.
 	 */
-    if (ARC_BUF_ENCRYPTED(buf)) {
-        ASSERT(ARC_BUF_COMPRESSED(buf));
-        arc_hdr_alloc_abd(hdr, B_TRUE);
-        abd_copy(hdr->b_crypt_hdr.b_rabd, zio->io_abd, psize);
-    } else if (zfs_abd_scatter_enabled || !arc_can_share(hdr, buf)) {
+	if (ARC_BUF_ENCRYPTED(buf)) {
+		ASSERT(ARC_BUF_COMPRESSED(buf));
+		arc_hdr_alloc_abd(hdr, B_TRUE);
+		abd_copy(hdr->b_crypt_hdr.b_rabd, zio->io_abd, psize);
+	} else if (zfs_abd_scatter_enabled || !arc_can_share(hdr, buf)) {
 		/*
 		 * Ideally, we would always copy the io_abd into b_pabd, but the
 		 * user may have disabled compressed ARC, thus we must check the
