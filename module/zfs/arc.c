@@ -8395,10 +8395,11 @@ l2arc_apply_transforms(spa_t *spa, arc_buf_hdr_t *hdr, uint64_t asize,
 	    !HDR_ENCRYPTED(hdr)) {
 		ASSERT3U(size, ==, psize);
         to_write = abd_alloc_for_io(asize, ismd);
-        abd_copy(to_write, hdr->b_l1hdr.b_pabd, size);
-		if (size != asize)
-			abd_zero_off(to_write, size, asize - size);
-		goto out;
+	ASSERT3S(size,<=,hdr->b_l1hdr.b_pabd->abd_size);
+	abd_copy_off(to_write, hdr->b_l1hdr.b_pabd, 0, 0, size);
+	if (size != asize)
+		abd_zero_off(to_write, size, asize - size);
+	goto out;
 	}
 
 	if (compress != ZIO_COMPRESS_OFF && !HDR_COMPRESSION_ENABLED(hdr)) {
