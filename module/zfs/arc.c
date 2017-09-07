@@ -8131,9 +8131,11 @@ l2arc_read_done(zio_t *zio)
 	 */
 	if (cb->l2rcb_abd != NULL) {
 		ASSERT3U(arc_hdr_size(hdr), <, zio->io_size);
+		ASSERT3U(arc_hdr_size(hdr), <=, hdr->b_l1hdr.b_pabd->abd_size);
+		ASSERT3U(arc_hdr_size(hdr), <=, cb->l2rcb_abd->abd_size);
 		if (zio->io_error == 0) {
-			abd_copy(hdr->b_l1hdr.b_pabd, cb->l2rcb_abd,
-			    arc_hdr_size(hdr));
+			abd_copy_off(hdr->b_l1hdr.b_pabd, cb->l2rcb_abd,
+			    0, 0, arc_hdr_size(hdr));
 		}
 
 		/*
@@ -8677,7 +8679,8 @@ l2arc_write_buffers(spa_t *spa, l2arc_dev_t *dev, uint64_t target_sz)
 			} else {
 				to_write = abd_alloc_for_io(asize,
 				    HDR_ISTYPE_METADATA(hdr));
-				abd_copy(to_write, hdr->b_l1hdr.b_pabd, psize);
+				ASSERT3S(psize, <=, hdr->b_l1hdr.b_pabd->abd_size);
+				abd_copy_off(to_write, hdr->b_l1hdr.b_pabd, 0, 0, psize);
 				if (asize != psize) {
 					abd_zero_off(to_write, psize,
 					    asize - psize);
