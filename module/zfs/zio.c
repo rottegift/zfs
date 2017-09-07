@@ -1541,7 +1541,11 @@ zio_write_compress(zio_t *zio)
 			} else {
 				abd_t *cdata = abd_get_from_buf(cbuf, lsize);
 				abd_take_ownership_of_buf(cdata, B_TRUE);
-				abd_zero_off(cdata, psize, rounded - psize);
+				if (rounded != psize) {
+					// sometimes rounded - psize == 0, bad in DEBUG abd.c
+					ASSERT3U(rounded, >, psize);
+					abd_zero_off(cdata, psize, rounded - psize);
+				}
 				psize = rounded;
 				zio_push_transform(zio, cdata,
 				    psize, lsize, NULL);
