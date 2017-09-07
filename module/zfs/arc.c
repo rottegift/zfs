@@ -6633,6 +6633,7 @@ arc_write_ready(zio_t *zio)
 			arc_hdr_free_abd(hdr, B_TRUE);
 	}
 	ASSERT3P(hdr->b_l1hdr.b_pabd, ==, NULL);
+	ASSERT(!HDR_HAS_RABD(hdr));
 	ASSERT(!HDR_SHARED_DATA(hdr));
 	ASSERT(!arc_buf_is_shared(buf));
 
