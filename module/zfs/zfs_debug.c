@@ -35,7 +35,7 @@ int zfs_dbgmsg_maxsize = 4<<20; /* 4MB */
 /*
  * Enable various debugging features.
  */
-int zfs_flags = 0;
+int zfs_flags = ZFS_DEBUG_MODIFY;
 
 /*
  * zfs_recover can be set to nonzero to attempt to recover from

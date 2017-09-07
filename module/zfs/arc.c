@@ -1908,7 +1908,17 @@ arc_buf_try_copy_decompressed_data(arc_buf_t *buf)
 	 * There were no decompressed bufs, so there should not be a
 	 * checksum on the hdr either.
 	 */
-	EQUIV(!copied, hdr->b_l1hdr.b_freeze_cksum == NULL);
+	if (!copied && hdr->b_l1hdr.b_freeze_cksum != NULL) {
+		printf("ZFS: %s: verifying checksum\n", __func__);
+		arc_cksum_verify(buf);
+	}
+	if (hdr->b_l1hdr.b_freeze_cksum == NULL && copied) {
+		printf("ZFS: %s: NULL freeze but copied\n", __func__);
+	}
+#ifdef DEBUG
+	if (zfs_flags & ZFS_DEBUG_MODIFY)
+		EQUIV(!copied, hdr->b_l1hdr.b_freeze_cksum == NULL);
+#endif
 
 	return (copied);
 }
@@ -2298,7 +2308,10 @@ arc_buf_fill(arc_buf_t *buf, spa_t *spa, uint64_t dsobj, arc_fill_flags_t flags)
 		 */
 		if (arc_buf_try_copy_decompressed_data(buf)) {
 			/* Skip byteswapping and checksumming (already done) */
-			ASSERT3P(hdr->b_l1hdr.b_freeze_cksum, !=, NULL);
+#ifdef DEBUG
+			if (zfs_flags & ZFS_DEBUG_MODIFY)
+				ASSERT3P(hdr->b_l1hdr.b_freeze_cksum, !=, NULL);
+#endif
 			return (0);
 		} else {
 			int error = zio_decompress_data(HDR_GET_COMPRESS(hdr),
