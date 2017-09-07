@@ -8151,8 +8151,8 @@ l2arc_read_done(zio_t *zio)
 	/*
 	 * Check this survived the L2ARC journey.
 	 */
-    ASSERT(zio->io_abd == hdr->b_l1hdr.b_pabd ||
-        (HDR_HAS_RABD(hdr) && zio->io_abd == hdr->b_crypt_hdr.b_rabd));
+	ASSERT(zio->io_abd == hdr->b_l1hdr.b_pabd ||
+	    (HDR_HAS_RABD(hdr) && zio->io_abd == hdr->b_crypt_hdr.b_rabd));
 	zio->io_bp_copy = cb->l2rcb_bp;	/* XXX fix in L2ARC 2.0	*/
 	zio->io_bp = &zio->io_bp_copy;	/* XXX fix in L2ARC 2.0	*/
 
