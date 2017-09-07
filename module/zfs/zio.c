@@ -3366,7 +3366,9 @@ zio_vdev_io_start(zio_t *zio)
 		abd_t *abuf = abd_alloc_sametype(zio->io_abd, asize);
 		ASSERT(vd == vd->vdev_top);
 		if (zio->io_type == ZIO_TYPE_WRITE) {
-			abd_copy(abuf, zio->io_abd, zio->io_size);
+			ASSERT3U(zio->io_size, <=, zio->io_abd->abd_size);
+			ASSERT3U(zio->io_size, <=, abuf->abd_size);
+			abd_copy_off(abuf, zio->io_abd, 0, 0, zio->io_size);
 			abd_zero_off(abuf, zio->io_size, asize - zio->io_size);
 		}
 		zio_push_transform(zio, abuf, asize, asize, zio_subblock);
