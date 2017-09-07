@@ -6710,7 +6710,9 @@ arc_write_ready(zio_t *zio)
             !ARC_BUF_COMPRESSED(buf)) {
             ASSERT3U(psize, >, 0);
             arc_hdr_alloc_abd(hdr, B_FALSE);
-            abd_copy(hdr->b_l1hdr.b_pabd, zio->io_abd, psize);
+	    ASSERT3U(psize, <=, hdr->b_l1hdr.b_pabd->abd_size);
+	    ASSERT3U(psize, <=, zio->io_abd->abd_size);
+            abd_copy_off(hdr->b_l1hdr.b_pabd, zio->io_abd, 0, 0, psize);
         } else {
             ASSERT3U(zio->io_orig_size, ==, arc_hdr_size(hdr));
             arc_hdr_alloc_abd(hdr, B_FALSE);
