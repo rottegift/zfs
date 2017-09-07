@@ -1810,6 +1810,8 @@ arc_buf_freeze(arc_buf_t *buf)
 		return;
 
 	if (ARC_BUF_COMPRESSED(buf)) {
+		ASSERT(hdr->b_l1hdr.b_freeze_cksum == NULL ||
+		    arc_hdr_has_uncompressed_buf(hdr));
 		return;
 	}
 
