@@ -1662,6 +1662,7 @@ arc_cksum_compute(arc_buf_t *buf)
 
 	mutex_enter(&buf->b_hdr->b_l1hdr.b_freeze_lock);
 	if (hdr->b_l1hdr.b_freeze_cksum != NULL) {
+		ASSERT(arc_hdr_has_uncompressed_buf(hdr));
 		mutex_exit(&hdr->b_l1hdr.b_freeze_lock);
 		return;
 	} else if (ARC_BUF_COMPRESSED(buf)) {
