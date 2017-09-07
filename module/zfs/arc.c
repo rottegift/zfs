@@ -6707,22 +6707,22 @@ arc_write_ready(zio_t *zio)
 		 * hdr's compression setting rather than the io_bp's.
 		 */
 		if (BP_IS_ENCRYPTED(bp)) {
-            ASSERT3U(psize, >, 0);
-            arc_hdr_alloc_abd(hdr, B_TRUE);
-            abd_copy(hdr->b_crypt_hdr.b_rabd, zio->io_abd, psize);
-        } else if (arc_hdr_get_compress(hdr) != ZIO_COMPRESS_OFF &&
-            !ARC_BUF_COMPRESSED(buf)) {
-            ASSERT3U(psize, >, 0);
-            arc_hdr_alloc_abd(hdr, B_FALSE);
-	    ASSERT3U(psize, <=, hdr->b_l1hdr.b_pabd->abd_size);
-	    ASSERT3U(psize, <=, zio->io_abd->abd_size);
-            abd_copy_off(hdr->b_l1hdr.b_pabd, zio->io_abd, 0, 0, psize);
-        } else {
-            ASSERT3U(zio->io_orig_size, ==, arc_hdr_size(hdr));
-            arc_hdr_alloc_abd(hdr, B_FALSE);
-            abd_copy_from_buf(hdr->b_l1hdr.b_pabd, buf->b_data,
+			ASSERT3U(psize, >, 0);
+			arc_hdr_alloc_abd(hdr, B_TRUE);
+			abd_copy(hdr->b_crypt_hdr.b_rabd, zio->io_abd, psize);
+		} else if (arc_hdr_get_compress(hdr) != ZIO_COMPRESS_OFF &&
+		    !ARC_BUF_COMPRESSED(buf)) {
+			ASSERT3U(psize, >, 0);
+			arc_hdr_alloc_abd(hdr, B_FALSE);
+			ASSERT3U(psize, <=, hdr->b_l1hdr.b_pabd->abd_size);
+			ASSERT3U(psize, <=, zio->io_abd->abd_size);
+			abd_copy_off(hdr->b_l1hdr.b_pabd, zio->io_abd, 0, 0, psize);
+		} else {
+			ASSERT3U(zio->io_orig_size, ==, arc_hdr_size(hdr));
+			arc_hdr_alloc_abd(hdr, B_FALSE);
+			abd_copy_from_buf(hdr->b_l1hdr.b_pabd, buf->b_data,
 			    arc_buf_size(buf));
-        }
+		}
 	} else {
 		ASSERT3P(buf->b_data, ==, abd_to_buf_ephemeral(zio->io_orig_abd));
 		ASSERT3U(zio->io_orig_size, ==, arc_buf_size(buf));
