@@ -2673,6 +2673,8 @@ arc_change_state(arc_state_t *new_state, arc_buf_hdr_t *hdr,
 				    buf);
 			}
 			ASSERT3U(bufcnt, ==, buffers);
+			ASSERT(hdr->b_l1hdr.b_pabd != NULL ||
+			    HDR_HAS_RABD(hdr));
 
 			if (hdr->b_l1hdr.b_pabd != NULL) {
 				(void) refcount_remove_many(
