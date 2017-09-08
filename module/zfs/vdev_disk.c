@@ -954,14 +954,14 @@ vdev_disk_io_start(zio_t *zio)
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_WRITE)
 			flags = B_WRITE;
 		else
-			flags = B_WRITE;
+			flags = B_WRITE | B_ASYNC;
 		break;
 
 	case ZIO_TYPE_READ:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_READ)
-			flags = B_READ | B_NOCACHE;
+			flags = B_READ;
 		else
-			flags = B_READ | B_NOCACHE;
+			flags = B_READ | B_ASYNC;
 		break;
 
 	default:
