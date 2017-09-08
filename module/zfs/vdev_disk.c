@@ -803,7 +803,7 @@ vdev_disk_ldi_physio(ldi_handle_t vd_lh, caddr_t data,
 	ASSERT(flags & B_READ || flags & B_WRITE);
 
 	bp = getrbuf(KM_SLEEP);
-	bp->b_flags = flags | B_BUSY | B_NOCACHE | B_FAILFAST;
+	bp->b_flags = flags | B_BUSY | B_NOCACHE | B_FAILFAST | B_RAW | B_PASSIVE;
 	bp->b_bcount = size;
 	bp->b_un.b_addr = (void *)data;
 	bp->b_lblkno = lbtodb(offset);
@@ -973,7 +973,7 @@ vdev_disk_io_start(zio_t *zio)
 	ASSERT(zio->io_type == ZIO_TYPE_READ || zio->io_type == ZIO_TYPE_WRITE);
 
 	/* Stop OSX from also caching our data */
-	flags |= B_NOCACHE | B_RAW; // smd: also do B_PASSIVE for anti throttling test
+	flags |= B_NOCACHE | B_RAW | B_PASSIVE; // smd: also do B_PASSIVE for anti throttling test
 
 	zio->io_target_timestamp = zio_handle_io_delay(zio);
 
