@@ -878,12 +878,12 @@ vdev_disk_ioctl_done(void *zio_arg, int error)
 }
 
 static void
-vdev_disk_io_start(zio_t *zio)
+vdev_disk_io_rdwr_strategy(void *arg)
 {
-	vdev_t *vd = zio->io_vd;
+	zio_t *zio = (zio_t *)arg;
+        vdev_t *vd = zio->io_vd;
 	vdev_disk_t *dvd = vd->vdev_tsd;
 	vdev_buf_t *vb;
-	struct dk_callback *dkc;
 #ifdef illumos
 	buf_t *bp;
 #else
@@ -891,66 +891,7 @@ vdev_disk_io_start(zio_t *zio)
 #endif
 	int flags, error = 0;
 
-	/*
-	 * If the vdev is closed, it's likely in the REMOVED or FAULTED state.
-	 * Nothing to be done here but return failure.
-	 */
-	if (dvd == NULL || (dvd->vd_ldi_offline && dvd->vd_lh == NULL)) {
-		zio->io_error = ENXIO;
-		zio_interrupt(zio);
-		return;
-	}
-
 	switch (zio->io_type) {
-	case ZIO_TYPE_IOCTL:
-
-		if (!vdev_readable(vd)) {
-			zio->io_error = SET_ERROR(ENXIO);
-			zio_interrupt(zio);
-			return;
-		}
-
-		switch (zio->io_cmd) {
-		case DKIOCFLUSHWRITECACHE:
-
-			if (zfs_nocacheflush)
-				break;
-
-			if (vd->vdev_nowritecache) {
-				zio->io_error = SET_ERROR(ENOTSUP);
-				break;
-			}
-
-			zio->io_vsd = dkc = kmem_alloc(sizeof (*dkc), KM_SLEEP);
-			zio->io_vsd_ops = &vdev_disk_vsd_ops;
-
-			dkc->dkc_callback = vdev_disk_ioctl_done;
-			dkc->dkc_flag = FLUSH_VOLATILE;
-			dkc->dkc_cookie = zio;
-
-			error = ldi_ioctl(dvd->vd_lh, zio->io_cmd,
-			    (uintptr_t)dkc, FKIOCTL, kcred, NULL);
-
-			if (error == 0) {
-				/*
-				 * The ioctl will be done asychronously,
-				 * and will call vdev_disk_ioctl_done()
-				 * upon completion.
-				 */
-				return;
-			}
-
-			zio->io_error = error;
-
-			break;
-
-		default:
-			zio->io_error = SET_ERROR(ENOTSUP);
-		} /* io_cmd */
-
-		zio_execute(zio);
-		return;
-
 	case ZIO_TYPE_WRITE:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_WRITE)
 			flags = B_WRITE | B_ASYNC;
@@ -1038,6 +979,81 @@ vdev_disk_io_start(zio_t *zio)
 		// zio_interrupt(zio);
 	}
 #endif /* !illumos */
+}
+
+static void
+vdev_disk_io_start(zio_t *zio)
+{
+	vdev_t *vd = zio->io_vd;
+	vdev_disk_t *dvd = vd->vdev_tsd;
+	struct dk_callback *dkc;
+	int error = 0;
+
+	/*
+	 * If the vdev is closed, it's likely in the REMOVED or FAULTED state.
+	 * Nothing to be done here but return failure.
+	 */
+	if (dvd == NULL || (dvd->vd_ldi_offline && dvd->vd_lh == NULL)) {
+		zio->io_error = ENXIO;
+		zio_interrupt(zio);
+		return;
+	}
+
+	switch (zio->io_type) {
+	case ZIO_TYPE_IOCTL:
+
+		if (!vdev_readable(vd)) {
+			zio->io_error = SET_ERROR(ENXIO);
+			zio_interrupt(zio);
+			return;
+		}
+
+		switch (zio->io_cmd) {
+		case DKIOCFLUSHWRITECACHE:
+
+			if (zfs_nocacheflush)
+				break;
+
+			if (vd->vdev_nowritecache) {
+				zio->io_error = SET_ERROR(ENOTSUP);
+				break;
+			}
+
+			zio->io_vsd = dkc = kmem_alloc(sizeof (*dkc), KM_SLEEP);
+			zio->io_vsd_ops = &vdev_disk_vsd_ops;
+
+			dkc->dkc_callback = vdev_disk_ioctl_done;
+			dkc->dkc_flag = FLUSH_VOLATILE;
+			dkc->dkc_cookie = zio;
+
+			error = ldi_ioctl(dvd->vd_lh, zio->io_cmd,
+			    (uintptr_t)dkc, FKIOCTL, kcred, NULL);
+
+			if (error == 0) {
+				/*
+				 * The ioctl will be done asychronously,
+				 * and will call vdev_disk_ioctl_done()
+				 * upon completion.
+				 */
+				return;
+			}
+
+			zio->io_error = error;
+
+			break;
+
+		default:
+			zio->io_error = SET_ERROR(ENOTSUP);
+		} /* io_cmd */
+
+		zio_execute(zio);
+		return;
+	default:
+		break;
+	}
+
+	VERIFY3U(taskq_dispatch(system_taskq, vdev_disk_io_rdwr_strategy, zio,
+		TQ_SLEEP), !=, 0);
 
 }
 
