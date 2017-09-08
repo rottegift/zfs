@@ -954,14 +954,14 @@ vdev_disk_io_start(zio_t *zio)
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_WRITE)
 			flags = B_WRITE;
 		else
-			flags = B_WRITE | B_ASYNC;
+			flags = B_WRITE;
 		break;
 
 	case ZIO_TYPE_READ:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_READ)
-			flags = B_READ;
+			flags = B_READ | B_NOCACHE;
 		else
-			flags = B_READ | B_ASYNC;
+			flags = B_READ | B_NOCACHE;
 		break;
 
 	default:
@@ -973,7 +973,7 @@ vdev_disk_io_start(zio_t *zio)
 	ASSERT(zio->io_type == ZIO_TYPE_READ || zio->io_type == ZIO_TYPE_WRITE);
 
 	/* Stop OSX from also caching our data */
-	flags |= B_NOCACHE | B_RAW | B_PASSIVE; // smd: also do B_PASSIVE for anti throttling test
+	flags |= B_RAW | B_PASSIVE; // smd: also do B_PASSIVE for anti throttling test
 
 	zio->io_target_timestamp = zio_handle_io_delay(zio);
 
