@@ -952,14 +952,14 @@ vdev_disk_io_start(zio_t *zio)
 
 	case ZIO_TYPE_WRITE:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_WRITE)
-			flags = B_WRITE;
+			flags = B_WRITE | B_ASYNC;
 		else
 			flags = B_WRITE | B_ASYNC;
 		break;
 
 	case ZIO_TYPE_READ:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_READ)
-			flags = B_READ;
+			flags = B_READ | B_ASYNC;
 		else
 			flags = B_READ | B_ASYNC;
 		break;
@@ -974,6 +974,7 @@ vdev_disk_io_start(zio_t *zio)
 
 	/* Stop OSX from also caching our data */
 	// flags |= B_RAW | B_PASSIVE; // smd: also do B_PASSIVE for anti throttling test
+	flags |= B_PASSIVE; // smd: also do B_PASSIVE for anti throttling test
 
 	zio->io_target_timestamp = zio_handle_io_delay(zio);
 
