@@ -274,6 +274,7 @@ vdev_queue_max_async_writes(spa_t *spa)
 		zfs_vdev_async_write_active_min_dirty_percent / 100;
 	uint64_t max_bytes =  zfs_dirty_data_max *
 		zfs_vdev_async_write_active_max_dirty_percent / 100;
+
 	/*
 	 * Sync tasks correspond to interactive user actions. To reduce the
 	 * execution time of those actions we push data out as fast as possible.
@@ -299,8 +300,20 @@ vdev_queue_max_async_writes(spa_t *spa)
 		(uint64_t)(
 		(max_bytes - min_bytes) +
 	    zfs_vdev_async_write_min_active);
-	ASSERT3U(writes, >=, zfs_vdev_async_write_min_active);
-	ASSERT3U(writes, <=, zfs_vdev_async_write_max_active);
+#ifdef __APPLE__
+	/* let's avoid type problems here */
+	// ((dirty - min_bytes) * maxact) - {min_active / [(max_b-mi_bn) + min_act]}
+	int64_t product = (dirty - min_bytes) * zfs_vdev_async_write_max_active;
+	int64_t divisor = (max_bytes - min_bytes) + zfs_vdev_async_write_min_active;
+	int64_t quotient = zfs_vdev_async_write_min_active / divisor;
+	int64_t total = product - quotient;
+	ASSERT3S((int64_t)writes, ==, total);
+	ASSERT3S(writes, ==, (int)total);
+	ASSERT3S(total, >=, 0LL);
+#endif
+
+	ASSERT3S((int64_t)writes, >=, (int64_t)zfs_vdev_async_write_min_active);
+	ASSERT3S((int64_t)writes, <=, (int64_t)zfs_vdev_async_write_max_active);
 	return (writes);
 }
 
