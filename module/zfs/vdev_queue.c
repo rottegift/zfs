@@ -310,10 +310,11 @@ vdev_queue_max_async_writes(spa_t *spa)
 	ASSERT3S((int64_t)writes, ==, total);
 	ASSERT3S(writes, ==, (int)total);
 	ASSERT3S(total, >=, 0LL);
+	ASSERT3S(total, <=, zfs_vdev_async_write_max_active);
 #endif
 
-	ASSERT3S((int64_t)writes, >=, (int64_t)zfs_vdev_async_write_min_active);
-	ASSERT3S((int64_t)writes, <=, (int64_t)zfs_vdev_async_write_max_active);
+	ASSERT3S(((int64_t)writes), >=, (int64_t)zfs_vdev_async_write_min_active);
+	ASSERT3U(((int64_t)writes), <=, (int64_t)zfs_vdev_async_write_max_active);
 	return (writes);
 }
 
