@@ -1041,7 +1041,7 @@ vdev_disk_io_start(zio_t *zio)
 #else /* !illumos */
 
 	error = ldi_strategy(dvd->vd_lh, bp);
-	spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
+	spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
 
 	if (error != 0) {
 		dprintf("%s error from ldi_strategy %d\n", __func__, error);
