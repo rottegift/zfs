@@ -957,23 +957,23 @@ vdev_disk_io_start(zio_t *zio)
 			flags = B_WRITE;
 			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
-			flags = B_WRITE | B_ASYNC;
-			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
+			flags = B_WRITE | B_ASYNC | B_PASSIVE;
+			spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
 		} else {
-			flags = B_WRITE | B_ASYNC;
-		}       spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
+			flags = B_WRITE | B_ASYNC | B_PASSIVE;
+		}       spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
 		break;
 
 	case ZIO_TYPE_READ:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_READ) {
-			flags = B_READ;
-			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
+			flags = B_READ | B_PASSIVE;
+			spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
-			flags = B_READ | B_ASYNC;
-			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
+			flags = B_READ | B_ASYNC | B_PASSIVE;
+			spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
 		} else {
-			flags = B_READ | B_ASYNC;
-			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
+			flags = B_READ | B_ASYNC | B_PASSIVE;
+			spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
 		}
 		break;
 
@@ -1041,7 +1041,7 @@ vdev_disk_io_start(zio_t *zio)
 #else /* !illumos */
 
 	error = ldi_strategy(dvd->vd_lh, bp);
-	spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
+	spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
 
 	if (error != 0) {
 		dprintf("%s error from ldi_strategy %d\n", __func__, error);
