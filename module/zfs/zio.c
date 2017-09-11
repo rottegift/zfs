@@ -3368,8 +3368,11 @@ zio_vdev_io_start(zio_t *zio)
 	    zio->io_txg != spa_syncing_txg(spa)) {
 		uint64_t old = spa->spa_last_io;
 		uint64_t new = ddi_get_lbolt64();
+		uint64_t res = 0;
+		ASSERT3U(old,<=,new);
 		if (old != new)
-			(void) atomic_cas_64(&spa->spa_last_io, old, new);
+			res = atomic_cas_64(&spa->spa_last_io, old, new);
+		ASSERT3U(res,==,old);
 	}
 
 	align = 1ULL << vd->vdev_top->vdev_ashift;
