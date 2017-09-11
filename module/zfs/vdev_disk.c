@@ -958,10 +958,10 @@ vdev_disk_io_start(zio_t *zio)
 			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
 			flags = B_WRITE | B_ASYNC;
-			spl_throttle_set_thread_io_policy(IOPOL_THROTTLE);
+			spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
 		} else {
 			flags = B_WRITE | B_ASYNC;
-		}       spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
+		}       spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		break;
 
 	case ZIO_TYPE_READ:
@@ -970,10 +970,10 @@ vdev_disk_io_start(zio_t *zio)
 			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
 			flags = B_READ | B_ASYNC;
-			spl_throttle_set_thread_io_policy(IOPOL_THROTTLE);
+			spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
 		} else {
 			flags = B_READ | B_ASYNC;
-			spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
+			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		}
 		break;
 
