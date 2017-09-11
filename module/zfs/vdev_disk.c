@@ -35,7 +35,7 @@
 /* XXX If renamed to sunldi.h, no ifdef required */
 #include <sys/ldi_osx.h>
 #include <sys/resource.h>
-extern void throttle_set_thread_io_policy(int policy);
+extern void spl_throttle_set_thread_io_policy(int policy);
 #else
 #include <sys/sunldi.h>
 #endif
@@ -955,25 +955,25 @@ vdev_disk_io_start(zio_t *zio)
 	case ZIO_TYPE_WRITE:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_WRITE) {
 			flags = B_WRITE;
-			throttle_set_thread_io_policy(IOPOL_IMPORTANT);
+			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
 			flags = B_WRITE | B_ASYNC;
-			throttle_set_thread_io_policy(IOPOL_THROTTLE);
+			spl_throttle_set_thread_io_policy(IOPOL_THROTTLE);
 		} else {
 			flags = B_WRITE | B_ASYNC;
-		}       throttle_set_thread_io_policy(IOPOL_STANDARD);
+		}       spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
 		break;
 
 	case ZIO_TYPE_READ:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_READ) {
 			flags = B_READ;
-			throttle_set_thread_io_policy(IOPOL_IMPORTANT);
+			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
 			flags = B_READ | B_ASYNC;
-			throttle_set_thread_io_policy(IOPOL_THROTTLE);
+			spl_throttle_set_thread_io_policy(IOPOL_THROTTLE);
 		} else {
 			flags = B_READ | B_ASYNC;
-			throttle_set_thread_io_policy(IOPOL_STANDARD);
+			spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
 		}
 		break;
 
@@ -1041,7 +1041,7 @@ vdev_disk_io_start(zio_t *zio)
 #else /* !illumos */
 
 	error = ldi_strategy(dvd->vd_lh, bp);
-	throttle_set_thread_io_policy(IOPOL_DEFAULT);
+	spl_throttle_set_thread_io_policy(IOPOL_DEFAULT);
 
 	if (error != 0) {
 		dprintf("%s error from ldi_strategy %d\n", __func__, error);
