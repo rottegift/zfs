@@ -958,7 +958,7 @@ vdev_disk_io_start(zio_t *zio)
 			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
 			flags = B_WRITE | B_ASYNC;
-			spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
+			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else {
 			flags = B_WRITE | B_ASYNC;
 		}       spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
@@ -970,7 +970,7 @@ vdev_disk_io_start(zio_t *zio)
 			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
 			flags = B_READ | B_ASYNC;
-			spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
+			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else {
 			flags = B_READ | B_ASYNC;
 			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
@@ -1041,7 +1041,7 @@ vdev_disk_io_start(zio_t *zio)
 #else /* !illumos */
 
 	error = ldi_strategy(dvd->vd_lh, bp);
-	spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
+	spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 
 	if (error != 0) {
 		dprintf("%s error from ldi_strategy %d\n", __func__, error);
