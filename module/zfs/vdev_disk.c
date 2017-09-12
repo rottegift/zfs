@@ -1044,11 +1044,10 @@ vdev_disk_io_start(zio_t *zio)
 	spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
 
 	if (error != 0) {
-		dprintf("%s error from ldi_strategy %d\n", __func__, error);
+		printf("%s error from ldi_strategy %d\n", __func__, error);
 		zio->io_error = EIO;
 		kmem_free(vb, sizeof (vdev_buf_t));
-		zio_execute(zio);
-		// zio_interrupt(zio);
+		zio_interrupt(zio);
 	}
 #endif /* !illumos */
 
