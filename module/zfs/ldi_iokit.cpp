@@ -430,11 +430,11 @@ handle_sync_iokit(struct ldi_handle *lhp)
 	if (LH_MEDIA(lhp)->synchronize(LH_CLIENT(lhp), 0, 0, kIOStorageSynchronizeOptionBarrier) !=
 	    kIOReturnSuccess) {
 	  printf("%s %s\n", __func__,
-		       "IOMedia synchronizeCache (with write barrier) failed");
+		       "ZFS: IOMedia synchronizeCache (with write barrier) failed");
 		if (LH_MEDIA(lhp)->synchronize(LH_CLIENT(lhp), 0, 0, 0) !=
 		    kIOReturnSuccess) {
 		  printf("%s %s\n", __func__,
-			 "IOMedia synchronizeCache (standard) failed");
+			 "ZFS: IOMedia synchronizeCache (standard) failed");
 			    return (ENOTSUP);
 		}
 	}
