@@ -2016,10 +2016,23 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 		while (spa->spa_scrub_inflight >= maxinflight)
 			cv_wait(&spa->spa_scrub_io_cv, &spa->spa_scrub_lock);
 #else
+		/*
+		 * We get stuck here for 6 iterations of the loop when
+		 * the user is logged into the GUI, unless there is traffic
+		 * on one of the vds.
+		 *
+		 * We need to unstick things here somehow, for example:
+		 * expt: zio_flush(zio_root(spa, NULL, NULL, ZIO_FLAG_CANFAIL), vd);
+		 * expt2: wake up prefetcher now
+		 * or figure out why zio_done isn't happening (no call to _done func)
+		 * or why we aren't getting spa_scrub_inflight reducing
+		 */
 		clock_t begin = ddi_get_lbolt();
 		for (int i = 0; spa->spa_scrub_inflight >= maxinflight; i++) {
 			cv_timedwait(&spa->spa_scrub_io_cv, &spa->spa_scrub_lock,
 			    ddi_get_lbolt() + (hz << 2));
+			/* update maxinflight in case of sysctl */
+			maxinflight = rvd->vdev_children * zfs_top_maxinflight;
 			if (spa->spa_scrub_inflight < maxinflight)
 				break;
 			printf("ZFS: %s: loop %d seconds %llu inflight %llu\n",
