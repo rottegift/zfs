@@ -2012,8 +2012,21 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 		uint64_t maxinflight = rvd->vdev_children * zfs_top_maxinflight;
 
 		mutex_enter(&spa->spa_scrub_lock);
+#ifndef __APPLE__
 		while (spa->spa_scrub_inflight >= maxinflight)
 			cv_wait(&spa->spa_scrub_io_cv, &spa->spa_scrub_lock);
+#else
+		clock_t begin = ddi_get_lbolt();
+		for (int i = 0; spa->spa_scrub_inflight >= maxinflight; i++) {
+			cv_timedwait(&spa->spa_scrub_io_cv, &spa->spa_scrub_lock,
+			    ddi_get_lbolt() + (hz << 2));
+			if (spa->spa_scrub_inflight < maxinflight)
+				break;
+			printf("ZFS: %s: loop %d seconds %llu inflight %llu\n",
+			    __func__, i,
+			    (ddi_get_lbolt() - begin)/hz, spa->spa_scrub_inflight);
+		}
+#endif
 		spa->spa_scrub_inflight++;
 		mutex_exit(&spa->spa_scrub_lock);
 
