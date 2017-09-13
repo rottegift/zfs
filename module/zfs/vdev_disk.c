@@ -944,7 +944,7 @@ vdev_disk_io_start(zio_t *zio)
 
 			vd->vdev_cache_flush_count--;
 			const hrtime_t flushend = gethrtime();
-			const hrtime_t flushtime = flushstart - flushend;
+			const hrtime_t flushtime = flushend- flushstart;
 
 			if (flushtime >= SEC2NSEC(5)) {
 				printf("ZFS: %s: long flush %lld ms ( p: %s d: %s pp: %s)\n",
@@ -1062,8 +1062,24 @@ vdev_disk_io_start(zio_t *zio)
 	VERIFY(ldi_strategy(dvd->vd_lh, bp) == 0);
 #else /* !illumos */
 
+	const hrtime_t iostart = gethrtime();
+
 	error = ldi_strategy(dvd->vd_lh, bp);
 	spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
+
+	const hrtime_t ioend = gethrtime();
+	const hrtime_t iotime = ioend - iostart;
+
+	if (iotime > SEC2NSEC(5)) {
+		printf("ZFS: %s: long I/O %lld ms ( p: %s d: %s pp: %s, err: %d, ziop: %d, ziot %d\n",
+		    __func__, NSEC2MSEC(iotime),
+		    vd->vdev_path? vd->vdev_path : "(null)",
+		    vd->vdev_devid ? vd->vdev_devid : "(null)",
+		    vd->vdev_physpath ? vd->vdev_physpath : "(null)",
+		    error,
+		    zio->io_priority, zio->io_type);
+	}
+
 
 	if (error != 0) {
 		printf("%s error from ldi_strategy %d\n", __func__, error);
