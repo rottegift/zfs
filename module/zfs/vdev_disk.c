@@ -922,6 +922,16 @@ vdev_disk_io_start(zio_t *zio)
 				break;
 			}
 
+			if (vd->vdev_cache_flush_count > 0) {
+				printf("ZFS: %s: flush count %d (p: %s d: %s pp: %s)\n",
+				    __func__, vd->vdev_cache_flush_count,
+				    vd->vdev_path? vd->vdev_path : "(null)",
+				    vd->vdev_devid ? vd->vdev_devid : "(null)",
+				    vd->vdev_physpath ? vd->vdev_physpath : "(null)");
+			}
+			vd->vdev_cache_flush_count++;
+			const hrtime_t flushstart = gethrtime();
+
 			zio->io_vsd = dkc = kmem_alloc(sizeof (*dkc), KM_SLEEP);
 			zio->io_vsd_ops = &vdev_disk_vsd_ops;
 
@@ -931,6 +941,18 @@ vdev_disk_io_start(zio_t *zio)
 
 			error = ldi_ioctl(dvd->vd_lh, zio->io_cmd,
 			    (uintptr_t)dkc, FKIOCTL, kcred, NULL);
+
+			vd->vdev_cache_flush_count--;
+			const hrtime_t flushend = gethrtime();
+			const hrtime_t flushtime = flushstart - flushend;
+
+			if (flushtime >= SEC2NSEC(5)) {
+				printf("ZFS: %s: long flush %lld ms ( p: %s d: %s pp: %s)\n",
+                                    __func__, NSEC2MSEC(flushtime),
+                                    vd->vdev_path? vd->vdev_path : "(null)",
+                                    vd->vdev_devid ? vd->vdev_devid : "(null)",
+			            vd->vdev_physpath ? vd->vdev_physpath : "(null)");
+			}
 
 			if (error == 0) {
 				/*
