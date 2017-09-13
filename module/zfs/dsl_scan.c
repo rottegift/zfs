@@ -2026,6 +2026,15 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 		 * expt2: wake up prefetcher now
 		 * or figure out why zio_done isn't happening (no call to _done func)
 		 * or why we aren't getting spa_scrub_inflight reducing
+		 *
+		 * Update: setting maxinflight very high (1024) overcomes this
+		 * so new logic, if we're stuck in this loop, go above maxinflight
+		 * for this spa anyway because it's better than stalling.
+		 *
+		 * If we've been in here for a second, then dribble out another
+		 * transaction every 10 milliseconds.
+		 *
+		 * Count dribbles and report them after exiting the loop
 		 */
 		clock_t begin = ddi_get_lbolt();
 		for (int i = 0; spa->spa_scrub_inflight >= maxinflight; i++) {
