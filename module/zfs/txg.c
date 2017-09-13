@@ -236,8 +236,8 @@ txg_thread_exit(tx_state_t *tx, callb_cpr_t *cpr, kthread_t **tpp)
 	thread_exit();
 }
 
-static void
-txg_thread_wait(tx_state_t *tx, callb_cpr_t *cpr, kcondvar_t *cv, clock_t time)
+void
+txg_thread_wait(tx_state_t *tx, callb_cpr_t *cpr, kcondvar_t *cv, clock_t time) __attribute__((noinline))
 {
 	CALLB_CPR_SAFE_BEGIN(cpr);
 
