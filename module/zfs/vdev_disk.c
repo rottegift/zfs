@@ -922,7 +922,7 @@ vdev_disk_io_start(zio_t *zio)
 				break;
 			}
 
-			if (vd->vdev_cache_flush_count > 0) {
+			if (vd->vdev_cache_flush_count > 1) {
 				printf("ZFS: %s: flush count %d (p: %s d: %s pp: %s)\n",
 				    __func__, vd->vdev_cache_flush_count,
 				    vd->vdev_path? vd->vdev_path : "(null)",
