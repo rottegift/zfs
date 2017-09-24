@@ -61,16 +61,32 @@
 #include <sys/ldi_impl_osx.h>
 
 /* Debug prints */
+
 #if defined(DEBUG) || defined(ZFS_DEBUG)
-
-#ifdef dprintf
-#undef dprintf
+#ifdef	dprintf
+#undef	dprintf
 #endif
-
-#define	dprintf(fmt, ...) do {		\
-	IOLog(fmt, __VA_ARGS__);	\
+#define	dprintf(fmt, ...) do {							\
+    if (zfs_flags & ZFS_DEBUG_DPRINTF)					        \
+	IOLog("ZFS: ldi_iokit %s " fmt "\n", __func__, ##__VA_ARGS__);	\
 _NOTE(CONSTCOND) } while (0)
+#else
+
+#ifndef dprintf
+#define	dprintf(fmt, ...)	do { } while (0);
 #endif
+#endif /* if DEBUG or ZFS_DEBUG */
+
+#ifndef ddprintf
+#if defined(DEBUG) || defined(ZFS_DEBUG)
+#define ddprintf(fmt, ...) do {                                                   \
+  IOLog("ZFS: ldi_iokit %s " fmt "\n", __func__, ##__VA_ARGS__);           \
+_NOTE(CONSTCOND) } while (0)
+#else
+#define ddprintf(fmt, ...)      do { } while (0)
+#endif
+#endif
+
 
 /* Attach created IOService objects to the IORegistry under ZFS. */
 // #define	LDI_IOREGISTRY_ATTACH
@@ -429,11 +445,11 @@ handle_sync_iokit(struct ldi_handle *lhp)
 	/* Issue device sync */
 	if (LH_MEDIA(lhp)->synchronize(LH_CLIENT(lhp), 0, 0, kIOStorageSynchronizeOptionBarrier) !=
 	    kIOReturnSuccess) {
-	  printf("%s %s\n", __func__,
+	  ddprintf("%s %s\n", __func__,
 		       "ZFS: IOMedia synchronizeCache (with write barrier) failed");
 		if (LH_MEDIA(lhp)->synchronize(LH_CLIENT(lhp), 0, 0, 0) !=
 		    kIOReturnSuccess) {
-		  printf("%s %s\n", __func__,
+		  ddprintf("%s %s\n", __func__,
 			 "ZFS: IOMedia synchronizeCache (standard) failed");
 			    return (ENOTSUP);
 		}
@@ -1200,14 +1216,14 @@ ldi_iokit_io_intr(void *target, void *parameter,
 	ASSERT3U(iobp, !=, 0);
 
 	if (!iobp || !lbp) {
-		printf("%s missing a buffer\n", __func__);
+		ddprintf("%s missing a buffer\n", __func__);
 		return;
 	}
 
 	ASSERT3U(iobp->iomem, !=, 0);
 
 	if (!iobp->iomem) {
-	  printf("%s missing iobp->iomem\n", __func__);
+	  ddprintf("%s missing iobp->iomem\n", __func__);
 	  return;
 	}
 
@@ -1217,15 +1233,15 @@ ldi_iokit_io_intr(void *target, void *parameter,
 	if (actualByteCount == 0 ||
 	    actualByteCount != lbp->b_bcount ||
 	    status != kIOReturnSuccess) {
-		printf("%s %s %llx / %llx\n", __func__,
+		ddprintf("%s %s %llx / %llx\n", __func__,
 		    "actualByteCount != lbp->b_bcount",
 		    actualByteCount, lbp->b_bcount);
 		if (ldi_zfs_handle)
-		  printf("%s status %d %d %s\n", __func__, status,
+		  dprintf("%s status %d %d %s\n", __func__, status,
 			 ldi_zfs_handle->errnoFromReturn(status),
 			 ldi_zfs_handle->stringFromReturn(status));
 		else
-		  printf("%s status %d ldi_zfs_handle is NULL\n",
+		  dprintf("%s status %d ldi_zfs_handle is NULL\n",
 			 __func__, status);
 	}
 #endif

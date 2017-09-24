@@ -9017,7 +9017,7 @@ l2arc_stop(void)
 }
 
 #ifdef __APPLE__
-#undef ZDB_DEBUG
+#define ZDB_DEBUG
 #ifdef _KERNEL
 #define fprintf(...)
 #elif !defined(ZDB_DEBUG)

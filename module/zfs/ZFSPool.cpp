@@ -40,13 +40,24 @@ extern "C" {
 #undef	dprintf
 #endif
 #define	dprintf(fmt, ...) do {						\
-	printf("ZFSPool %s " fmt "\n", __func__, ##__VA_ARGS__);	\
+  if (zfs_flags & ZFS_DEBUG_DPRINTF)                                    \
+	printf("ZFS: ZFSPool %s " fmt "\n", __func__, ##__VA_ARGS__);	\
 _NOTE(CONSTCOND) } while (0)
 #else
 #ifndef dprintf
 #define	dprintf(fmt, ...)	do { } while (0);
 #endif
 #endif /* if DEBUG or ZFS_DEBUG */
+
+#ifndef ddprintf
+#if defined(DEBUG) || defined(ZFS_DEBUG)
+#define ddprintf(fmt, ...) do {                                          \
+  IOLog("ZFS: ZFSPool %s " fmt "\n", __func__, ##__VA_ARGS__);           \
+_NOTE(CONSTCOND) } while (0)
+#else
+#define ddprintf(fmt, ...)      do { } while (0)
+#endif
+#endif
 
 #define	DPRINTF_FUNC()	do { dprintf("%s\n", __func__); } while (0);
 
@@ -73,7 +84,7 @@ copy_zfs_handle()
 	}
 
 	if (!service) {
-		dprintf("couldn't get zfs IOService");
+		ddprintf("couldn't get zfs IOService");
 		return (NULL);
 	}
 
@@ -82,7 +93,7 @@ copy_zfs_handle()
 	/* Got service, make sure it casts */
 	zfs_hl = OSDynamicCast(net_lundman_zfs_zvol, service);
 	if (zfs_hl == NULL) {
-		dprintf("couldn't get zfs_hl");
+		ddprintf("couldn't get zfs_hl");
 		/* Drop retain from copyMatchingService */
 		OSSafeReleaseNULL(service);
 		return (NULL);
@@ -171,7 +182,7 @@ ZFSPool::handleClose(IOService *client,
 	/* XXX IOService close() locks for arbitration around handleClose */
 	//lockForArbitration();
 	if (_openClients->containsObject(client) == false) {
-		dprintf("not open");
+		ddprintf("not open");
 	}
 	/* Remove client from set */
 	_openClients->removeObject(client);
@@ -220,14 +231,14 @@ ZFSPool::setPoolName(const char *name)
 	/* Validate arguments */
 	if (!name || (len = strnlen(name,
 	    ZFS_MAX_DATASET_NAME_LEN)) == 0) {
-		dprintf("missing argument");
+		ddprintf("missing argument");
 		return (false);
 	}
 
 	/* Truncate too-long names (shouldn't happen) */
 	if (len == ZFS_MAX_DATASET_NAME_LEN &&
 	    name[ZFS_MAX_DATASET_NAME_LEN] != '\0') {
-		dprintf("name too long [%s]", name);
+		ddprintf("name too long [%s]", name);
 		/* XXX Just truncate the name */
 		len--;
 	}
@@ -235,7 +246,7 @@ ZFSPool::setPoolName(const char *name)
 	/* Allocate room for name plus null char */
 	newname = (char *)kmem_alloc(len+1, KM_SLEEP);
 	if (!newname) {
-		dprintf("string alloc failed");
+		ddprintf("string alloc failed");
 		return (false);
 	}
 	snprintf(newname, len+1, "%s", name);
@@ -245,7 +256,7 @@ ZFSPool::setPoolName(const char *name)
 	dsstr = OSString::withCString(newname);
 	//dsstr = OSSymbol::withCString(newname);
 	if (!dsstr) {
-		dprintf("OSString failed");
+		ddprintf("OSString failed");
 		kmem_free(newname, len+1);
 		return (false);
 	}
@@ -264,7 +275,7 @@ ZFSPool::setPoolName(const char *name)
 	if ((dict = OSDynamicCast(OSDictionary,
 	    getProperty(kIOPropertyDeviceCharacteristicsKey))) == NULL ||
 	    (dict = OSDictionary::withDictionary(dict)) == NULL) {
-		dprintf("couldn't clone prop dict");
+		ddprintf("couldn't clone prop dict");
 		/* Should only happen during initialization */
 	}
 
@@ -274,7 +285,7 @@ ZFSPool::setPoolName(const char *name)
 		    dsstr) == false ||
 		    setProperty(kIOPropertyDeviceCharacteristicsKey,
 		    dict) == false) {
-			dprintf("couldn't set name");
+			ddprintf("couldn't set name");
 			OSSafeReleaseNULL(dsstr);
 			OSSafeReleaseNULL(dict);
 			return (false);
@@ -325,7 +336,7 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 	logSize = OSNumber::withNumber((uint32_t)ZFS_POOL_DEV_BSIZE, 32);
 #endif
 	if (!spa) {
-		dprintf("missing spa");
+		ddprintf("missing spa");
 		goto error;
 	}
 
@@ -350,7 +361,7 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 	/* Validate allocations */
 	if (!pdict || !ddict || !virtualSymbol || !locationSymbol ||
 	    !ssdSymbol || !physSize || !logSize) {
-		dprintf("allocation failed");
+		ddprintf("allocation failed");
 		goto error;
 	}
 #endif
@@ -358,13 +369,13 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 	/* Need an OSSet for open clients */
 	_openClients = OSSet::withCapacity(1);
 	if (_openClients == NULL) {
-		dprintf("client OSSet failed");
+		ddprintf("client OSSet failed");
 		goto error;
 	}
 
 	/* Set spa pointer and this Pool object's name to match */
 	if (!spa) {
-		dprintf("missing spa");
+		ddprintf("missing spa");
 		goto error;
 	}
 	_spa = spa;
@@ -406,14 +417,14 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 	revisionSymbol = OSSymbol::withCString(revisionString);
 	blankSymbol = OSSymbol::withCString("");
 	if (!vendorSymbol || !revisionSymbol || !blankSymbol) {
-		dprintf("class symbols failed");
+		ddprintf("class symbols failed");
 		goto error;
 	}
 #endif
 
 	/* Call super init */
 	if (IOService::init(properties) == false) {
-		dprintf("device init failed");
+		ddprintf("device init failed");
 		goto error;
 	}
 
@@ -427,7 +438,7 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 	    locationSymbol) == false ||
 	    pdict->setObject(kIOPropertyPhysicalInterconnectTypeKey,
 	    virtualSymbol) == false) {
-		dprintf("pdict set properties failed");
+		ddprintf("pdict set properties failed");
 		goto error;
 	}
 	setProperty(kIOPropertyProtocolCharacteristicsKey, pdict);
@@ -445,7 +456,7 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 	    logSize) == false ||
 	    ddict->setObject(kIOPropertyMediumTypeKey,
 	    ssdSymbol) == false) {
-		dprintf("ddict set properties failed");
+		ddprintf("ddict set properties failed");
 		goto error;
 	}
 	setProperty(kIOPropertyDeviceCharacteristicsKey, ddict);
@@ -455,7 +466,7 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 	    properties->getObject(kZFSPoolReadOnlyKey))) != NULL) {
 		/* Got the boolean */
 		isReadOnly = rdonly->getValue();
-		dprintf("set %s", (isReadOnly ? "readonly" : "readwrite"));
+		ddprintf("set %s", (isReadOnly ? "readonly" : "readwrite"));
 	}
 
 	/* Check for passed in pool GUID */
@@ -464,13 +475,13 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 		/* Got the string, try to set GUID */
 		str->retain();
 		if (ddict->setObject(kZFSPoolGUIDKey, str) == false) {
-			dprintf("couldn't set GUID");
+			ddprintf("couldn't set GUID");
 			OSSafeReleaseNULL(str);
 			goto error;
 		}
 #ifdef DEBUG
 		cstr = str->getCStringNoCopy();
-		dprintf("set GUID");
+		ddprintf("set GUID");
 		cstr = 0;
 #endif
 		OSSafeReleaseNULL(str);
@@ -478,7 +489,7 @@ ZFSPool::init(OSDictionary *properties, spa_t *spa)
 #endif
 
 	if (setPoolName(spa_name(spa)) == false) {
-		dprintf("setPoolName failed");
+		ddprintf("setPoolName failed");
 		goto error;
 	}
 
@@ -495,20 +506,20 @@ dprintf("space %llu", space);
 		str->retain();
 		if (setPoolName(cstr) == false) {
 			/* Unlikely */
-			dprintf("couldn't setup pool"
+			ddprintf("couldn't setup pool"
 			    " name property [%s]", cstr);
 			OSSafeReleaseNULL(str);
 			goto error;
 		}
 
-		dprintf("set pool name [%s]", cstr);
+		ddprintf("set pool name [%s]", cstr);
 		OSSafeReleaseNULL(str);
 	} else {
 		if (setPoolName("invalid") == false) {
 			dprintf("setPoolName failed");
 			goto error;
 		}
-		dprintf("set name [invalid]");
+		ddprintf("set name [invalid]");
 	}
 #endif
 
@@ -566,7 +577,7 @@ spa_iokit_pool_proxy_destroy(spa_t *spa)
 	spa_iokit_t *wrapper;
 
 	if (!spa) {
-		printf("missing spa");
+		ddprintf("missing spa");
 		return;
 	}
 
@@ -575,7 +586,7 @@ spa_iokit_pool_proxy_destroy(spa_t *spa)
 	spa->spa_iokit_proxy = NULL;
 
 	if (wrapper == NULL) {
-		printf("missing spa_iokit_proxy");
+		ddprintf("missing spa_iokit_proxy");
 		return;
 	}
 
@@ -584,13 +595,13 @@ spa_iokit_pool_proxy_destroy(spa_t *spa)
 	/* Free the struct */
 	kmem_free(wrapper, sizeof(spa_iokit_t));
 	if (!proxy) {
-		printf("missing proxy");
+		ddprintf("missing proxy");
 		return;
 	}
 
 	if (proxy->terminate(kIOServiceSynchronous|
 	    kIOServiceRequired) == false) {
-		dprintf("terminate failed");
+		ddprintf("terminate failed");
 	}
 	proxy->release();
 
@@ -613,20 +624,20 @@ spa_iokit_pool_proxy_create(spa_t *spa)
 	spa_iokit_t *wrapper;
 
 	if (!spa) {
-		dprintf("missing spa");
+		ddprintf("missing spa");
 		return (EINVAL);
 	}
 
 	/* Allocate C struct */
 	if ((wrapper = (spa_iokit_t *)kmem_alloc(sizeof (spa_iokit_t),
 	    KM_SLEEP)) == NULL) {
-		dprintf("couldn't allocate wrapper");
+		ddprintf("couldn't allocate wrapper");
 		return (ENOMEM);
 	}
 
 	/* Get ZFS IOService */
 	if ((zfs_hl = copy_zfs_handle()) == NULL) {
-		dprintf("couldn't get ZFS handle");
+		ddprintf("couldn't get ZFS handle");
 		kmem_free(wrapper, sizeof (spa_iokit_t));
 		return (ENODEV);
 	}
@@ -634,7 +645,7 @@ spa_iokit_pool_proxy_create(spa_t *spa)
 	/* Allocate and init ZFS pool proxy */
 	proxy = ZFSPool::withProviderAndPool(zfs_hl, spa);
 	if (!proxy) {
-		dprintf("Pool proxy creation failed");
+		ddprintf("Pool proxy creation failed");
 		kmem_free(wrapper, sizeof (spa_iokit_t));
 		OSSafeReleaseNULL(zfs_hl);
 		return (ENOMEM);
@@ -657,19 +668,19 @@ ZFSPool::withProviderAndPool(IOService *zfs_hl, spa_t *spa)
 	ZFSPool *proxy = new ZFSPool;
 
 	if (!proxy) {
-		printf("allocation failed");
+		ddprintf("allocation failed");
 		return (0);
 	}
 
 	if (proxy->init(0, spa) == false ||
 	    proxy->attach(zfs_hl) == false) {
-		printf("init/attach failed");
+		ddprintf("init/attach failed");
 		OSSafeReleaseNULL(proxy);
 		return (0);
 	}
 
 	if (proxy->start(zfs_hl) == false) {
-		printf("start failed");
+		ddprintf("start failed");
 		proxy->detach(zfs_hl);
 		OSSafeReleaseNULL(proxy);
 		return (0);
@@ -678,7 +689,7 @@ ZFSPool::withProviderAndPool(IOService *zfs_hl, spa_t *spa)
 	/* Open zfs_hl, adding proxy to its open clients */
 	//if (proxy->open(zfs_hl) == false) {
 	if (zfs_hl->open(proxy) == false) {
-		printf("open failed");
+		ddprintf("open failed");
 		proxy->stop(zfs_hl);
 		proxy->detach(zfs_hl);
 		OSSafeReleaseNULL(proxy);

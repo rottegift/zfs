@@ -27,17 +27,30 @@
 #include <sys/ZFSPool.h>
 
 #if defined(DEBUG) || defined(ZFS_DEBUG)
+#include <sys/multilist.h>
+#include <sys/zfs_debug.h>
 #ifdef	dprintf
 #undef	dprintf
 #endif
 #define	dprintf(fmt, ...) do {						\
-	IOLog("ZFSDatasetProxy %s " fmt "\n", __func__, ##__VA_ARGS__);	\
+  if (zfs_flags & ZFS_DEBUG_DPRINTF)                                    \
+	IOLog("ZFS: ZFSDatasetProxy %s " fmt "\n", __func__, ##__VA_ARGS__);	\
 _NOTE(CONSTCOND) } while (0)
 #else
 #ifndef dprintf
 #define	dprintf(fmt, ...)	do { } while (0);
 #endif
 #endif /* if DEBUG or ZFS_DEBUG */
+
+#ifndef ddprintf
+#if defined(DEBUG) || defined(ZFS_DEBUG)
+#define ddprintf(fmt, ...) do {                                                   \
+  IOLog("ZFS: ZFSDatasetProxy %s " fmt "\n", __func__, ##__VA_ARGS__);            \
+_NOTE(CONSTCOND) } while (0)
+#else
+#define ddprintf(fmt, ...)      do { } while (0)
+#endif
+#endif
 
 #define	DPRINTF_FUNC()	do { dprintf(""); } while (0);
 
@@ -79,7 +92,7 @@ ZFSDatasetProxy::init(OSDictionary *properties)
 	char *str = (char *)IOMalloc(1);
 
 	if (!str) {
-		dprintf("string allocation failed\n");
+		ddprintf("string allocation failed\n");
 		return (false);
 	}
 	str[0] = '\0';
@@ -88,7 +101,7 @@ ZFSDatasetProxy::init(OSDictionary *properties)
 	infoString = str;
 
 	if (IOBlockStorageDevice::init(properties) == false) {
-		dprintf("BlockStorageDevice start failed");
+		ddprintf("BlockStorageDevice start failed");
 		goto error;
 	}
 
@@ -123,13 +136,13 @@ ZFSDatasetProxy::start(IOService *provider)
 	    (kIORegistryIterateRecursively|kIORegistryIterateParents));
 
 	if (!size || !property) {
-		dprintf("couldn't get pool name or size");
+		ddprintf("couldn't get pool name or size");
 		goto error;
 	}
 
 	nameString = OSDynamicCast(OSString, property);
 	if (!nameString) {
-		dprintf("missing pool name");
+		ddprintf("missing pool name");
 		goto error;
 	}
 #if 0
@@ -143,7 +156,7 @@ ZFSDatasetProxy::start(IOService *provider)
 			OSSymbol *nameSymbol;
 		       	nameSymbol = OSDynamicCast(OSSymbol, property);
 			if (!nameSymbol) {
-				dprintf("couldn't get name");
+				ddprintf("couldn't get name");
 				goto error;
 			}
 			nameString = OSString::withCString(
@@ -154,7 +167,7 @@ ZFSDatasetProxy::start(IOService *provider)
 
 	sizeNum = OSDynamicCast(OSNumber, size);
 	if (!sizeNum) {
-		dprintf("invalid size");
+		ddprintf("invalid size");
 		goto error;
 	}
 	_pool_bcount = sizeNum->unsigned64BitValue() / DEV_BSIZE;
@@ -175,7 +188,7 @@ ZFSDatasetProxy::start(IOService *provider)
 	pstring = 0;
 
 	if (IOBlockStorageDevice::start(provider) == false) {
-		dprintf("BlockStorageDevice start failed");
+		ddprintf("BlockStorageDevice start failed");
 		goto error;
 	}
 	started = true;
@@ -186,18 +199,18 @@ ZFSDatasetProxy::start(IOService *provider)
 		/* Clone a new dictionary */
 		deviceDict = OSDictionary::withDictionary(deviceDict);
 		if (!deviceDict) {
-			dprintf("dict clone failed");
+			ddprintf("dict clone failed");
 			goto error;
 		}
 	}
 
 	if (!deviceDict) {
-		dprintf("creating new device dict");
+		ddprintf("creating new device dict");
 		deviceDict = OSDictionary::withCapacity(1);
 	}
 
 	if (!deviceDict) {
-		dprintf("missing device dict");
+		ddprintf("missing device dict");
 		goto error;
 	}
 
@@ -206,7 +219,7 @@ ZFSDatasetProxy::start(IOService *provider)
 
 	if (setProperty(kIOPropertyDeviceCharacteristicsKey,
 	    deviceDict) == false) {
-		dprintf("device dict setProperty failed");
+		ddprintf("device dict setProperty failed");
 		goto error;
 	}
 	OSSafeReleaseNULL(deviceDict);
@@ -217,7 +230,7 @@ ZFSDatasetProxy::start(IOService *provider)
 		/* Clone a new dictionary */
 		protocolDict = OSDictionary::withDictionary(protocolDict);
 		if (!protocolDict) {
-			dprintf("dict clone failed");
+			ddprintf("dict clone failed");
 			goto error;
 		}
 	}
@@ -228,7 +241,7 @@ ZFSDatasetProxy::start(IOService *provider)
 	}
 
 	if (!protocolDict) {
-		dprintf("missing protocol dict");
+		ddprintf("missing protocol dict");
 		goto error;
 	}
 
@@ -251,7 +264,7 @@ ZFSDatasetProxy::start(IOService *provider)
 
 	if (setProperty(kIOPropertyProtocolCharacteristicsKey,
 	    protocolDict) == false) {
-		dprintf("protocol dict setProperty failed");
+		ddprintf("protocol dict setProperty failed");
 		goto error;
 	}
 	OSSafeReleaseNULL(protocolDict);
@@ -317,7 +330,7 @@ ZFSDatasetProxy::doAsyncReadWrite(IOMemoryDescriptor *buffer,
 	}
 
 	if (buffer->getDirection() != kIODirectionOut) {
-		dprintf("invalid direction %d", buffer->getDirection());
+		ddprintf("invalid direction %d", buffer->getDirection());
 		IOStorage::complete(completion, kIOReturnError, 0);
 		return (kIOReturnSuccess);
 	}

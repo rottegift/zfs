@@ -126,12 +126,22 @@ int dsl_dsobj_to_dsname(char *pname, uint64_t obj, char *buf);
 #ifndef	dprintf
 #if defined(DEBUG) || defined(ZFS_DEBUG)
 #define	dprintf(fmt, ...) do {					\
-	printf("%s " fmt, __func__, __VA_ARGS__);		\
+	ddprintf("ZFS: %s " fmt, __func__, __VA_ARGS__);		\
 _NOTE(CONSTCOND) } while (0)
 #else
 #define	dprintf(fmt, ...)	do { } while (0);
 #endif /* if DEBUG or ZFS_DEBUG */
 #endif /* ifndef dprintf */
+
+#ifndef ddprintf
+#if defined(DEBUG) || defined(ZFS_DEBUG)
+#define ddprintf(fmt, ...) do {                                                   \
+  IOLog("ZFS: ZFSDatasetScheme %s " fmt "\n", __func__, ##__VA_ARGS__);           \
+_NOTE(CONSTCOND) } while (0)
+#else
+#define ddprintf(fmt, ...)      do { } while (0)
+#endif
+#endif
 
 #ifdef ZFS_BOOT
 /* Most of this is only built when configured with --enable-boot */
@@ -925,7 +935,7 @@ add_pool:
 
 nomem:
 #ifdef DEBUG
-	printf("zfs_boot_get_configs failed to allocate memory\n");
+	ddprintf("zfs_boot_get_configs failed to allocate memory\n");
 #endif
 	if (config) nvlist_free(config);
 	if (ret) nvlist_free(ret);
@@ -1130,7 +1140,7 @@ zfs_boot_probe_media(void* target, void* refCon,
 	}
 	/* Should never happen */
 	if (!newService) {
-		printf("%s %s\n", "zfs_boot_probe_media",
+		ddprintf("%s %s\n", "zfs_boot_probe_media",
 		    "called with null newService");
 		return (false);
 	}
@@ -1299,7 +1309,7 @@ zfs_boot_probe_disk(pool_list_t *pools, IOMedia *media)
 		if (strlen(pools->pool_name) == strlen(pname) &&
 		    strncmp(pools->pool_name, pname,
 		    strlen(pname)) == 0) {
-			printf("%s matched pool %s\n",
+			ddprintf("%s matched pool %s\n",
 			    __func__, pname);
 			matched = B_TRUE;
 		}
@@ -1326,7 +1336,7 @@ zfs_boot_probe_disk(pool_list_t *pools, IOMedia *media)
 	dprintf("%s: add_config %s\n", __func__, path);
 	if (zfs_boot_add_config(pools, path, 1,
 	    num_labels, config) != 0) {
-		printf("%s couldn't add config to pool list\n",
+		ddprintf("%s couldn't add config to pool list\n",
 		    __func__);
 	}
 
@@ -1424,14 +1434,14 @@ zfs_boot_fini()
 	pool_list_t *pools = zfs_boot_pool_list;
 
 	if (!pools) {
-		printf("%s no pool_list to clear\n", __func__);
+		ddprintf("%s no pool_list to clear\n", __func__);
 		return;
 	}
 
 	/* Set terminating flag */
 	if (false == OSCompareAndSwap64(ZFS_BOOT_ACTIVE,
 	    ZFS_BOOT_TERMINATING, &(pools->terminating))) {
-		printf("%s already terminating? %llu\n",
+		ddprintf("%s already terminating? %llu\n",
 		    __func__, pools->terminating);
 	}
 
@@ -1473,7 +1483,7 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 
 	zfs_bootfs = (char *)kmem_alloc(len, KM_SLEEP);
 	if (!zfs_bootfs) {
-		printf("%s string alloc failed\n", __func__);
+		ddprintf("%s string alloc failed\n", __func__);
 		return (ENOMEM);
 	}
 	zfs_bootfs[0] = '\0';
@@ -1511,7 +1521,7 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 		return (ENODEV);
 	}
 
-	printf("%s: publishing bootfs [%s]\n", __func__, zfs_bootfs);
+	ddprintf("%s: publishing bootfs [%s]\n", __func__, zfs_bootfs);
 
 	/* Create prop dict for the proxy, with 6 or more keys */
 	if ((properties = OSDictionary::withCapacity(6)) == NULL) {
@@ -1588,14 +1598,14 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 	zfs_bootfs = 0;
 
 	if (!dataset) {
-		printf("%s: couldn't create proxy device\n",
+		ddprintf("%s: couldn't create proxy device\n",
 		    __func__);
 		return (ENXIO);
 	}
 
 	media = OSDynamicCast(IOMedia, dataset);
 	if (!media) {
-		printf("%s: couldn't cast proxy media\n",
+		ddprintf("%s: couldn't cast proxy media\n",
 		    __func__);
 		dataset->release();
 		return (ENXIO);
@@ -1605,12 +1615,12 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 	bootdev = new ZFSBootDevice;
 
 	if (!bootdev) {
-		printf("%s: couldn't create boot device\n", __func__);
+		ddprintf("%s: couldn't create boot device\n", __func__);
 		return (ENOMEM);
 	}
 
 	if (bootdev->init(properties) == false) {
-		printf("%s init failed\n", __func__);
+		ddprintf("%s init failed\n", __func__);
 		properties->release();
 		bootdev->release();
 		bootdev = 0;
@@ -1620,7 +1630,7 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 	properties = 0;
 
 	if (bootdev->attach(pool_proxy) == false) {
-		printf("%s attach failed\n", __func__);
+		ddprintf("%s attach failed\n", __func__);
 		bootdev->release();
 		bootdev = 0;
 		return (ENXIO);
@@ -1628,7 +1638,7 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 
 	/* Technically should start but this doesn't do much */
 	if (bootdev->start(pool_proxy) == false) {
-		printf("%s start failed\n", __func__);
+		ddprintf("%s start failed\n", __func__);
 		bootdev->detach(pool_proxy);
 		bootdev->release();
 		bootdev = 0;
@@ -1658,7 +1668,7 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 
 	if (!media) {
 		/* XXX currently unreachable */
-		printf("%s couldn't get bootdev media\n", __func__);
+		ddprintf("%s couldn't get bootdev media\n", __func__);
 		return (ENXIO);
 	}
 #endif
@@ -1695,7 +1705,7 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 		/* Handle error */
 		return (ENXIO);
 	}
-	printf("%s: got boot-uuid %s\n", __func__, uuid->getCStringNoCopy());
+	ddprintf("%s: got boot-uuid %s\n", __func__, uuid->getCStringNoCopy());
 
 	/* XXX Or use below and let AppleFileSystemDriver match it */
 	/* Leaves the Apple_Boot content hint (at least for now) */
@@ -1707,7 +1717,7 @@ zfs_boot_publish_bootfs(IOService *zfs_hl, pool_list_t *pools)
 	media->release();
 #endif
 
-	printf("%s done\n", __func__);
+	ddprintf("%s done\n", __func__);
 	return (0);
 }
 
@@ -1729,7 +1739,7 @@ zfs_boot_import_thread(void *arg)
 	/* Verify pool list coult be cast */
 	ASSERT3U(pools, !=, 0);
 	if (!pools) {
-		printf("%s %p %s\n", "zfs_boot_import_thread",
+		ddprintf("%s %p %s\n", "zfs_boot_import_thread",
 		    arg, "couldn't be cast as pool_list_t*");
 		return;
 	}

@@ -38,13 +38,25 @@
 #undef	dprintf
 #endif
 #define	dprintf(fmt, ...) do {							\
-	IOLog("ZFSDatasetScheme %s " fmt "\n", __func__, ##__VA_ARGS__);	\
+    if (zfs_flags & ZFS_DEBUG_DPRINTF)					        \
+	IOLog("ZFS: ZFSDatasetScheme %s " fmt "\n", __func__, ##__VA_ARGS__);	\
 _NOTE(CONSTCOND) } while (0)
 #else
+
 #ifndef dprintf
 #define	dprintf(fmt, ...)	do { } while (0);
 #endif
 #endif /* if DEBUG or ZFS_DEBUG */
+
+#ifndef ddprintf
+#if defined(DEBUG) || defined(ZFS_DEBUG)
+#define ddprintf(fmt, ...) do {                                                   \
+  IOLog("ZFS: ZFSDatasetScheme %s " fmt "\n", __func__, ##__VA_ARGS__);           \
+_NOTE(CONSTCOND) } while (0)
+#else
+#define ddprintf(fmt, ...)      do { } while (0)
+#endif
+#endif
 
 static ZFSDatasetScheme *
 zfs_osx_proxy_scheme_by_osname(const char *osname)
@@ -66,7 +78,7 @@ zfs_osx_proxy_scheme_by_osname(const char *osname)
 
 	pool_name = (char *)kmem_alloc(len, KM_SLEEP);
 	if (!pool_name) {
-		dprintf("string alloc failed");
+		ddprintf("string alloc failed");
 		return (NULL);
 	}
 	snprintf(pool_name, len, "%s", osname);
@@ -74,7 +86,7 @@ zfs_osx_proxy_scheme_by_osname(const char *osname)
 
 	matching = IOService::serviceMatching(kZFSDatasetSchemeClass);
 	if (!matching) {
-		dprintf("couldn't get match dict");
+		ddprintf("couldn't get match dict");
 		kmem_free(pool_name, len);
 		return (NULL);
 	}
@@ -110,7 +122,7 @@ zfs_osx_proxy_scheme_by_osname(const char *osname)
 		if (i) dprintf("%s: tried %d times\n", __func__, i);
 
 		if (!iter) {
-			dprintf("couldn't get iterator");
+			ddprintf("couldn't get iterator");
 			kmem_free(pool_name, len);
 			OSSafeReleaseNULL(matching);
 			return (NULL);
@@ -147,7 +159,7 @@ zfs_osx_proxy_scheme_by_osname(const char *osname)
 	pool_name = 0;
 
 	if (scheme == NULL) {
-		dprintf("no matching pool proxy");
+		ddprintf("no matching pool proxy");
 	}
 	return (scheme);
 
@@ -156,7 +168,7 @@ zfs_osx_proxy_scheme_by_osname(const char *osname)
 	ZFSPool *pool = 0;
 
 	if (!osname || osname[0] == '\0') {
-		dprintf("missing dataset argument");
+		ddprintf("missing dataset argument");
 		return (EINVAL);
 	}
 
@@ -171,7 +183,7 @@ zfs_osx_proxy_scheme_by_osname(const char *osname)
 
 	/* Need a pool proxy to attach to */
 	if (!pool) {
-		dprintf("couldn't get pool proxy");
+		ddprintf("couldn't get pool proxy");
 		return (EINVAL);
 	}
 	return (0);
@@ -198,7 +210,7 @@ zfs_osx_proxy_lookup(const char *property, OSObject *value)
 
 	/* Validate arguments */
 	if (!property || !value || property[0] == '\0') {
-		dprintf("invalid argument");
+		ddprintf("invalid argument");
 		return (NULL);
 	}
 
@@ -209,7 +221,7 @@ zfs_osx_proxy_lookup(const char *property, OSObject *value)
 	matching = IOService::serviceMatching(kZFSDatasetClassKey);
 	if ((matching) == NULL ||
 	    (matching->setObject(property, value) == false)) {
-		dprintf("match dictionary create failed");
+		ddprintf("match dictionary create failed");
 		OSSafeReleaseNULL(matching);
 		return (NULL);
 	}
@@ -234,7 +246,7 @@ zfs_osx_proxy_lookup(const char *property, OSObject *value)
 	iter = IOService::getMatchingServices(matching);
 	OSSafeReleaseNULL(matching);
 	if (iter == NULL) {
-		dprintf("iterator failed");
+		ddprintf("iterator failed");
 		return (NULL);
 	}
 
@@ -270,7 +282,7 @@ zfs_osx_proxy_lookup(const char *property, OSObject *value)
 	 */
 	if ((service = IOService::copyMatchingService(matching)) == NULL ||
 	    (dataset = OSDynamicCast(ZFSDataset, service)) == NULL) {
-		dprintf("matching failed");
+		ddprintf("matching failed");
 		OSSafeReleaseNULL(service);
 		return (NULL);
 	}
@@ -298,13 +310,13 @@ zfs_osx_proxy_get(const char *osname)
 	/* Validate arguments, osname is limited to MAXNAMELEN */
 	if (!osname || osname[0] == '\0' || osname[0] == '/' ||
 	    strnlen(osname, MAXNAMELEN+1) == (MAXNAMELEN+1)) {
-		dprintf("invalid argument");
+		ddprintf("invalid argument");
 		return (NULL);
 	}
 
 	osstr = OSString::withCString(osname);
 	if (!osstr) {
-		dprintf("string alloc failed");
+		ddprintf("string alloc failed");
 		return (NULL);
 	}
 
@@ -312,7 +324,7 @@ zfs_osx_proxy_get(const char *osname)
 	OSSafeReleaseNULL(osstr);
 
 	if (!dataset) {
-		dprintf("lookup failed");
+		ddprintf("lookup failed");
 		return (NULL);
 	}
 
@@ -340,7 +352,7 @@ zfs_osx_proxy_from_devpath(const char *devpath)
 	/* Validate arguments, devpath is limited to MAXPATHLEN */
 	if (!devpath || devpath[0] == '\0' ||
 	    strnlen(devpath, MAXPATHLEN+1) == (MAXPATHLEN+1)) {
-		dprintf("invalid argument");
+		ddprintf("invalid argument");
 		return (NULL);
 	}
 
@@ -353,13 +365,13 @@ zfs_osx_proxy_from_devpath(const char *devpath)
 
 	/* Make sure we have (at least) "diskN" at this point */
 	if (strncmp(bsdname, "disk", 4) != 0 || bsdname[4] == '\0') {
-		dprintf("invalid bsdname %s from %s", bsdname, devpath);
+		ddprintf("invalid bsdname %s from %s", bsdname, devpath);
 		return (NULL);
 	}
 
 	bsdstr = OSString::withCString(bsdname);
 	if (!bsdstr) {
-		dprintf("string alloc failed");
+		ddprintf("string alloc failed");
 		return (NULL);
 	}
 
@@ -367,7 +379,7 @@ zfs_osx_proxy_from_devpath(const char *devpath)
 	OSSafeReleaseNULL(bsdstr);
 
 	if (!dataset) {
-		dprintf("lookup with %s failed", bsdname);
+		ddprintf("lookup with %s failed", bsdname);
 		return (NULL);
 	}
 
@@ -397,7 +409,7 @@ zfs_osx_proxy_get_prop_string(ZFSDataset *dataset,
 
 	/* Validate arguments */
 	if (!dataset || !property || !value || len == 0) {
-		dprintf("invalid argument");
+		ddprintf("invalid argument");
 		return (EINVAL);
 	}
 
@@ -407,14 +419,14 @@ zfs_osx_proxy_get_prop_string(ZFSDataset *dataset,
 	dataset->unlockForArbitration();
 
 	if (!obj) {
-		dprintf("no property %s", property);
+		ddprintf("no property %s", property);
 		return (ENXIO);
 	}
 
 	valueString = OSDynamicCast(OSString, obj);
 	/* Validate property value */
 	if (!valueString) {
-		dprintf("couldn't cast value for %s", property);
+		ddprintf("couldn't cast value for %s", property);
 		OSSafeReleaseNULL(obj);
 		return (ENXIO);
 	}
@@ -454,14 +466,14 @@ zfs_osx_proxy_get_bsdname(const char *osname,
 
 	/* Validate arguments */
 	if (!osname || !bsdname || len == 0) {
-		dprintf("invalid argument");
+		ddprintf("invalid argument");
 		return (EINVAL);
 	}
 
 	/* Get dataset proxy (takes a retain) */
 	dataset = zfs_osx_proxy_get(osname);
 	if (!dataset) {
-		dprintf("no proxy matching %s", osname);
+		ddprintf("no proxy matching %s", osname);
 		return (ENOENT);
 	}
 
@@ -499,14 +511,14 @@ zfs_osx_proxy_get_osname(const char *devpath, char *osname, int len)
 
 	/* Validate arguments */
 	if (!devpath || !osname || len == 0) {
-		dprintf("invalid argument");
+		ddprintf("invalid argument");
 		return (EINVAL);
 	}
 
 	/* Get dataset proxy (takes a retain) */
 	dataset = zfs_osx_proxy_from_devpath(devpath);
 	if (!dataset) {
-		dprintf("no proxy matching %s", devpath);
+		ddprintf("no proxy matching %s", devpath);
 		return (ENOENT);
 	}
 
@@ -560,7 +572,7 @@ zfs_osx_proxy_remove(const char *osname)
 	/* Get dataset proxy (takes a retain) */
 	dataset = zfs_osx_proxy_get(osname);
 	if (dataset == NULL) {
-		dprintf("couldn't get dataset");
+		ddprintf("couldn't get dataset");
 		return;
 	}
 #if 0
@@ -571,7 +583,7 @@ zfs_osx_proxy_remove(const char *osname)
 	provider = OSDynamicCast(ZFSDatasetScheme,
 	    dataset->getProvider());
 	if (!provider) {
-		dprintf("invalid provider");
+		ddprintf("invalid provider");
 		return;
 	}
 
@@ -595,18 +607,18 @@ zfs_osx_proxy_create(const char *osname)
 	ZFSDatasetScheme *provider = NULL;
 
 	if (!osname || osname[0] == '\0') {
-		dprintf("missing dataset argument");
+		ddprintf("missing dataset argument");
 		return (EINVAL);
 	}
 
 	provider = zfs_osx_proxy_scheme_by_osname(osname);
 	if (provider == NULL) {
-		dprintf("can't get pool proxy");
+		ddprintf("can't get pool proxy");
 		return (ENOENT);
 	}
 
 	if (provider->addDataset(osname) == false) {
-		dprintf("couldn't add dataset");
+		ddprintf("couldn't add dataset");
 		provider->release();
 		return (ENXIO);
 	}
@@ -673,7 +685,7 @@ ZFSDatasetScheme::init(OSDictionary *properties)
 	_max_id = 0;
 
 	if (!_datasets || !_holes) {
-		dprintf("OSSet allocation failed");
+		ddprintf("OSSet allocation failed");
 		OSSafeReleaseNULL(_datasets);
 		OSSafeReleaseNULL(_holes);
 		return (false);
@@ -691,7 +703,7 @@ ZFSDatasetScheme::init(OSDictionary *properties)
 	OSSafeReleaseNULL(str);
 
 	if (IOPartitionScheme::init(newProps) == false) {
-		dprintf("IOPartitionScheme init failed");
+		ddprintf("IOPartitionScheme init failed");
 		OSSafeReleaseNULL(newProps);
 		OSSafeReleaseNULL(_datasets);
 		OSSafeReleaseNULL(_holes);
@@ -708,7 +720,7 @@ ZFSDatasetScheme::start(IOService *provider)
 	OSObject *pool_name;
 
 	if (IOPartitionScheme::start(provider) == false) {
-		dprintf("IOPartitionScheme start failed");
+		ddprintf("IOPartitionScheme start failed");
 		return (false);
 	}
 
@@ -733,7 +745,7 @@ ZFSDatasetScheme::probe(IOService *provider, SInt32 *score)
 
 	/* First ask IOPartitionScheme to probe */
 	if (IOPartitionScheme::probe(provider, score) == 0) {
-		dprintf("IOPartitionScheme probe failed");
+		ddprintf("IOPartitionScheme probe failed");
 		return (0);
 	}
 
@@ -741,7 +753,7 @@ ZFSDatasetScheme::probe(IOService *provider, SInt32 *score)
 	property = getProperty(kZFSPoolNameKey, gIOServicePlane,
 	    kIORegistryIterateRecursively|kIORegistryIterateParents);
 	if (!property) {
-		dprintf("no pool name");
+		ddprintf("no pool name");
 		return (0);
 	}
 
@@ -749,20 +761,20 @@ ZFSDatasetScheme::probe(IOService *provider, SInt32 *score)
 	if (provider == NULL ||
 	    OSDynamicCast(IOMedia, provider) == NULL ||
 	    (parent = provider->getProvider()) == NULL) {
-		dprintf("invalid provider");
+		ddprintf("invalid provider");
 		return (0);
 	}
 
 	/* Make sure provider is driver, and has valid provider below */
 	if (OSDynamicCast(IOBlockStorageDriver, parent) == NULL ||
 	    (parent = parent->getProvider()) == NULL) {
-		dprintf("invalid parent");
+		ddprintf("invalid parent");
 		return (0);
 	}
 
 	/* Make sure the parent provider is a proxy */
 	if (OSDynamicCast(ZFSDatasetProxy, parent) == NULL) {
-		dprintf("invalid grandparent");
+		ddprintf("invalid grandparent");
 		return (0);
 	}
 
@@ -814,11 +826,11 @@ void ZFSDatasetScheme::returnPartitionID(uint32_t part_id)
 {
 	OSNumber *id_num = OSNumber::withNumber(part_id, 32);
 
-	if (!id_num) dprintf("alloc failed");
+	if (!id_num)	ddprintf("alloc failed");
 	/* XXX Continue and try to decrement max_id if possible */
 
 	if (lockForArbitration(false) == false) {
-		dprintf("service is terminated");
+		ddprintf("service is terminated");
 		OSSafeReleaseNULL(id_num);
 		return;
 	}
@@ -885,12 +897,12 @@ ZFSDatasetScheme::addDataset(const char *osname)
 	obj = copyProperty(kZFSPoolSizeKey, gIOServicePlane,
 	    kIORegistryIterateRecursively|kIORegistryIterateParents);
 	if (!obj) {
-		dprintf("missing pool size");
+		ddprintf("missing pool size");
 		return (false);
 	}
 	sizeNum = OSDynamicCast(OSNumber, obj);
 	if (!sizeNum) {
-		dprintf("invalid pool size");
+		ddprintf("invalid pool size");
 		return (false);
 	}
 	size = sizeNum->unsigned64BitValue();
@@ -900,7 +912,7 @@ ZFSDatasetScheme::addDataset(const char *osname)
 	part_id = getNextPartitionID();
 	/* Only using non-zero partition ids */
 	if (part_id == 0) {
-		dprintf("invalid partition ID");
+		ddprintf("invalid partition ID");
 		return (false);
 	}
 	snprintf(location, sizeof (location), "%u", part_id);
@@ -909,7 +921,7 @@ ZFSDatasetScheme::addDataset(const char *osname)
 	OSString *locationStr;
 	locationStr = OSString::withCString(location);
 	if (!locationStr) {
-		dprintf("location string alloc failed");
+		ddprintf("location string alloc failed");
 		return (false);
 	}
 	OSSafeReleaseNULL(locationStr);
@@ -917,7 +929,7 @@ ZFSDatasetScheme::addDataset(const char *osname)
 
 	dataset = ZFSDataset::withDatasetNameAndSize(osname, size);
 	if (!dataset) {
-		dprintf("couldn't add %s", osname);
+		ddprintf("couldn't add %s", osname);
 		return (false);
 	}
 
@@ -932,13 +944,13 @@ ZFSDatasetScheme::addDataset(const char *osname)
 	dataset->setProperty("Content Hint","6A898CC3-1DD2-11B2-99A6-080020736631");
 
 	if (dataset->attach(this) == false) {
-		dprintf("attach failed");
+		ddprintf("attach failed");
 		OSSafeReleaseNULL(dataset);
 		return (false);
 	}
 
 	if (dataset->start(this) == false) {
-		dprintf("start failed");
+		ddprintf("start failed");
 		dataset->detach(this);
 		OSSafeReleaseNULL(dataset);
 		return (false);
@@ -968,12 +980,12 @@ ZFSDatasetScheme::removeDataset(const char *osname, bool force)
 	bool locked;
 
 	if ((locked = lockForArbitration(false)) == false) {
-		dprintf("couldn't lock terminated service");
+		ddprintf("couldn't lock terminated service");
 	}
 
 	iter = OSCollectionIterator::withCollection(_datasets);
 	if (!iter) {
-		dprintf("couldn't get dataset iterator");
+		ddprintf("couldn't get dataset iterator");
 		return (false);
 	}
 
@@ -995,7 +1007,7 @@ ZFSDatasetScheme::removeDataset(const char *osname, bool force)
 	}
 
 	if (!dataset) {
-		dprintf("couldn't get dataset");
+		ddprintf("couldn't get dataset");
 		iter->release();
 		return (false);
 	}
@@ -1009,7 +1021,7 @@ ZFSDatasetScheme::removeDataset(const char *osname, bool force)
 	partNum = OSDynamicCast(OSNumber,
 	    dataset->getProperty(kIOMediaPartitionIDKey));
 	if (!partNum) {
-		dprintf("couldn't get partition number");
+		ddprintf("couldn't get partition number");
 	} else {
 		part_id = partNum->unsigned32BitValue();
 	}

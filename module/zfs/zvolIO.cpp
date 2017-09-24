@@ -48,14 +48,25 @@
 #ifdef	dprintf
 #undef	dprintf
 #endif
-#define	dprintf(fmt, ...) do {							\
-	IOLog("zvolIO %s " fmt "\n", __func__, ##__VA_ARGS__);	\
+#define	dprintf(fmt, ...) do {						\
+  if (zfs_flags & ZFS_DEBUG_DPRINTF)                                    \
+	IOLog("ZFS: zvolIO %s " fmt "\n", __func__, ##__VA_ARGS__);	\
 _NOTE(CONSTCOND) } while (0)
 #else
 #ifndef dprintf
 #define	dprintf(fmt, ...)	do { } while (0);
 #endif
 #endif /* if DEBUG or ZFS_DEBUG */
+
+#ifndef ddprintf
+#if defined(DEBUG) || defined(ZFS_DEBUG)
+#define ddprintf(fmt, ...) do {                                          \
+  IOLog("ZFS: zvolIO  %s " fmt "\n", __func__, ##__VA_ARGS__);           \
+_NOTE(CONSTCOND) } while (0)
+#else
+#define ddprintf(fmt, ...)      do { } while (0)
+#endif
+#endif
 
 //#define dprintf IOLog
 
@@ -79,7 +90,7 @@ net_lundman_zfs_zvol_device::init(zvol_state_t *c_zv,
 {
 	zvol_iokit_t *iokitdev;
 
-	dprintf("zvolIO_device:init\n");
+	ddprintf("zvolIO_device:init\n");
 
 	if (!c_zv || c_zv->zv_iokitdev != NULL) {
 		dprintf("zvol %s invalid c_zv\n", __func__);
@@ -88,12 +99,12 @@ net_lundman_zfs_zvol_device::init(zvol_state_t *c_zv,
 
 	if ((iokitdev = (zvol_iokit_t *)kmem_alloc(sizeof (zvol_iokit_t),
 	    KM_SLEEP)) == NULL) {
-		printf("zvol %s wrapper alloc failed\n", __func__);
+		ddprintf("zvol %s wrapper alloc failed\n", __func__);
 		return (false);
 	}
 
 	if (super::init(properties) == false) {
-		printf("zvol %s super init failed\n", __func__);
+		ddprintf("zvol %s super init failed\n", __func__);
 		kmem_free(iokitdev, sizeof (zvol_iokit_t));
 		return (false);
 	}
@@ -128,7 +139,7 @@ net_lundman_zfs_zvol_device::attach(IOService* provider)
 	char product_name[strlen(ZVOL_PRODUCT_NAME_PREFIX) + MAXPATHLEN + 1];
 
 	if (!provider) {
-		dprintf("ZVOL attach missing provider\n");
+		ddprintf("ZVOL attach missing provider\n");
 		return (false);
 	}
 
@@ -329,7 +340,7 @@ net_lundman_zfs_zvol_device::renameDevice(void)
 	len = strlen(ZVOL_PRODUCT_NAME_PREFIX) + strlen(zv->zv_name) + 1;
 	newstr = (char *)kmem_alloc(len, KM_SLEEP);
 	if (!newstr) {
-		dprintf("%s string alloc failed\n", __func__);
+		ddprintf("%s string alloc failed\n", __func__);
 		return (ENOMEM);
 	}
 
@@ -339,7 +350,7 @@ net_lundman_zfs_zvol_device::renameDevice(void)
 	kmem_free(newstr, len);
 
 	if (!nameStr) {
-		dprintf("%s couldn't allocate name string\n", __func__);
+		ddprintf("%s couldn't allocate name string\n", __func__);
 		return (ENOMEM);
 	}
 
@@ -348,11 +359,11 @@ net_lundman_zfs_zvol_device::renameDevice(void)
 	    getProperty(kIOPropertyDeviceCharacteristicsKey));
 	if (!deviceDict || (deviceDict =
 	    OSDictionary::withDictionary(deviceDict)) == NULL) {
-		dprintf("couldn't clone device characteristics\n");
+		ddprintf("couldn't clone device characteristics\n");
 		/* Allocate new dict */
 		if (!deviceDict &&
 		    (deviceDict = OSDictionary::withCapacity(1)) == NULL) {
-			dprintf("%s OSDictionary alloc failed\n", __func__);
+			ddprintf("%s OSDictionary alloc failed\n", __func__);
 			nameStr->release();
 			return (ENOMEM);
 		}
@@ -362,7 +373,7 @@ net_lundman_zfs_zvol_device::renameDevice(void)
 	/* Add or replace the product name */
 	if (deviceDict->setObject(kIOPropertyProductNameKey,
 	    nameStr) == false) {
-		dprintf("%s couldn't set product name\n", __func__);
+		ddprintf("%s couldn't set product name\n", __func__);
 		nameStr->release();
 		deviceDict->release();
 		return (ENXIO);
@@ -373,7 +384,7 @@ net_lundman_zfs_zvol_device::renameDevice(void)
 	/* Set IORegistry property */
 	if (setProperty(kIOPropertyDeviceCharacteristicsKey,
 	    deviceDict) == false) {
-		dprintf("%s couldn't set IORegistry property\n", __func__);
+		ddprintf("%s couldn't set IORegistry property\n", __func__);
 		deviceDict->release();
 		return (ENXIO);
 	}
@@ -398,7 +409,7 @@ net_lundman_zfs_zvol_device::offlineDevice(void)
 	/* Ask IOBlockStorageDevice to offline media */
 	if (client->message(kIOMessageMediaStateHasChanged,
 	    this, (void *)kIOMediaStateOffline) != kIOReturnSuccess) {
-		dprintf("%s failed\n", __func__);
+		ddprintf("%s failed\n", __func__);
 		return (ENXIO);
 	}
 
@@ -417,7 +428,7 @@ net_lundman_zfs_zvol_device::onlineDevice(void)
 	/* Ask IOBlockStorageDevice to online media */
 	if (client->message(kIOMessageMediaStateHasChanged,
 	    this, (void *)kIOMediaStateOnline) != kIOReturnSuccess) {
-		dprintf("%s failed\n", __func__);
+		ddprintf("%s failed\n", __func__);
 		return (ENXIO);
 	}
 
@@ -436,7 +447,7 @@ net_lundman_zfs_zvol_device::refreshDevice(void)
 	/* Ask IOBlockStorageDevice to reset the media params */
 	if (client->message(kIOMessageMediaParametersHaveChanged,
 	    this) != kIOReturnSuccess) {
-		dprintf("%s failed\n", __func__);
+		ddprintf("%s failed\n", __func__);
 		return (ENXIO);
 	}
 
@@ -572,32 +583,32 @@ net_lundman_zfs_zvol_device::doAsyncReadWrite(
 
 	// Return errors for incoming I/O if we have been terminated.
 	if (isInactive() == true) {
-		dprintf("asyncReadWrite notActive fail\n");
+		ddprintf("asyncReadWrite notActive fail\n");
 		return (kIOReturnNotAttached);
 	}
 	// These variables are set in zvol_first_open(), which should have been
 	// called already.
 	if (!zv->zv_objset || !zv->zv_dbuf) {
-		dprintf("asyncReadWrite no objset nor dbuf\n");
+		ddprintf("asyncReadWrite no objset nor dbuf\n");
 		return (kIOReturnNotAttached);
 	}
 
 	// Ensure the start block is within the disk capacity.
 	if ((block)*(ZVOL_BSIZE) >= zv->zv_volsize) {
-		dprintf("asyncReadWrite start block outside volume\n");
+		ddprintf("asyncReadWrite start block outside volume\n");
 		return (kIOReturnBadArgument);
 	}
 
 	// Shorten the read, if beyond the end
 	if (((block + nblks)*(ZVOL_BSIZE)) > zv->zv_volsize) {
-		dprintf("asyncReadWrite block shortening needed\n");
+		ddprintf("asyncReadWrite block shortening needed\n");
 		return (kIOReturnBadArgument);
 	}
 
 	// Get the buffer direction, whether this is a read or a write.
 	direction = buffer->getDirection();
 	if ((direction != kIODirectionIn) && (direction != kIODirectionOut)) {
-		dprintf("asyncReadWrite kooky direction\n");
+		ddprintf("asyncReadWrite kooky direction\n");
 		return (kIOReturnBadArgument);
 	}
 
@@ -611,7 +622,7 @@ net_lundman_zfs_zvol_device::doAsyncReadWrite(
 #if 0
 	if ((iomem = (struct iomem *)kmem_alloc(sizeof (struct iomem),
 	    KM_SLEEP)) == NULL) {
-		dprintf("%s allocation failed\n", __func__);
+		ddprintf("%s allocation failed\n", __func__);
 		(completion->action)(completion->target, completion->parameter,
 		    kIOReturnSuccess, actualByteCount);
 		return (kIOReturnSuccess);
@@ -684,6 +695,8 @@ net_lundman_zfs_zvol_device::doDiscard(UInt64 block, UInt64 nblks)
 	/* Convert block/nblks to offset/bytes */
 	off =	block * ZVOL_BSIZE;
 	bytes =	nblks * ZVOL_BSIZE;
+
+	// this is exceptionally noisy after an fsck
 	dprintf("calling zvol_unmap with offset, bytes (%llu, %llu)\n",
 	    off, bytes);
 
@@ -836,6 +849,7 @@ IOReturn
 net_lundman_zfs_zvol_device::doSynchronizeCache(void)
 {
 	dprintf("doSync\n");
+
 	if (zv && zv->zv_zilog) {
 		zil_commit(zv->zv_zilog, ZVOL_OBJ);
 	}
@@ -928,18 +942,18 @@ zvolCreateNewDevice(zvol_state_t *zv)
 
 	/* We must have a valid zvol_state_t */
 	if (!zv || !zv->zv_objset) {
-		dprintf("%s missing zv or objset\n", __func__);
+		ddprintf("%s missing zv or objset\n", __func__);
 		return (EINVAL);
 	}
 
 	/* We need the spa to get the pool proxy */
 	if ((spa = dmu_objset_spa(zv->zv_objset)) == NULL) {
-		dprintf("%s couldn't get spa\n", __func__);
+		ddprintf("%s couldn't get spa\n", __func__);
 		return (EINVAL);
 	}
 	if (spa->spa_iokit_proxy == NULL ||
 	    (pool_proxy = spa->spa_iokit_proxy->proxy) == NULL) {
-		dprintf("%s missing IOKit pool proxy\n", __func__);
+		ddprintf("%s missing IOKit pool proxy\n", __func__);
 		return (EINVAL);
 	}
 
@@ -948,13 +962,13 @@ zvolCreateNewDevice(zvol_state_t *zv)
 	/* Validate creation, initialize and attach */
 	if (!zvol || zvol->init(zv) == false ||
 	    zvol->attach(pool_proxy) == false) {
-		dprintf("%s device creation failed\n", __func__);
+		ddprintf("%s device creation failed\n", __func__);
 		if (zvol) zvol->release();
 		return (ENOMEM);
 	}
 	/* Start the service */
 	if (zvol->start(pool_proxy) == false) {
-		dprintf("%s device start failed\n", __func__);
+		ddprintf("%s device start failed\n", __func__);
 		zvol->detach(pool_proxy);
 		zvol->release();
 		return (ENXIO);
@@ -962,7 +976,7 @@ zvolCreateNewDevice(zvol_state_t *zv)
 
 	/* Open pool_proxy provider */
 	if (pool_proxy->open(zvol) == false) {
-		dprintf("%s open provider failed\n", __func__);
+		ddprintf("%s open provider failed\n", __func__);
 		zvol->stop(pool_proxy);
 		zvol->detach(pool_proxy);
 		zvol->release();
@@ -987,12 +1001,12 @@ zvolRegisterDevice(zvol_state_t *zv)
 	bool ret = false;
 
 	if (!zv || !zv->zv_iokitdev || strnlen(zv->zv_name, 1) == 0) {
-		dprintf("%s missing zv, iokitdev, or name\n", __func__);
+		ddprintf("%s missing zv, iokitdev, or name\n", __func__);
 		return (EINVAL);
 	}
 
 	if ((zvol = zv->zv_iokitdev->dev) == NULL) {
-		dprintf("%s couldn't get zvol device\n", __func__);
+		ddprintf("%s couldn't get zvol device\n", __func__);
 		return (EINVAL);
 	}
 
@@ -1006,13 +1020,13 @@ zvolRegisterDevice(zvol_state_t *zv)
 		snprintf(str, MAXNAMELEN, "%s %s Media",
 		    zvol->getVendorString(), zv->zv_name);
 		if ((nameStr = OSString::withCString(str)) == NULL) {
-			dprintf("%s problem with name string\n", __func__);
+			ddprintf("%s problem with name string\n", __func__);
 			return (ENOMEM);
 		}
 	}
 	matching = IOService::serviceMatching("IOMedia");
 	if (!matching || !matching->setObject(gIONameMatchKey, nameStr)) {
-		dprintf("%s couldn't get matching dictionary\n", __func__);
+		ddprintf("%s couldn't get matching dictionary\n", __func__);
 		return (ENOMEM);
 	}
 
@@ -1026,7 +1040,7 @@ zvolRegisterDevice(zvol_state_t *zv)
 	dprintf("%s %s service\n", __func__, (service ? "got" : "no"));
 
 	if (!service) {
-		dprintf("%s couldn't get matching service\n", __func__);
+		ddprintf("%s couldn't get matching service\n", __func__);
 		return (false);
 	}
 
@@ -1034,7 +1048,7 @@ zvolRegisterDevice(zvol_state_t *zv)
 	media = OSDynamicCast(IOMedia, service);
 
 	if (!media) {
-		dprintf("%s no IOMedia\n", __func__);
+		ddprintf("%s no IOMedia\n", __func__);
 		service->release();
 		return (false);
 	}
@@ -1056,7 +1070,7 @@ zvolRegisterDevice(zvol_state_t *zv)
 		    zv->zv_bsdname);
 		ret = true;
 	} else {
-		dprintf("%s couldn't get BSD Name\n", __func__);
+		ddprintf("%s couldn't get BSD Name\n", __func__);
 	}
 
 	/* Release retain held by waitForMatchingService */
@@ -1073,7 +1087,7 @@ zvolRemoveDevice(zvol_iokit_t *iokitdev)
 	dprintf("%s\n", __func__);
 
 	if (!iokitdev) {
-		dprintf("%s missing argument\n", __func__);
+		ddprintf("%s missing argument\n", __func__);
 		return (EINVAL);
 	}
 
@@ -1082,7 +1096,7 @@ zvolRemoveDevice(zvol_iokit_t *iokitdev)
 	kmem_free(iokitdev, sizeof (zvol_iokit_t));
 
 	if (zvol == NULL) {
-		dprintf("%s couldn't get IOKit handle\n", __func__);
+		ddprintf("%s couldn't get IOKit handle\n", __func__);
 		return (ENXIO);
 	}
 
@@ -1094,7 +1108,7 @@ zvolRemoveDevice(zvol_iokit_t *iokitdev)
 	IOReturn ret;
 	if ((ret = zvol->message(kIOMessageServiceIsRequestingClose,
 	    provider)) != kIOReturnSuccess) {
-		dprintf("%s media close failed %d\n", __func__, ret);
+		ddprintf("%s media close failed %d\n", __func__, ret);
 	}
 #endif
 
@@ -1117,18 +1131,18 @@ zvolRenameDevice(zvol_state_t *zv)
 	int error;
 
 	if (!zv || strnlen(zv->zv_name, 1) == 0) {
-		dprintf("%s missing argument\n", __func__);
+		ddprintf("%s missing argument\n", __func__);
 		return (EINVAL);
 	}
 
 	if ((zvol = zv->zv_iokitdev->dev) == NULL) {
-		dprintf("%s couldn't get zvol device\n", __func__);
+		ddprintf("%s couldn't get zvol device\n", __func__);
 		return (EINVAL);
 	}
 
 	/* Set IORegistry name and property */
 	if ((error = zvol->renameDevice()) != 0) {
-		dprintf("%s renameDevice error %d\n", __func__, error);
+		ddprintf("%s renameDevice error %d\n", __func__, error);
 		return (error);
 	}
 
@@ -1141,7 +1155,7 @@ zvolRenameDevice(zvol_state_t *zv)
 	/* Inform clients of this device that name has changed */
 	if (zvol->offlineDevice() != 0 ||
 	    zvol->onlineDevice() != 0) {
-		dprintf("%s media reset failed\n", __func__);
+		ddprintf("%s media reset failed\n", __func__);
 		return (ENXIO);
 	}
 
@@ -1158,13 +1172,13 @@ zvolSetVolsize(zvol_state_t *zv)
 	dprintf("%s\n", __func__);
 
 	if (!zv || !zv->zv_iokitdev) {
-		dprintf("%s invalid zvol\n", __func__);
+		ddprintf("%s invalid zvol\n", __func__);
 		return (EINVAL);
 	}
 
 	/* Cast to correct type */
 	if ((zvol = zv->zv_iokitdev->dev) == NULL) {
-		dprintf("%s couldn't cast IOKit handle\n", __func__);
+		ddprintf("%s couldn't cast IOKit handle\n", __func__);
 		return (ENXIO);
 	}
 
@@ -1175,7 +1189,7 @@ zvolSetVolsize(zvol_state_t *zv)
 	 */
 	/* Inform clients of this device that size has changed */
 	if ((error = zvol->refreshDevice()) != 0) {
-		dprintf("%s refreshDevice error %d\n", __func__, error);
+		ddprintf("%s refreshDevice error %d\n", __func__, error);
 		return (error);
 	}
 

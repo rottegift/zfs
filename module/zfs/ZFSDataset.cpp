@@ -40,13 +40,24 @@
 #undef	dprintf
 #endif
 #define	dprintf(fmt, ...) do {						\
-	IOLog("ZFSDataset %s " fmt "\n", __func__, ##__VA_ARGS__);	\
+  if (zfs_flags & ZFS_DEBUG_DPRINTF)                                    \
+	IOLog("ZFS: ZFSDataset %s " fmt "\n", __func__, ##__VA_ARGS__);	\
 _NOTE(CONSTCOND) } while (0)
 #else
 #ifndef dprintf
 #define	dprintf(fmt, ...)	do { } while (0);
 #endif
 #endif /* if DEBUG or ZFS_DEBUG */
+
+#ifndef ddprintf
+#if defined(DEBUG) || defined(ZFS_DEBUG)
+#define ddprintf(fmt, ...) do {                                                   \
+  IOLog("ZFS: ZFSDataset %s " fmt "\n", __func__, ##__VA_ARGS__);                 \
+_NOTE(CONSTCOND) } while (0)
+#else
+#define ddprintf(fmt, ...)      do { } while (0)
+#endif
+#endif
 
 #define	DPRINTF_FUNC()	do { dprintf(""); } while (0);
 
@@ -216,7 +227,7 @@ kIOBlockStorageDeviceTypeGeneric
 	     || !protocolDict || !virtualSymbol || !internalSymbol
 #endif
 	    ) {
-		dprintf("symbol allocation failed");
+		ddprintf("symbol allocation failed");
 		OSSafeReleaseNULL(newProps);
 		OSSafeReleaseNULL(deviceDict);
 #if 0
@@ -258,7 +269,7 @@ kIOBlockStorageDeviceTypeGeneric
 	    protocolDict) == false
 #endif
 	    ) {
-		dprintf("setup properties failed");
+		ddprintf("setup properties failed");
 		OSSafeReleaseNULL(newProps);
 		OSSafeReleaseNULL(deviceDict);
 #if 0
@@ -277,7 +288,7 @@ kIOBlockStorageDeviceTypeGeneric
 	    newProps);
 	OSSafeReleaseNULL(newProps);
 
-	if (!ret) dprintf("IOMedia init failed");
+	if (!ret) printf("IOMedia init failed");
 
 	return (ret);
 
@@ -348,7 +359,7 @@ ZFSDataset::setDatasetName(const char *name)
 	const char *newname;
 
 	if (!name || name[0] == '\0') {
-		dprintf("missing name");
+		ddprintf("missing name");
 		return (false);
 	}
 
@@ -373,14 +384,14 @@ ZFSDataset::setDatasetName(const char *name)
 #if 0
 	nameString = OSString::withCString(newname);
 	if (newname == NULL || nameString == NULL) {
-		dprintf("couldn't make name strings");
+		ddprintf("couldn't make name strings");
 		OSSafeReleaseNULL(nameString);
 		if (newname) kmem_free(newname, len);
 		return (false);
 	}
 #else
 	if (datasetString == NULL) {
-		dprintf("couldn't make name strings");
+		ddprintf("couldn't make name strings");
 		return (false);
 	}
 #endif
@@ -399,7 +410,7 @@ ZFSDataset::setDatasetName(const char *name)
 	    getProperty(kIOPropertyDeviceCharacteristicsKey))) == NULL) {
 	    /* Unlock IORegistryEntry */
 		unlockForArbitration();
-		dprintf("couldn't get prop dict");
+		ddprintf("couldn't get prop dict");
 	}
 	prevDict->retain();
 	unlockForArbitration();
@@ -407,7 +418,7 @@ ZFSDataset::setDatasetName(const char *name)
 	/* Clone existing dictionary */
 	if (prevDict) {
 		if ((newDict = OSDictionary::withDictionary(prevDict)) == NULL) {
-			dprintf("couldn't clone prop dict");
+			ddprintf("couldn't clone prop dict");
 		}
 		OSSafeReleaseNULL(prevDict);
 		/* Non-fatal at the moment */
@@ -415,7 +426,7 @@ ZFSDataset::setDatasetName(const char *name)
 
 	/* If prevDict did not exist or couldn't be copied, make new */
 	if (!newDict && (newDict = OSDictionary::withCapacity(1)) == NULL) {
-		dprintf("couldn't make new prop dict");
+		ddprintf("couldn't make new prop dict");
 	}
 
 	/* If we have a new or copied dict at this point */
@@ -423,7 +434,7 @@ ZFSDataset::setDatasetName(const char *name)
 		/* Add or replace dictionary Product Name string */
 		if (newDict->setObject(kIOPropertyProductNameKey,
 		    datasetString) == false) {
-			dprintf("couldn't set name");
+			ddprintf("couldn't set name");
 			OSSafeReleaseNULL(datasetString);
 			//OSSafeReleaseNULL(nameString);
 			//kmem_free(newname, len);
@@ -436,7 +447,7 @@ ZFSDataset::setDatasetName(const char *name)
 		if (setProperty(kIOPropertyDeviceCharacteristicsKey,
 		    newDict) == false) {
 			unlockForArbitration();
-			dprintf("couldn't set name");
+			ddprintf("couldn't set name");
 			OSSafeReleaseNULL(datasetString);
 			//OSSafeReleaseNULL(nameString);
 			//kmem_free(newname, len);
@@ -474,7 +485,7 @@ get_objnum(const char *name)
 
 	error = dmu_objset_own(name, DMU_OST_ZFS, B_TRUE, FTAG, &os);
 	if (error != 0) {
-		dprintf("couldn't open dataset %d", error);
+		ddprintf("couldn't open dataset %d", error);
 		return (0);
 	}
 
@@ -508,7 +519,7 @@ ZFSDataset::withDatasetNameAndSize(const char *name, uint64_t size)
 	DPRINTF_FUNC();
 
 	if (!name || name[0] == '\0') {
-		dprintf("missing name");
+		ddprintf("missing name");
 		/* Nothing allocated or retained yet */
 		return (NULL);
 	}
@@ -519,12 +530,12 @@ ZFSDataset::withDatasetNameAndSize(const char *name, uint64_t size)
 	property = copyProperty(kZFSPoolSizeKey, gIOServicePlane,
 	    kIORegistryIterateRecursively|kIORegistryIterateParents);
 	if (!property) {
-		dprintf("couldn't get pool size");
+		ddprintf("couldn't get pool size");
 		/* Nothing allocated or retained yet */
 		return (NULL);
 	}
 	if ((sizeNum = OSDynamicCast(OSNumber, property)) == NULL) {
-		dprintf("couldn't cast pool size");
+		ddprintf("couldn't cast pool size");
 		goto error;
 	}
 	size = sizeNum->unsigned64BitValue();
@@ -533,7 +544,7 @@ ZFSDataset::withDatasetNameAndSize(const char *name, uint64_t size)
 #endif
 
 	if (zfs_vfs_uuid_gen(name, uuid) != 0) {
-		dprintf("UUID gen failed");
+		ddprintf("UUID gen failed");
 		goto error;
 	}
 	//uuid_unparse(uuid, uuid_cstr);
@@ -542,20 +553,20 @@ ZFSDataset::withDatasetNameAndSize(const char *name, uint64_t size)
 
 	uuidStr = OSString::withCString(uuid_cstr);
 	if (!uuidStr) {
-		dprintf("uuidStr alloc failed");
+		ddprintf("uuidStr alloc failed");
 		goto error;
 	}
 
 	dataset = new ZFSDataset;
 	if (!dataset) {
-		dprintf("allocation failed");
+		ddprintf("allocation failed");
 		goto error;
 	}
 
 	/* Own the dmu objset to get properties */
 	error = dmu_objset_own(name, DMU_OST_ZFS, B_TRUE, B_FALSE, FTAG, &os);
 	if (error != 0) {
-		dprintf("couldn't open dataset %d", error);
+		ddprintf("couldn't open dataset %d", error);
 		goto error;
 	}
 
@@ -573,7 +584,7 @@ ZFSDataset::withDatasetNameAndSize(const char *name, uint64_t size)
 
 	if (dsl_prop_get_integer(name, "readonly", &readonly, NULL) != 0) {
 		dmu_objset_disown(os, B_FALSE, FTAG);
-		dprintf("get readonly property failed");
+		ddprintf("get readonly property failed");
 		goto error;
 	}
 	//size = (1<<30);
@@ -595,12 +606,12 @@ dprintf("[%s] readonly %lld isWritable %d guid %016llx"
 	if (dataset->init(/* base */ 0, size, DEV_BSIZE,
 	    /* attributes */ 0, /* isWhole */ false, isWritable,
 	    kZFSContentHint, /* properties */ NULL) == false) {
-		dprintf("init failed");
+		ddprintf("init failed");
 		goto error;
 	}
 
 	if (dataset->setDatasetName(name) == false) {
-		dprintf("invalid name");
+		ddprintf("invalid name");
 		goto error;
 	}
 
@@ -650,7 +661,7 @@ ZFSDataset::read(IOService *client,
 
 	//if (!completion || !completion->action) {
 	if (!completion) {
-		dprintf("invalid completion");
+		ddprintf("invalid completion");
 		return;
 	}
 
@@ -680,7 +691,7 @@ ZFSDataset::write(IOService *client,
 
 	//if (!completion || !completion->action) {
 	if (!completion) {
-		dprintf("invalid completion");
+		ddprintf("invalid completion");
 		return;
 	}
 
