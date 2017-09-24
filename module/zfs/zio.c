@@ -149,13 +149,15 @@ zio_init(void)
 #define KMF_LITE        0x00000100      /* lightweight debugging */
 #define KMF_HASH                0x00000200      /* cache has hash table */
 #define KMF_BUFTAG      (KMF_DEADBEEF | KMF_REDZONE)
+#define KMF_AUDIT       0x00000001
 
 	for (c = 0; c < SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT; c++) {
 		size_t size = (c + 1) << SPA_MINBLOCKSHIFT;
 		size_t p2 = size;
 		size_t align = 0;
-		size_t cflags = (size > zio_buf_debug_limit) ? KMC_NODEBUG : 0;
+		//size_t cflags = (size > zio_buf_debug_limit) ? KMC_NODEBUG : 0;
 		//size_t cflags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
+		size_t cflags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
 
 #ifdef _ILP32
 		/*
