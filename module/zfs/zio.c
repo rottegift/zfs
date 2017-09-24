@@ -156,8 +156,8 @@ zio_init(void)
 		size_t p2 = size;
 		size_t align = 0;
 		//size_t cflags = (size > zio_buf_debug_limit) ? KMC_NODEBUG : 0;
-		//size_t cflags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
-		size_t cflags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
+		size_t cflags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
+		//size_t cflags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
 
 #ifdef _ILP32
 		/*

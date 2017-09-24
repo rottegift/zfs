@@ -324,8 +324,8 @@ abd_init(void)
 
 	ASSERT3P(abd_chunk_arena, !=, NULL);
 
-	int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
-	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
+	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
+	int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
 	//int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
 	cache_debug_flags |= KMC_ARENA_SLAB; /* use large slabs */
 
