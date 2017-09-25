@@ -1639,7 +1639,7 @@ dmu_write_iokit_dnode(dnode_t *dn, uint64_t *offset, uint64_t position,
             uint64_t done;
             dmu_buf_t *db = dbp[i];
 
-            ASSERT(size > 0);
+            ASSERT3U(*size,>,0);
 
             //bufoff = uio->uio_loffset - db->db_offset;
             bufoff = (position + *offset) - db->db_offset;
