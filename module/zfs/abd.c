@@ -272,7 +272,8 @@ static void
 abd_free_chunk_to_slab(void *c)
 {
 #ifdef _KERNEL
-	kmem_cache_free_to_slab(abd_chunk_cache, c);
+	//kmem_cache_free_to_slab(abd_chunk_cache, c);
+	kmem_cache_free(abd_chunk_cache, c);
 #else
 	kmem_cache_free(abd_chunk_cache, c);
 #endif
