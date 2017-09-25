@@ -330,7 +330,10 @@ abd_init(void)
 	//int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
 	//cache_debug_flags |= KMC_ARENA_SLAB; /* use large slabs */
 
-	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, zfs_abd_chunk_size,
+	size_t align = 0; // must be zero if not KMC_ARENA_SLAB and KMF_{AUDIT,LITE,CONTENTS}
+	//size_t align = zfs_abd_chunk_size; // if KMC_ARENA_SLAB
+
+	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, align,
 	    NULL, NULL, NULL, NULL, abd_chunk_arena, cache_debug_flags);
 
 	VERIFY3P(abd_chunk_cache, !=, NULL);
