@@ -458,7 +458,7 @@ pbkdf2(uint8_t *passphrase, size_t passphraselen, uint8_t *salt,
 
 	/* initialize passphrase as a crypto key */
 	key.ck_format = CRYPTO_KEY_RAW;
-	key.ck_length = BYTES_TO_BITS(passphraselen);
+	key.ck_length = CRYPTO_BYTES2BITS(passphraselen);
 	key.ck_data = passphrase;
 
 	/*
