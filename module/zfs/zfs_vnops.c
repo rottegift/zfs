@@ -511,7 +511,6 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		    UBC_PUSHDIRTY);
 	}
 
-
 	if (upl_page > 0)
 		VNOPS_STAT_INCR(update_pages, (uint64_t) upl_page);
 }
@@ -1273,10 +1272,10 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	if (ioflag & (FSYNC | FDSYNC) ||
 	    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS) {
 		zil_commit(zilog, zp->z_id);
-		if (spl_UBCINFOEXISTS(vp)) {
+		if (zp->z_is_mapped && spl_UBCINFOEXISTS(vp)) {
 			VNOPS_STAT_BUMP(zfs_write_ubc_msync);
 			(void) ubc_msync(vp, 0, ubc_getsize(vp), NULL,
-			    UBC_PUSHALL | UBC_SYNC);
+			    UBC_PUSHDIRTY | UBC_SYNC);
 		}
 	}
 

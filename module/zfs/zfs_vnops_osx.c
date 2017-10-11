@@ -99,9 +99,9 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mnomap_ubc_msync;
 	kstat_named_t reclaim_mapped;
 	kstat_named_t reclaim_mapped_ubc_msync;
+	kstat_named_t null_reclaim;
 	kstat_named_t fsync_ioctl_ubc_msync;
 	kstat_named_t fsync_vnop_ubc_msync;
-	kstat_named_t null_reclaim;
 	kstat_named_t unexpected_dirty_page;
 	kstat_named_t bluster_pageout_pages;
 	kstat_named_t pageoutv2_to_pageout;
@@ -116,12 +116,12 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_idem",                         KSTAT_DATA_UINT64 },
 	{ "mmap_idem_ubc_msync",               KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
-	{ "mnomap_ubc_mmap",                   KSTAT_DATA_UINT64 },
+	{ "mnomap_ubc_msync",                  KSTAT_DATA_UINT64 },
 	{ "reclaim_mapped",                    KSTAT_DATA_UINT64 },
 	{ "reclaim_mapped_ubc_msync",          KSTAT_DATA_UINT64 },
+	{ "null_reclaim",                      KSTAT_DATA_UINT64 },
 	{ "fsync_ioctl_ubc_msync",             KSTAT_DATA_UINT64 },
 	{ "fsync_vnop_ubc_msync",              KSTAT_DATA_UINT64 },
-	{ "null_reclaim",                      KSTAT_DATA_UINT64 },
 	{ "unexpected_dirty_page",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_to_pageout",              KSTAT_DATA_UINT64 },
