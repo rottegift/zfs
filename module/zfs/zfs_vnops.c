@@ -95,8 +95,6 @@ typedef struct vnops_stats {
 	kstat_named_t dmu_read_uio_dbuf_pages;
 	kstat_named_t cluster_push;
 	kstat_named_t zfs_sync;
-	kstat_named_t update_pages_ubc_msync_in;
-	kstat_named_t update_pages_ubc_msync_out;
 	kstat_named_t zfs_write_ubc_msync;
 	kstat_named_t zfs_fsync_ubc_msync;
 } vnops_stats_t;
@@ -107,8 +105,6 @@ static vnops_stats_t vnops_stats = {
 	{ "dmu_read_uio_dbuf_pages",                     KSTAT_DATA_UINT64 },
 	{ "cluster_push",                                KSTAT_DATA_UINT64 },
 	{ "zfs_sync",                                    KSTAT_DATA_UINT64 },
-	{ "update_pages_ubc_msync_in",                   KSTAT_DATA_UINT64 },
-	{ "update_pages_ubc_msync_out",                  KSTAT_DATA_UINT64 },
 	{ "zfs_write_ubc_msync",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
 };
@@ -416,12 +412,6 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
     dprintf("update_pages %llu - %llu (adjusted %llu - %llu): off %llu\n",
            uio_offset(uio), nbytes, upl_start, upl_size, off);
 
-    if (spl_UBCINFOEXISTS(vp)) {
-	    VNOPS_STAT_BUMP(update_pages_ubc_msync_in);
-		(void) ubc_msync(vp, 0, ubc_getsize(vp), NULL,
-		    UBC_PUSHDIRTY);
-    }
-
     /*
      * Create a UPL for the current range and map its
      * page list into the kernel virtual address space.
@@ -504,12 +494,6 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 * we effectively didn't dirty any pages.
 	 */
 	(void) ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
-
-	if (spl_UBCINFOEXISTS(vp)) {
-		VNOPS_STAT_BUMP(update_pages_ubc_msync_out);
-		(void) ubc_msync(vp, 0, ubc_getsize(vp), NULL,
-		    UBC_PUSHDIRTY);
-	}
 
 	if (upl_page > 0)
 		VNOPS_STAT_INCR(update_pages, (uint64_t) upl_page);
