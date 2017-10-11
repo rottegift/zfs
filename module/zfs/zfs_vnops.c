@@ -416,7 +416,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
     dprintf("update_pages %llu - %llu (adjusted %llu - %llu): off %llu\n",
            uio_offset(uio), nbytes, upl_start, upl_size, off);
 
-    if (UBCINFOEXISTS(vp)) {
+    if (spl_UBCINFOEXISTS(vp)) {
 	    VNOPS_STAT_BUMP(update_pages_ubc_msync_in);
 		(void) ubc_msync(vp, 0, ubc_getsize(vp), NULL,
 		    UBC_PUSHDIRTY);
@@ -505,7 +505,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 */
 	(void) ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 
-	if (UBCINFOEXISTS(vp)) {
+	if (spl_UBCINFOEXISTS(vp)) {
 		VNOPS_STAT_BUMP(update_pages_ubc_msync_out);
 		(void) ubc_msync(vp, 0, ubc_getsize(vp), NULL,
 		    UBC_PUSHDIRTY);
@@ -1273,7 +1273,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	if (ioflag & (FSYNC | FDSYNC) ||
 	    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS) {
 		zil_commit(zilog, zp->z_id);
-		if (UBCINFOEXISTS(vp)) {
+		if (spl_UBCINFOEXISTS(vp)) {
 			VNOPS_STAT_BUMP(zfs_write_ubc_msync);
 			(void) ubc_msync(vp, 0, ubc_getsize(vp), NULL,
 			    UBC_PUSHALL | UBC_SYNC);
@@ -3023,7 +3023,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		VNOPS_STAT_BUMP(zfs_sync);
 	}
 
-	if (UBCINFOEXISTS(vp)) {
+	if (spl_UBCINFOEXISTS(vp)) {
 		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 		(void) ubc_msync(vp, 0, ubc_getsize(vp),
 		    NULL, UBC_PUSHALL | UBC_SYNC);

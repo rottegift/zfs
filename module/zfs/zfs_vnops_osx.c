@@ -519,7 +519,7 @@ zfs_vnop_ioctl(struct vnop_ioctl_args *ap)
 		case F_BARRIERFSYNC:
 			dprintf("%s F_BARRIERFSYNC\n", __func__);
 #endif
-			if (UBCINFOEXISTS(ap->a_vp)) {
+			if (spl_UBCINFOEXISTS(ap->a_vp)) {
 				VNOPS_OSX_STAT_BUMP(fsync_ioctl_ubc_msync);
 				(void) ubc_msync(ap->a_vp, 0,
 				    ubc_getsize(ap->a_vp), NULL,
@@ -1666,7 +1666,7 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	// this might not be needed now
 	//if (vnode_isrecycled(ap->a_vp)) return 0;
 
-	if (UBCINFOEXISTS(ap->a_vp)) {
+	if (spl_UBCINFOEXISTS(ap->a_vp)) {
 		VNOPS_OSX_STAT_BUMP(fsync_vnop_ubc_msync);
 		(void) ubc_msync(ap->a_vp, 0, ubc_getsize(ap->a_vp),
 		    NULL, UBC_PUSHALL | UBC_SYNC);
@@ -2879,7 +2879,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	}
 	mutex_enter(&zp->z_lock);
 	if (zp->z_is_mapped == 1) {
-		if (UBCINFOEXISTS(vp)) {
+		if (spl_UBCINFOEXISTS(vp)) {
 			VNOPS_OSX_STAT_BUMP(mmap_idem_ubc_msync);
 			(void) ubc_msync(vp, 0, ubc_getsize(vp),
 			    NULL, UBC_PUSHDIRTY);
@@ -2914,7 +2914,7 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	dprintf("+vnop_mnomap: %p\n", ap->a_vp);
 
 	/* as in nfs_vnop_mnomap */
-	if (UBCINFOEXISTS(vp)) {
+	if (spl_UBCINFOEXISTS(vp)) {
 		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
 		(void) ubc_msync(vp, 0, ubc_getsize(vp),
 		    NULL, UBC_PUSHALL | UBC_SYNC);
@@ -3046,7 +3046,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	if (!zp) goto out;
 	if (zp->z_is_mapped == 1) {
 		VNOPS_OSX_STAT_BUMP(reclaim_mapped);
-		if (UBCINFOEXISTS(vp)) {
+		if (spl_UBCINFOEXISTS(vp)) {
 			VNOPS_OSX_STAT_BUMP(reclaim_mapped_ubc_msync);
 			(void)ubc_msync(vp, (off_t)0,
 			    ubc_getsize(vp), NULL,
