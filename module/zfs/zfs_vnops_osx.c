@@ -94,8 +94,13 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_set;
 	kstat_named_t mmap_idem;
+	kstat_named_t mmap_idem_ubc_msync;
 	kstat_named_t mnomap_calls;
+	kstat_named_t mnomap_ubc_msync;
 	kstat_named_t reclaim_mapped;
+	kstat_named_t reclaim_mapped_ubc_msync;
+	kstat_named_t fsync_ioctl_ubc_msync;
+	kstat_named_t fsync_vnop_ubc_msync;
 	kstat_named_t null_reclaim;
 	kstat_named_t unexpected_dirty_page;
 	kstat_named_t bluster_pageout_pages;
@@ -109,13 +114,18 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_set",                          KSTAT_DATA_UINT64 },
 	{ "mmap_idem",                         KSTAT_DATA_UINT64 },
+	{ "mmap_idem_ubc_msync",               KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
+	{ "mnomap_ubc_mmap",                   KSTAT_DATA_UINT64 },
 	{ "reclaim_mapped",                    KSTAT_DATA_UINT64 },
+	{ "reclaim_mapped_ubc_msync",          KSTAT_DATA_UINT64 },
+	{ "fsync_ioctl_ubc_msync",             KSTAT_DATA_UINT64 },
+	{ "fsync_vnop_ubc_msync",              KSTAT_DATA_UINT64 },
 	{ "null_reclaim",                      KSTAT_DATA_UINT64 },
 	{ "unexpected_dirty_page",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_to_pageout",              KSTAT_DATA_UINT64 },
-	{ "pageoutv1_pages",                      KSTAT_DATA_UINT64 },
+	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 };
 
@@ -509,6 +519,12 @@ zfs_vnop_ioctl(struct vnop_ioctl_args *ap)
 		case F_BARRIERFSYNC:
 			dprintf("%s F_BARRIERFSYNC\n", __func__);
 #endif
+			if (UBCINFOEXISTS(ap->a_vp)) {
+				VNOPS_OSX_STAT_BUMP(fsync_ioctl_ubc_msync);
+				(void) ubc_msync(ap->a_vp, 0,
+				    ubc_getsize(ap->a_vp), NULL,
+				    UBC_PUSHALL | UBC_SYNC);
+			}
 			error = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 			break;
 
@@ -1649,6 +1665,12 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	 */
 	// this might not be needed now
 	//if (vnode_isrecycled(ap->a_vp)) return 0;
+
+	if (UBCINFOEXISTS(ap->a_vp)) {
+		VNOPS_OSX_STAT_BUMP(fsync_vnop_ubc_msync);
+		(void) ubc_msync(ap->a_vp, 0, ubc_getsize(ap->a_vp),
+		    NULL, UBC_PUSHALL | UBC_SYNC);
+	}
 
 	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 
@@ -2856,9 +2878,14 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		return (ENODEV);
 	}
 	mutex_enter(&zp->z_lock);
-	if (zp->z_is_mapped == 1)
+	if (zp->z_is_mapped == 1) {
+		if (UBCINFOEXISTS(vp)) {
+			VNOPS_OSX_STAT_BUMP(mmap_idem_ubc_msync);
+			(void) ubc_msync(vp, 0, ubc_getsize(vp),
+			    NULL, UBC_PUSHDIRTY);
+		}
 		VNOPS_OSX_STAT_BUMP(mmap_idem);
-	else
+	} else
 		VNOPS_OSX_STAT_BUMP(mmap_set);
 	zp->z_is_mapped = 1;
 	mutex_exit(&zp->z_lock);
@@ -2885,6 +2912,13 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 
 	dprintf("+vnop_mnomap: %p\n", ap->a_vp);
+
+	/* as in nfs_vnop_mnomap */
+	if (UBCINFOEXISTS(vp)) {
+		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
+		(void) ubc_msync(vp, 0, ubc_getsize(vp),
+		    NULL, UBC_PUSHALL | UBC_SYNC);
+	}
 
 	ZFS_ENTER(zfsvfs);
 
@@ -3010,7 +3044,15 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	dprintf("+vnop_reclaim zp %p/%p type %d\n", zp, vp, vnode_vtype(vp));
 	if (!zp) VNOPS_OSX_STAT_BUMP(null_reclaim);
 	if (!zp) goto out;
-	if (zp->z_is_mapped == 1) VNOPS_OSX_STAT_BUMP(reclaim_mapped);
+	if (zp->z_is_mapped == 1) {
+		VNOPS_OSX_STAT_BUMP(reclaim_mapped);
+		if (UBCINFOEXISTS(vp)) {
+			VNOPS_OSX_STAT_BUMP(reclaim_mapped_ubc_msync);
+			(void)ubc_msync(vp, (off_t)0,
+			    ubc_getsize(vp), NULL,
+			    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
+		}
+	}
 
 	zfsvfs = zp->z_zfsvfs;
 
