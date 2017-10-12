@@ -2925,8 +2925,8 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 			VNOPS_OSX_STAT_BUMP(mmap_idem_ubc_msync);
 			(void) ubc_msync(vp, 0, ubc_getsize(vp),
 			    NULL, UBC_PUSHALL | UBC_INVALIDATE);
-#endif
 		}
+#endif
 		if (need_unlock == B_TRUE) {
 			rw_exit(&zp->z_map_lock);
 		}
