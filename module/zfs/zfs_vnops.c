@@ -417,7 +417,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
      * page list into the kernel virtual address space.
      */
     error = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl,
-						   UPL_FILE_IO | UPL_SET_LITE);
+						   UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY);
 	if ((error != KERN_SUCCESS) || !upl) {
 		printf("ZFS: update_pages failed to ubc_create_upl: %d\n", error);
 		return;
@@ -597,7 +597,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
      * page list into the kernel virtual address space.
      */
     error = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl,
-						   UPL_FILE_IO | UPL_SET_LITE);
+						   UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY);
 	if ((error != KERN_SUCCESS) || !upl) {
 		printf("ZFS: mappedread failed to ubc_create_upl: %d\n", error);
 		return EIO;
@@ -1259,7 +1259,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		if (zp->z_is_mapped && spl_UBCINFOEXISTS(vp)) {
 			VNOPS_STAT_BUMP(zfs_write_ubc_msync);
 			(void) ubc_msync(vp, 0, ubc_getsize(vp), NULL,
-			    UBC_PUSHDIRTY | UBC_SYNC);
+			    UBC_PUSHDIRTY | UBC_INVALIDATE | UBC_SYNC);
 		}
 	}
 
@@ -3009,7 +3009,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	if (spl_UBCINFOEXISTS(vp)) {
 		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 		(void) ubc_msync(vp, 0, ubc_getsize(vp),
-		    NULL, UBC_PUSHALL | UBC_SYNC);
+		    NULL, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 	}
 	//tsd_set(zfs_fsyncer_key, NULL);
 	return (0);

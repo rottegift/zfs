@@ -523,7 +523,7 @@ zfs_vnop_ioctl(struct vnop_ioctl_args *ap)
 				VNOPS_OSX_STAT_BUMP(fsync_ioctl_ubc_msync);
 				(void) ubc_msync(ap->a_vp, 0,
 				    ubc_getsize(ap->a_vp), NULL,
-				    UBC_PUSHALL | UBC_SYNC);
+				    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 			}
 			error = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 			break;
@@ -1669,7 +1669,7 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	if (spl_UBCINFOEXISTS(ap->a_vp)) {
 		VNOPS_OSX_STAT_BUMP(fsync_vnop_ubc_msync);
 		(void) ubc_msync(ap->a_vp, 0, ubc_getsize(ap->a_vp),
-		    NULL, UBC_PUSHALL | UBC_SYNC);
+		    NULL, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 	}
 
 	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
@@ -2882,7 +2882,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		if (spl_UBCINFOEXISTS(vp)) {
 			VNOPS_OSX_STAT_BUMP(mmap_idem_ubc_msync);
 			(void) ubc_msync(vp, 0, ubc_getsize(vp),
-			    NULL, UBC_PUSHDIRTY);
+			    NULL, UBC_PUSHALL | UBC_INVALIDATE);
 		}
 		VNOPS_OSX_STAT_BUMP(mmap_idem);
 	} else
@@ -2917,7 +2917,7 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	if (spl_UBCINFOEXISTS(vp)) {
 		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
 		(void) ubc_msync(vp, 0, ubc_getsize(vp),
-		    NULL, UBC_PUSHALL | UBC_SYNC);
+		    NULL, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 	}
 
 	ZFS_ENTER(zfsvfs);
