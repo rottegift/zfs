@@ -105,6 +105,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t unexpected_clean_page;
 	kstat_named_t bluster_pageout_msync_pages;
 	kstat_named_t bluster_pageout_no_msync_pages;
+	kstat_named_t pageoutv2_lock_held;
 	kstat_named_t pageoutv2_msync_flag;
 	kstat_named_t pageoutv2_to_pageout;
 	kstat_named_t pageoutv1_pages;
@@ -127,6 +128,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "unexpected_clean_page",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_msync_pages",       KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_no_msync_pages",    KSTAT_DATA_UINT64 },
+	{ "pageoutv2_lock_held",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_msync_flag",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_to_pageout",              KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
@@ -2646,7 +2648,8 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		rw_enter(&zp->z_map_lock, RW_WRITER);
 		need_unlock = B_TRUE;
 	} else {
-		printf("ZFS: %s: z_map_lock already held\n", __func__);
+		VNOPS_OSX_STAT_BUMP(pageoutv2_lock_held);
+		dprintf("ZFS: %s: z_map_lock already held\n", __func__);
 	}
 
 	rl = zfs_range_lock(zp, ap->a_f_offset, a_size, RL_WRITER);
