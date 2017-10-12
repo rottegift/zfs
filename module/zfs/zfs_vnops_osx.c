@@ -523,12 +523,22 @@ zfs_vnop_ioctl(struct vnop_ioctl_args *ap)
 		case F_BARRIERFSYNC:
 			dprintf("%s F_BARRIERFSYNC\n", __func__);
 #endif
+			boolean_t need_unlock = B_FALSE;
+			if (!rw_write_held(&zp->z_map_lock)) {
+				rw_enter(&zp->z_map_lock, RW_WRITER);
+				need_unlock = B_TRUE;
+			} else {
+				printf("ZFS: %s: F_...FSYNC already holds z_map_lock\n", __func__);
+			}
 			error = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 			if (spl_UBCINFOEXISTS(ap->a_vp)) {
 				VNOPS_OSX_STAT_BUMP(fsync_ioctl_ubc_msync);
 				(void) ubc_msync(ap->a_vp, 0,
 				    ubc_getsize(ap->a_vp), NULL,
 				    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
+			}
+			if (need_unlock == B_TRUE) {
+				rw_exit(&zp->z_map_lock);
 			}
 			break;
 
