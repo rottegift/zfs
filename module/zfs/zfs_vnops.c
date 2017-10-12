@@ -94,9 +94,7 @@ typedef struct vnops_stats {
 	kstat_named_t mappedread_pages;
 	kstat_named_t dmu_read_uio_dbuf_pages;
 	kstat_named_t cluster_push;
-	kstat_named_t zfs_sync;
-	kstat_named_t zfs_write_ubc_msync;
-	kstat_named_t zfs_fsync_ubc_msync;
+	kstat_named_t zfs_fsync;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -104,9 +102,7 @@ static vnops_stats_t vnops_stats = {
 	{ "mappedread_pages",                            KSTAT_DATA_UINT64 },
 	{ "dmu_read_uio_dbuf_pages",                     KSTAT_DATA_UINT64 },
 	{ "cluster_push",                                KSTAT_DATA_UINT64 },
-	{ "zfs_sync",                                    KSTAT_DATA_UINT64 },
-	{ "zfs_write_ubc_msync",                         KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
+	{ "zfs_fsync",                                    KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -787,10 +783,8 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 			error = dmu_read_uio_dbuf(sa_get_db(zp->z_sa_hdl),
 			    uio, nbytes);
 			if (error == 0) {
-				VNOPS_STAT_INCR(dmu_read_uio_dbuf_pages,
-				    1ULL+
-				    P2ROUNDUP((uint64_t)nbytes/(uint64_t)PAGESIZE, (uint64_t)PAGESIZE) /
-				    (uint64_t)PAGESIZE);
+				uint64_t pgs = 1ULL + atop_64((uint64_t)nbytes);
+				VNOPS_STAT_INCR(dmu_read_uio_dbuf_pages, pgs);
 			}
 		}
 
@@ -1256,11 +1250,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	if (ioflag & (FSYNC | FDSYNC) ||
 	    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS) {
 		zil_commit(zilog, zp->z_id);
-		if (zp->z_is_mapped && spl_UBCINFOEXISTS(vp)) {
-			VNOPS_STAT_BUMP(zfs_write_ubc_msync);
-			(void) ubc_msync(vp, 0, ubc_getsize(vp), NULL,
-			    UBC_PUSHDIRTY | UBC_INVALIDATE | UBC_SYNC);
-		}
 	}
 
 	ZFS_EXIT(zfsvfs);
@@ -3003,14 +2992,9 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		ZFS_VERIFY_ZP(zp);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		ZFS_EXIT(zfsvfs);
-		VNOPS_STAT_BUMP(zfs_sync);
+		VNOPS_STAT_BUMP(zfs_fsync);
 	}
 
-	if (spl_UBCINFOEXISTS(vp)) {
-		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
-		(void) ubc_msync(vp, 0, ubc_getsize(vp),
-		    NULL, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
-	}
 	//tsd_set(zfs_fsyncer_key, NULL);
 	return (0);
 }

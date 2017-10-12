@@ -103,7 +103,9 @@ typedef struct vnops_osx_stats {
 	kstat_named_t fsync_ioctl_ubc_msync;
 	kstat_named_t fsync_vnop_ubc_msync;
 	kstat_named_t unexpected_dirty_page;
-	kstat_named_t bluster_pageout_pages;
+	kstat_named_t bluster_pageout_msync_pages;
+	kstat_named_t bluster_pageout_no_msync_pages;
+	kstat_named_t pageoutv2_msync_flag;
 	kstat_named_t pageoutv2_to_pageout;
 	kstat_named_t pageoutv1_pages;
 	kstat_named_t pagein_pages;
@@ -123,7 +125,9 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "fsync_ioctl_ubc_msync",             KSTAT_DATA_UINT64 },
 	{ "fsync_vnop_ubc_msync",              KSTAT_DATA_UINT64 },
 	{ "unexpected_dirty_page",             KSTAT_DATA_UINT64 },
-	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
+	{ "bluster_pageout_msync_pages",       KSTAT_DATA_UINT64 },
+	{ "bluster_pageout_no_msync_pages",    KSTAT_DATA_UINT64 },
+	{ "pageoutv2_msync_flag",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_to_pageout",              KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
@@ -519,13 +523,13 @@ zfs_vnop_ioctl(struct vnop_ioctl_args *ap)
 		case F_BARRIERFSYNC:
 			dprintf("%s F_BARRIERFSYNC\n", __func__);
 #endif
+			error = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 			if (spl_UBCINFOEXISTS(ap->a_vp)) {
 				VNOPS_OSX_STAT_BUMP(fsync_ioctl_ubc_msync);
 				(void) ubc_msync(ap->a_vp, 0,
 				    ubc_getsize(ap->a_vp), NULL,
 				    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 			}
-			error = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 			break;
 
 		case F_CHKCLEAN:
@@ -1666,13 +1670,13 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	// this might not be needed now
 	//if (vnode_isrecycled(ap->a_vp)) return 0;
 
+	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
+
 	if (spl_UBCINFOEXISTS(ap->a_vp)) {
 		VNOPS_OSX_STAT_BUMP(fsync_vnop_ubc_msync);
 		(void) ubc_msync(ap->a_vp, 0, ubc_getsize(ap->a_vp),
 		    NULL, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 	}
-
-	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 
 	if (err) dprintf("%s err %d\n", __func__, err);
 
@@ -2135,9 +2139,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	ubc_upl_unmap(upl);
 
 	if (bytes_read > 0) {
-		const uint64_t pgsz = (uint64_t)PAGESIZE;
-		const uint64_t rup = P2ROUNDUP(bytes_read, pgsz);
-		const uint64_t pgs = 1ULL + rup/pgsz;
+		const uint64_t pgs = 1ULL + atop_64((uint64_t)bytes_read);
 		VNOPS_OSX_STAT_INCR(pagein_pages, pgs);
 	}
 
@@ -2522,13 +2524,15 @@ static int bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 #endif
 
-
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, &vaddr[upl_offset], tx);
 
-	VNOPS_OSX_STAT_INCR(bluster_pageout_pages,
-	    1ULL+
-	    (P2ROUNDUP((uint64_t)size/(uint64_t)PAGESIZE, (uint64_t)PAGESIZE) /
-		(uint64_t)PAGESIZE));
+	if ((flags & UPL_UBC_MSYNC) == UPL_UBC_MSYNC) {
+		const uint64_t pgs = atop_64((uint64_t)size) + 1ULL;
+		VNOPS_OSX_STAT_INCR(bluster_pageout_msync_pages, pgs);
+	} else {
+		const uint64_t pgs = atop_64((uint64_t)size) + 1ULL;
+		VNOPS_OSX_STAT_INCR(bluster_pageout_no_msync_pages, pgs);
+	}
 
 	return 0;
 }
@@ -2633,6 +2637,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 
 	if (a_flags & UPL_MSYNC) {
 		request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
+		VNOPS_OSX_STAT_BUMP(pageoutv2_msync_flag);
 	}
 	else {
 		request_flags = UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY;
@@ -2911,14 +2916,9 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	znode_t *zp = VTOZ(vp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 
-	dprintf("+vnop_mnomap: %p\n", ap->a_vp);
+	DECLARE_CRED_AND_CONTEXT(ap);
 
-	/* as in nfs_vnop_mnomap */
-	if (spl_UBCINFOEXISTS(vp)) {
-		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
-		(void) ubc_msync(vp, 0, ubc_getsize(vp),
-		    NULL, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
-	}
+	dprintf("+vnop_mnomap: %p\n", ap->a_vp);
 
 	ZFS_ENTER(zfsvfs);
 
@@ -2935,6 +2935,15 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	 */
 	/* zp->z_is_mapped = 0; */
 	mutex_exit(&zp->z_lock);
+
+	/* as in nfs_vnop_mnomap, which does nfs_flush then ubc_msync */
+	zfs_fsync(vp, 0, cr, ct);
+	if (spl_UBCINFOEXISTS(vp)) {
+		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
+		(void) ubc_msync(vp, 0, ubc_getsize(vp),
+		    NULL, UBC_PUSHALL | UBC_SYNC);
+	}
+
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
 	ZFS_EXIT(zfsvfs);
