@@ -2894,6 +2894,8 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		if (!rw_write_held(&zp->z_map_lock)) {
 			rw_enter(&zp->z_map_lock, RW_WRITER);
 			need_unlock = B_TRUE;
+		} else {
+			printf("ZFS: %s: z_map_lock already held\n", __func__);
 		}
 		if (spl_UBCINFOEXISTS(vp)) {
 			VNOPS_OSX_STAT_BUMP(mmap_idem_ubc_msync);
@@ -2959,6 +2961,8 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	if (!rw_write_held(&zp->z_map_lock)) {
 		rw_enter(&zp->z_map_lock, RW_WRITER);
 		need_unlock = B_TRUE;
+	} else {
+		printf("ZFS: %s: z_map_lock already held\n", __func__);
 	}
 	if (spl_UBCINFOEXISTS(vp)) {
 		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
