@@ -2090,6 +2090,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	if (!rw_write_held(&zp->z_map_lock)) {
 		rw_enter(&zp->z_map_lock, RW_WRITER);
 		need_unlock = TRUE;
+	} else {
+		printf("ZFS: %s: already have z_map_lock\n", __func__);
 	}
 
 	if (ubc_upl_map(upl, (vm_offset_t *)&vaddr) != KERN_SUCCESS) {
@@ -2952,8 +2954,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	/* zp->z_is_mapped = 0; */
 	mutex_exit(&zp->z_lock);
 
-	/* as in nfs_vnop_mnomap, which does nfs_flush then ubc_msync */
-	zfs_fsync(vp, 0, cr, ct);
 	/* we should hold the z_map_lock here to block out
 	 * update_pages() (from zfs_write), zfs_vnop_pagein(),
 	 * and zfs_vnop_mmap() (and other threads doing mnomap) */
@@ -2964,6 +2964,8 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	} else {
 		printf("ZFS: %s: z_map_lock already held\n", __func__);
 	}
+	/* as in nfs_vnop_mnomap, which does nfs_flush then ubc_msync */
+	zfs_fsync(vp, 0, cr, ct);
 	if (spl_UBCINFOEXISTS(vp)) {
 		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
 		(void) ubc_msync(vp, 0, ubc_getsize(vp),
