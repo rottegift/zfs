@@ -431,7 +431,9 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 * mmap()ed at some point in the past (and may still be
 	 * mmap()ed).
 	 *
-	 * We also lock against other writers to the same file.
+	 * We also lock against other writers to the same file,
+	 * and new callers of zfs_vnop_mmap() or zfs_vnop_mnomap(),
+	 * since those may update the file as well.
 	 *
 	 * While this penalizes writes to a file that has been mmap()ed,
 	 * we can guarantee that whole zfs_write() updates or whole pageins

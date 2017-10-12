@@ -2083,6 +2083,9 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	 * We also lock against zfs_vnop_pageoutv2 and zfs_vnop_pageout,
 	 * and ourselves (if in other threads), since any of these may
 	 * modify the UBC with respect to this file.
+	 *
+	 * Finally we also lock against new callers of zfs_vnop_mmap() and
+	 * zfs_vnop_mnomap(), since those may update the file as well.
 	 */
 	if (!rw_write_held(&zp->z_map_lock)) {
 		rw_enter(&zp->z_map_lock, RW_WRITER);
@@ -2884,10 +2887,21 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	}
 	mutex_enter(&zp->z_lock);
 	if (zp->z_is_mapped == 1) {
+		/* we should hold the z_map_lock here to block
+		 * out update_pages() (from zfs_write), zfs_vnop_pagein(),
+		 * and zfs_vnop_mnomap() */
+		boolean_t need_unlock = B_FALSE;
+		if (!rw_write_held(&zp->z_map_lock)) {
+			rw_enter(&zp->z_map_lock, RW_WRITER);
+			need_unlock = B_TRUE;
+		}
 		if (spl_UBCINFOEXISTS(vp)) {
 			VNOPS_OSX_STAT_BUMP(mmap_idem_ubc_msync);
 			(void) ubc_msync(vp, 0, ubc_getsize(vp),
 			    NULL, UBC_PUSHALL | UBC_INVALIDATE);
+		}
+		if (need_unlock == B_TRUE) {
+			rw_exit(&zp->z_map_lock);
 		}
 		VNOPS_OSX_STAT_BUMP(mmap_idem);
 	} else
@@ -2938,10 +2952,21 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 
 	/* as in nfs_vnop_mnomap, which does nfs_flush then ubc_msync */
 	zfs_fsync(vp, 0, cr, ct);
+	/* we should hold the z_map_lock here to block out
+	 * update_pages() (from zfs_write), zfs_vnop_pagein(),
+	 * and zfs_vnop_mmap() (and other threads doing mnomap) */
+	boolean_t need_unlock  = B_FALSE;
+	if (!rw_write_held(&zp->z_map_lock)) {
+		rw_enter(&zp->z_map_lock, RW_WRITER);
+		need_unlock = B_TRUE;
+	}
 	if (spl_UBCINFOEXISTS(vp)) {
 		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
 		(void) ubc_msync(vp, 0, ubc_getsize(vp),
 		    NULL, UBC_PUSHALL | UBC_SYNC);
+	}
+	if (need_unlock == B_TRUE) {
+		rw_exit(&zp->z_map_lock);
 	}
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
