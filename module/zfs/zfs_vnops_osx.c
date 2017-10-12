@@ -102,7 +102,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t null_reclaim;
 	kstat_named_t fsync_ioctl_ubc_msync;
 	kstat_named_t fsync_vnop_ubc_msync;
-	kstat_named_t unexpected_dirty_page;
+	kstat_named_t unexpected_clean_page;
 	kstat_named_t bluster_pageout_msync_pages;
 	kstat_named_t bluster_pageout_no_msync_pages;
 	kstat_named_t pageoutv2_msync_flag;
@@ -124,7 +124,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "null_reclaim",                      KSTAT_DATA_UINT64 },
 	{ "fsync_ioctl_ubc_msync",             KSTAT_DATA_UINT64 },
 	{ "fsync_vnop_ubc_msync",              KSTAT_DATA_UINT64 },
-	{ "unexpected_dirty_page",             KSTAT_DATA_UINT64 },
+	{ "unexpected_clean_page",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_msync_pages",       KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_no_msync_pages",    KSTAT_DATA_UINT64 },
 	{ "pageoutv2_msync_flag",              KSTAT_DATA_UINT64 },
@@ -2758,7 +2758,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 			 * unsure what is going on */
 			printf ("ZFS: %s: unforeseen clean page @ index %lld for UPL %p, need_unlock = %d\n",
 			    __func__,  pg_index, upl, need_unlock);
-			VNOPS_OSX_STAT_BUMP(unexpected_dirty_page);
+			VNOPS_OSX_STAT_BUMP(unexpected_clean_page);
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
 			isize    -= PAGE_SIZE;
