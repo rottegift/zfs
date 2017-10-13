@@ -442,7 +442,23 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 * Finally, we also lock against zfs_vnop_pageoutv2() and
 	 * zfs_vnop_pageout() to this file.
 	 */
-        rw_enter(&zp->z_map_lock, RW_WRITER);
+
+	boolean_t need_unlock = B_FALSE;
+	if (!rw_write_held(&zp->z_map_lock)) {
+		for (unsigned int i=0; !rw_tryenter(&zp->z_map_lock, RW_WRITER) ; i++) {
+			if (i > 0 && (i % 512) == 0)
+				printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
+			if (i > 1000000) { // 2000 seconds for now, enough time to take manual intervention
+				printf("ZFS: %s: giving up (%u)! WARNING: not locked!\n", __func__, i);
+				break;
+			}
+			delay(2);
+		}
+		if (rw_write_held(&zp->z_map_lock))
+			need_unlock = B_TRUE;
+	} else {
+		printf("ZFS: %s: already holds z_map_lock\n", __func__);
+	}
 
 	for (upl_page = 0; len > 0; ++upl_page) {
 		uint64_t bytes = MIN(PAGESIZE - off, len);
@@ -481,7 +497,9 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		if (error)
 			break;
 	}
-	rw_exit(&zp->z_map_lock);
+
+	if (need_unlock == B_TRUE)
+		rw_exit(&zp->z_map_lock);
 
 	/*
 	 * Unmap the page list and free the UPL.
