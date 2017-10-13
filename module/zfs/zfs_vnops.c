@@ -465,12 +465,12 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		}
 		if (rw_write_held(&zp->z_map_lock)) {
 			need_unlock = B_TRUE;
-			VNOP_STAT_BUMP(update_pages_acquired_lock);
+			VNOPS_STAT_BUMP(update_pages_acquired_lock);
 		} else {
-			VNOP_STAT_BUMP(update_pages_lock_timeout);
+			VNOPS_STAT_BUMP(update_pages_lock_timeout);
 		}
 	} else {
-		VNOP_STAT_BUMP(update_pages_had_lock);
+		VNOPS_STAT_BUMP(update_pages_had_lock);
 		printf("ZFS: %s: already holds z_map_lock\n", __func__);
 	}
 
