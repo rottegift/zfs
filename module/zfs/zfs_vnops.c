@@ -3108,12 +3108,11 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 		if (mapped > 0) {
 			zfs_fsync_upgrade_lock(zp, &need_release, &need_upgrade);
-			zfs_fsync_downgrade_lock(zp, &need_release, &need_upgrade);
+			zfs_fsync_drop_lock(zp, &need_release, &need_upgrade);
 			if (ubc_msync(vp, 0, ubc_getsize(vp),
 				NULL, UBC_PUSHALL | UBC_SYNC)) {
 				printf("ZFS: %s: ubc_msync failed!\n", __func__);
 			}
-			zfs_fsync_drop_lock(zp, &need_release, &need_upgrade);
 		}
 		ZFS_EXIT(zfsvfs);
 		VNOPS_STAT_BUMP(zfs_fsync);
