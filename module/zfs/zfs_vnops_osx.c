@@ -1682,6 +1682,8 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	// this might not be needed now
 	//if (vnode_isrecycled(ap->a_vp)) return 0;
 
+	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
+
 	boolean_t need_unlock = B_FALSE;
 	if (!rw_write_held(&zp->z_map_lock)) {
 		rw_enter(&zp->z_map_lock, RW_WRITER);
@@ -1689,7 +1691,6 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	} else {
 		printf("ZFS: %s: already holds z_map_lock\n", __func__);
 	}
-	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 
 	if (spl_UBCINFOEXISTS(ap->a_vp)) {
 		VNOPS_OSX_STAT_BUMP(fsync_vnop_ubc_msync);
