@@ -2590,6 +2590,8 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	/* ASSERT(zp->z_dbuf_held); */ /* field no longer present in znode. */
 	ASSERT3U(zp->z_is_mapped,==,1);
 
+	rl = zfs_range_lock(zp, ap->a_f_offset, a_size, RL_WRITER);
+
 	/*
 	 * We lock against update_pages() [part of zfs_write()],
 	 * zfs_vnop_pageout(), and zfs_vnop_pagein(), and ourselves (in
@@ -2604,8 +2606,6 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		VNOPS_OSX_STAT_BUMP(pageoutv2_lock_held);
 		dprintf("ZFS: %s: z_map_lock already held\n", __func__);
 	}
-
-	rl = zfs_range_lock(zp, ap->a_f_offset, a_size, RL_WRITER);
 
 	/* Grab UPL now */
 	int request_flags;
