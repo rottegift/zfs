@@ -458,7 +458,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 			if (i > 0 && (i % 512) == 0)
 				printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
 			if (i > 1000000) { // 2000 seconds for now, enough time to take manual intervention
-				printf("ZFS: %s: giving up (%u)! WARNING: not locked!\n", __func__, i);
+				panic("could not acquire z_map_lock");
 				break;
 			}
 			delay(2);
@@ -3004,6 +3004,65 @@ update:
 	return (error);
 }
 
+static void
+zfs_fsync_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade)
+{
+	if (rw_write_held(&zp->z_map_lock)) {
+		printf("ZFS: %s: z_map_lock already held\n", __func__);
+		*need_release = B_FALSE;
+		*need_upgrade = B_FALSE;
+		return;
+	}
+	for (unsigned int i=0; !rw_tryenter(&zp->z_map_lock, RW_WRITER) ; i++) {
+		if (i > 0 && (i % 512) == 0)
+			printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
+		if (i > 1000000) { // 2000 seconds for now, enough time to take manual intervention
+			panic("could not acquire z_map_lock");
+			break;
+		}
+		delay(2);
+	}
+	*need_release = B_FALSE;
+	return;
+}
+
+static void
+zfs_sync_downgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade)
+{
+	if (!rw_write_held(&zp->z_map_lock))
+		return;
+
+	rw_downgrade(&zp->z_map_lock);
+	*need_upgrade = B_TRUE;
+}
+
+static void
+zfs_sync_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade)
+{
+	if (*need_upgrade != B_TRUE)
+		return;
+
+	for (unsigned int i = 0; !rw_tryupgrade(&zp->z_map_lock); i++) {
+		if (i > 0 && (i % 512) == 0)
+			printf("ZFS: %s: trying to upgrade z_map_lock (%d)\n", __func__, i);
+		if (i > 1000000)
+			panic("could not upgrade z_map_lock");
+	}
+
+	*need_upgrade = B_FALSE;
+}
+
+static void
+zfs_sync_drop_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade)
+{
+	if (*need_release == B_FALSE)
+		return;
+
+	rw_exit(&zp->z_map_lock);
+
+	*need_release = B_FALSE;
+}
+
 ulong_t zfs_fsync_sync_cnt = 4;
 
 int
@@ -3012,11 +3071,27 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	znode_t	*zp = VTOZ(vp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 
+	mutex_enter(&zp->z_lock);
+	int mapped = zp->z_is_mapped;
+	mutex_exit(&zp->z_lock);
+
+	boolean_t need_release = B_FALSE;
+	boolean_t need_upgrade = B_FALSE;
+
+	if (mapped > 0 && zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED)
+		zfs_fsync_rw_lock(zp, &need_release, &need_upgrade);
+
+	if (mapped > 0)
+		zfs_sync_downgrade_lock(zp, &need_release, &need_upgrade);
+
 	if (vn_has_cached_data(vp) /*&& !(syncflag & FNODSYNC)*/ &&
 		vnode_isreg(vp) && !vnode_isswap(vp)) {
 		(void) cluster_push(vp, IO_SYNC);
 		VNOPS_STAT_BUMP(cluster_push);
 	}
+
+	if (mapped > 0)
+		zfs_sync_upgrade_lock(zp, &need_release, &need_upgrade);
 
 	(void) tsd_set(zfs_fsyncer_key, (void *)zfs_fsync_sync_cnt);
 
@@ -3024,10 +3099,26 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		&& zfs_nocacheflush == 0) {
 		ZFS_ENTER(zfsvfs);
 		ZFS_VERIFY_ZP(zp);
+		if (mapped > 0)
+			zfs_sync_downgrade_lock(zp, &need_release, &need_upgrade);
+
 		zil_commit(zfsvfs->z_log, zp->z_id);
+
+		if (mapped > 0) {
+			zfs_sync_upgrade_lock(zp, &need_release, &need_upgrade);
+			zfs_sync_downgrade_lock(zp, &need_release, &need_upgrade);
+			if (ubc_msync(vp, 0, ubc_getsize(vp),
+				NULL, UBC_PUSHALL | UBC_SYNC)) {
+				printf("ZFS: %s: ubc_msync failed!\n", __func__);
+			}
+			zfs_sync_drop_lock(zp, &need_release, &need_upgrade);
+		}
 		ZFS_EXIT(zfsvfs);
 		VNOPS_STAT_BUMP(zfs_fsync);
 	}
+
+	if (need_release != B_FALSE)
+		zfs_sync_drop_lock(zp, &need_release, &need_upgrade);
 
 	//tsd_set(zfs_fsyncer_key, NULL);
 	return (0);

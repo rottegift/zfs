@@ -98,7 +98,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mnomap_calls;
 	kstat_named_t mnomap_ubc_msync;
 	kstat_named_t reclaim_mapped;
-	kstat_named_t reclaim_mapped_ubc_msync;
 	kstat_named_t null_reclaim;
 	kstat_named_t fsync_ioctl_ubc_msync;
 	kstat_named_t fsync_vnop_ubc_msync;
@@ -121,10 +120,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
 	{ "mnomap_ubc_msync",                  KSTAT_DATA_UINT64 },
 	{ "reclaim_mapped",                    KSTAT_DATA_UINT64 },
-	{ "reclaim_mapped_ubc_msync",          KSTAT_DATA_UINT64 },
 	{ "null_reclaim",                      KSTAT_DATA_UINT64 },
-	{ "fsync_ioctl_ubc_msync",             KSTAT_DATA_UINT64 },
-	{ "fsync_vnop_ubc_msync",              KSTAT_DATA_UINT64 },
 	{ "unexpected_clean_page",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_msync_pages",       KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_no_msync_pages",    KSTAT_DATA_UINT64 },
@@ -526,25 +522,6 @@ zfs_vnop_ioctl(struct vnop_ioctl_args *ap)
 			dprintf("%s F_BARRIERFSYNC\n", __func__);
 #endif
 			error = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
-			boolean_t need_unlock = B_FALSE;
-			if (!rw_write_held(&zp->z_map_lock)) {
-				rw_enter(&zp->z_map_lock, RW_WRITER);
-				need_unlock = B_TRUE;
-			} else {
-				printf("ZFS: %s: F_...FSYNC already holds z_map_lock\n", __func__);
-			}
-
-			if (spl_UBCINFOEXISTS(ap->a_vp)) {
-				VNOPS_OSX_STAT_BUMP(fsync_ioctl_ubc_msync);
-				(void) ubc_msync(ap->a_vp, 0,
-				    ubc_getsize(ap->a_vp), NULL,
-				    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
-			}
-			if (need_unlock == B_TRUE) {
-				rw_exit(&zp->z_map_lock);
-			}
-			break;
-
 		case F_CHKCLEAN:
 			dprintf("%s F_CHKCLEAN\n", __func__);
 			/* normally calls http://fxr.watson.org/fxr/source/bsd/vfs/vfs_cluster.c?v=xnu-2050.18.24#L5839 */
@@ -1675,33 +1652,7 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	if (!zfsvfs)
 		return (0);
 
-	/*
-	 * If we come here via vnode_create()->vclean() we can not end up in
-	 * zil_commit() or we will deadlock. But we know that vnop_reclaim will
-	 * be called next, so we just return success.
-	 */
-	// this might not be needed now
-	//if (vnode_isrecycled(ap->a_vp)) return 0;
-
 	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
-
-	boolean_t need_unlock = B_FALSE;
-	if (!rw_write_held(&zp->z_map_lock)) {
-		rw_enter(&zp->z_map_lock, RW_WRITER);
-		need_unlock = B_TRUE;
-	} else {
-		printf("ZFS: %s: already holds z_map_lock\n", __func__);
-	}
-
-	if (spl_UBCINFOEXISTS(ap->a_vp)) {
-		VNOPS_OSX_STAT_BUMP(fsync_vnop_ubc_msync);
-		(void) ubc_msync(ap->a_vp, 0, ubc_getsize(ap->a_vp),
-		    NULL, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
-	}
-
-	if (need_unlock == B_TRUE) {
-		rw_exit(&zp->z_map_lock);
-	}
 
 	if (err) dprintf("%s err %d\n", __func__, err);
 
@@ -2901,6 +2852,8 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	znode_t *zp = VTOZ(vp);
 	zfsvfs_t *zfsvfs;
 
+	DECLARE_CRED_AND_CONTEXT(ap);
+
 	if (!zp) return ENODEV;
 
 	zfsvfs = zp->z_zfsvfs;
@@ -2914,27 +2867,8 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		return (ENODEV);
 	}
 	mutex_enter(&zp->z_lock);
-	if (zp->z_is_mapped == 1) {
-		/* we should hold the z_map_lock here to block
-		 * out update_pages() (from zfs_write), zfs_vnop_pagein(),
-		 * and zfs_vnop_mnomap() */
-		boolean_t need_unlock = B_FALSE;
-		if (!rw_write_held(&zp->z_map_lock)) {
-			rw_enter(&zp->z_map_lock, RW_WRITER);
-			need_unlock = B_TRUE;
-		} else {
-			printf("ZFS: %s: z_map_lock already held\n", __func__);
-		}
-#if 0
-		if (spl_UBCINFOEXISTS(vp)) {
-			VNOPS_OSX_STAT_BUMP(mmap_idem_ubc_msync);
-			(void) ubc_msync(vp, 0, ubc_getsize(vp),
-			    NULL, UBC_PUSHALL | UBC_INVALIDATE);
-		}
-#endif
-		if (need_unlock == B_TRUE) {
-			rw_exit(&zp->z_map_lock);
-		}
+	if (zp->z_is_mapped > 0) {
+		zfs_fsync(vp, 0, cr, ct);
 		VNOPS_OSX_STAT_BUMP(mmap_idem);
 	} else
 		VNOPS_OSX_STAT_BUMP(mmap_set);
@@ -2980,30 +2914,14 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	 * keep updating both places on zfs_write().
 	 */
 	/* zp->z_is_mapped = 0; */
+	ASSERT3U((uint64_t)zp->z_is_mapped, >, 0ULL);
 	mutex_exit(&zp->z_lock);
 
 	/* we should hold the z_map_lock here to block out
 	 * update_pages() (from zfs_write), zfs_vnop_pagein(),
 	 * and zfs_vnop_mmap() (and other threads doing mnomap) */
 
-	/* as in nfs_vnop_mnomap, which does nfs_flush then ubc_msync */
 	zfs_fsync(vp, 0, cr, ct);
-	boolean_t need_unlock  = B_FALSE;
-	if (!rw_write_held(&zp->z_map_lock)) {
-		rw_enter(&zp->z_map_lock, RW_WRITER);
-		need_unlock = B_TRUE;
-	} else {
-		printf("ZFS: %s: z_map_lock already held\n", __func__);
-	}
-
-	if (spl_UBCINFOEXISTS(vp)) {
-		VNOPS_OSX_STAT_BUMP(mnomap_ubc_msync);
-		(void) ubc_msync(vp, 0, ubc_getsize(vp),
-		    NULL, UBC_PUSHALL | UBC_SYNC);
-	}
-	if (need_unlock == B_TRUE) {
-		rw_exit(&zp->z_map_lock);
-	}
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
@@ -3114,14 +3032,12 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	dprintf("+vnop_reclaim zp %p/%p type %d\n", zp, vp, vnode_vtype(vp));
 	if (!zp) VNOPS_OSX_STAT_BUMP(null_reclaim);
 	if (!zp) goto out;
-	if (zp->z_is_mapped == 1) {
+
+	if (zp->z_is_mapped > 0) {
 		VNOPS_OSX_STAT_BUMP(reclaim_mapped);
-		if (spl_UBCINFOEXISTS(vp)) {
-			VNOPS_OSX_STAT_BUMP(reclaim_mapped_ubc_msync);
-			(void)ubc_msync(vp, (off_t)0,
-			    ubc_getsize(vp), NULL,
-			    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
-		}
+		(void)ubc_msync(vp, (off_t)0,
+		    ubc_getsize(vp), NULL,
+		    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 	}
 
 	zfsvfs = zp->z_zfsvfs;

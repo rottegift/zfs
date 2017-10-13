@@ -496,8 +496,6 @@ extern void znode_stalker(znode_t *zp, whereami_t event);
 extern void znode_stalker_fini(znode_t *zp);
 #endif
 
-extern int UBCINFOEXISTS(const struct vnode * vp);
-
 #endif /* _KERNEL */
 
 extern int zfs_obj_to_path(objset_t *osp, uint64_t obj, char *buf, int len);
