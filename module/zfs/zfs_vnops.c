@@ -95,6 +95,7 @@ typedef struct vnops_stats {
 	kstat_named_t update_pages_acquired_lock;
 	kstat_named_t update_pages_lock_timeout;
 	kstat_named_t update_pages_had_lock;
+	kstat_named_t update_pages_not_mapped;
 	kstat_named_t mappedread_pages;
 	kstat_named_t dmu_read_uio_dbuf_pages;
 	kstat_named_t cluster_push;
@@ -107,6 +108,7 @@ static vnops_stats_t vnops_stats = {
 	{ "update_pages_acquired_lock",                  KSTAT_DATA_UINT64 },
 	{ "update_pages_lock_timeout",                   KSTAT_DATA_UINT64 },
 	{ "update_pages_had_lock",                       KSTAT_DATA_UINT64 },
+	{ "update_pages_not_mapped",                     KSTAT_DATA_UINT64 },
 	{ "mappedread_pages",                            KSTAT_DATA_UINT64 },
 	{ "dmu_read_uio_dbuf_pages",                     KSTAT_DATA_UINT64 },
 	{ "cluster_push",                                KSTAT_DATA_UINT64 },
@@ -433,6 +435,19 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		return;
 	}
 
+	 /* check if we are updating z_is_mapped for this file; if it is,
+	  * then it always will be.   If it isn't, we need to lock out
+	  * mmap()-callers.
+	  */
+	boolean_t z_lock_held = B_FALSE;
+	mutex_enter(&zp->z_lock);
+	z_lock_held = B_TRUE;
+	int mapped = zp->z_is_mapped;
+	if (mapped > 0) {
+		mutex_exit(&zp->z_lock);
+		z_lock_held = B_FALSE;
+	}
+
 	/*
 	 * We lock against zfs_vnops_pagein() for this file, as it may
 	 * be trying to page in from the current file, which was
@@ -452,7 +467,9 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 */
 
 	boolean_t need_unlock = B_FALSE;
-	if (!rw_write_held(&zp->z_map_lock)) {
+	if (mapped > 0 && !rw_write_held(&zp->z_map_lock)) {
+		ASSERT(!MUTEX_HELD(&zp->z_lock));
+		ASSERT3U((uint64_t)z_lock_held, ==, (uint64_t)B_FALSE);
 		for (unsigned int i=0; !rw_tryenter(&zp->z_map_lock, RW_WRITER) ; i++) {
 			VNOPS_STAT_BUMP(update_pages_want_lock);
 			if (i > 0 && (i % 512) == 0)
@@ -469,10 +486,19 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		} else {
 			VNOPS_STAT_BUMP(update_pages_lock_timeout);
 		}
-	} else {
+	} else if (mapped > 0) {
+		ASSERT(!MUTEX_HELD(&zp->z_lock));
+		ASSERT3U((uint64_t)z_lock_held, ==, (uint64_t)B_FALSE);
 		VNOPS_STAT_BUMP(update_pages_had_lock);
 		printf("ZFS: %s: already holds z_map_lock\n", __func__);
+	} else {
+		ASSERT(MUTEX_HELD(&zp->z_lock));
+		VNOPS_STAT_BUMP(update_pages_not_mapped);
 	}
+
+	/* we now hold EITHER z_lock or z_map_lock, but not both */
+	EQUIV(MUTEX_HELD(&zp->z_lock), mapped == 0);
+	EQUIV(!rw_write_held(&zp->z_map_lock), MUTEX_HELD(&zp->z_lock));
 
 	for (upl_page = 0; len > 0; ++upl_page) {
 		uint64_t bytes = MIN(PAGESIZE - off, len);
@@ -512,9 +538,6 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 			break;
 	}
 
-	if (need_unlock == B_TRUE)
-		rw_exit(&zp->z_map_lock);
-
 	/*
 	 * Unmap the page list and free the UPL.
 	 */
@@ -524,6 +547,15 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 * we effectively didn't dirty any pages.
 	 */
 	(void) ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+
+	/* release locks as necessary */
+	if (need_unlock == B_TRUE)
+		rw_exit(&zp->z_map_lock);
+
+	if (z_lock_held == B_TRUE)
+		mutex_exit(&zp->z_lock);
+
+	ASSERT(!MUTEX_HELD(&zp->z_lock));
 
 	if (upl_page > 0)
 		VNOPS_STAT_INCR(update_pages, (uint64_t) upl_page);
