@@ -2803,6 +2803,9 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		vaddr = NULL;
 	}
 
+	if (need_unlock)
+		rw_exit(&zp->z_map_lock);
+
 	zfs_range_unlock(rl);
 
 	if (a_flags & UPL_IOSYNC)
@@ -2814,19 +2817,16 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 
 	upl = NULL;
 
-	if (need_unlock)
-		rw_exit(&zp->z_map_lock);
-
 	ZFS_EXIT(zfsvfs);
 	if (error)
 		dprintf("ZFS: pageoutv2 failed %d\n", error);
 	return (error);
 
   pageout_done:
-	zfs_range_unlock(rl);
-
 	if (need_unlock)
 		rw_exit(&zp->z_map_lock);
+
+	zfs_range_unlock(rl);
 
   exit_abort:
 	dprintf("ZFS: pageoutv2 aborted %d\n", error);
@@ -2918,10 +2918,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	/* zp->z_is_mapped = 0; */
 	ASSERT3U((uint64_t)zp->z_is_mapped, >, 0ULL);
 	mutex_exit(&zp->z_lock);
-
-	/* we should hold the z_map_lock here to block out
-	 * update_pages() (from zfs_write), zfs_vnop_pagein(),
-	 * and zfs_vnop_mmap() (and other threads doing mnomap) */
 
 	zfs_fsync(vp, 0, cr, ct);
 
