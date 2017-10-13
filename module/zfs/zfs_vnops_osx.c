@@ -2868,7 +2868,9 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	}
 	mutex_enter(&zp->z_lock);
 	if (zp->z_is_mapped > 0) {
+		mutex_exit(&zp->z_lock);
 		zfs_fsync(vp, 0, cr, ct);
+		mutex_enter(&zp->z_lock);
 		VNOPS_OSX_STAT_BUMP(mmap_idem);
 	} else
 		VNOPS_OSX_STAT_BUMP(mmap_set);
