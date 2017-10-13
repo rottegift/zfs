@@ -418,23 +418,6 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
     dprintf("update_pages %llu - %llu (adjusted %llu - %llu): off %llu\n",
            uio_offset(uio), nbytes, upl_start, upl_size, off);
 
-    /*
-     * Create a UPL for the current range and map its
-     * page list into the kernel virtual address space.
-     */
-    error = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl,
-						   UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY);
-	if ((error != KERN_SUCCESS) || !upl) {
-		printf("ZFS: update_pages failed to ubc_create_upl: %d\n", error);
-		return;
-	}
-
-	if (ubc_upl_map(upl, &vaddr) != KERN_SUCCESS) {
-		printf("ZFS: update_pages failed to ubc_upl_map: %d\n", error);
-		(void) ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
-		return;
-	}
-
 	 /* check if we are updating z_is_mapped for this file; if it is,
 	  * then it always will be.   If it isn't, we need to lock out
 	  * mmap()-callers.
@@ -499,6 +482,23 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	/* we now hold EITHER z_lock or z_map_lock, but not both */
 	EQUIV(MUTEX_HELD(&zp->z_lock), mapped == 0);
 	EQUIV(!rw_write_held(&zp->z_map_lock), MUTEX_HELD(&zp->z_lock));
+
+	/*
+	 * Create a UPL for the current range and map its
+	 * page list into the kernel virtual address space.
+	 */
+	error = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl,
+	    UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY);
+	if ((error != KERN_SUCCESS) || !upl) {
+		printf("ZFS: update_pages failed to ubc_create_upl: %d\n", error);
+		return;
+	}
+
+	if (ubc_upl_map(upl, &vaddr) != KERN_SUCCESS) {
+		printf("ZFS: update_pages failed to ubc_upl_map: %d\n", error);
+		(void) ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+		return;
+	}
 
 	for (upl_page = 0; len > 0; ++upl_page) {
 		uint64_t bytes = MIN(PAGESIZE - off, len);
