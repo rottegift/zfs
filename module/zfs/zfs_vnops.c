@@ -91,6 +91,10 @@ int zfs_vnop_force_formd_normalized_output = 0; /* disabled by default */
 
 typedef struct vnops_stats {
 	kstat_named_t update_pages;
+	kstat_named_t update_pages_want_lock;
+	kstat_named_t update_pages_acquired_lock;
+	kstat_named_t update_pages_lock_timeout;
+	kstat_named_t update_pages_had_lock;
 	kstat_named_t mappedread_pages;
 	kstat_named_t dmu_read_uio_dbuf_pages;
 	kstat_named_t cluster_push;
@@ -99,10 +103,14 @@ typedef struct vnops_stats {
 
 static vnops_stats_t vnops_stats = {
 	{ "update_pages",                                KSTAT_DATA_UINT64 },
+	{ "update_pages_want_lock",                      KSTAT_DATA_UINT64 },
+	{ "update_pages_acquired_lock",                  KSTAT_DATA_UINT64 },
+	{ "update_pages_lock_timeout",                   KSTAT_DATA_UINT64 },
+	{ "update_pages_had_lock",                       KSTAT_DATA_UINT64 },
 	{ "mappedread_pages",                            KSTAT_DATA_UINT64 },
 	{ "dmu_read_uio_dbuf_pages",                     KSTAT_DATA_UINT64 },
 	{ "cluster_push",                                KSTAT_DATA_UINT64 },
-	{ "zfs_fsync",                                    KSTAT_DATA_UINT64 },
+	{ "zfs_fsync",                                   KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -446,6 +454,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	boolean_t need_unlock = B_FALSE;
 	if (!rw_write_held(&zp->z_map_lock)) {
 		for (unsigned int i=0; !rw_tryenter(&zp->z_map_lock, RW_WRITER) ; i++) {
+			VNOPS_STAT_BUMP(update_pages_want_lock);
 			if (i > 0 && (i % 512) == 0)
 				printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
 			if (i > 1000000) { // 2000 seconds for now, enough time to take manual intervention
@@ -454,9 +463,14 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 			}
 			delay(2);
 		}
-		if (rw_write_held(&zp->z_map_lock))
+		if (rw_write_held(&zp->z_map_lock)) {
 			need_unlock = B_TRUE;
+			VNOP_STAT_BUMP(update_pages_acquired_lock);
+		} else {
+			VNOP_STAT_BUMP(update_pages_lock_timeout);
+		}
 	} else {
+		VNOP_STAT_BUMP(update_pages_had_lock);
 		printf("ZFS: %s: already holds z_map_lock\n", __func__);
 	}
 
