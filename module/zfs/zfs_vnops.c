@@ -3084,7 +3084,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		zfs_fsync_rw_lock(zp, &need_release, &need_upgrade);
 
 	if (mapped > 0)
-		zfs_sync_downgrade_lock(zp, &need_release, &need_upgrade);
+		zfs_fsync_downgrade_lock(zp, &need_release, &need_upgrade);
 
 	if (vn_has_cached_data(vp) /*&& !(syncflag & FNODSYNC)*/ &&
 		vnode_isreg(vp) && !vnode_isswap(vp)) {
