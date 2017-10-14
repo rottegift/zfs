@@ -2184,7 +2184,6 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 		return EIO;
 	}
 
-
 	ASSERT(vn_has_cached_data(ZTOV(zp)));
 	/* ASSERT(zp->z_dbuf_held); */ /* field no longer present in znode. */
 
@@ -2675,7 +2674,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		if (upl_page_present(pl, --pg_index))
 			break;
-		ASSERT3S(pg_index, ==, 0);
+		ASSERT3S(pg_index, >, 0);
 		if (pg_index == 0) {
 			dprintf("ZFS: failed on pg_index\n");
 			dmu_tx_commit(tx);
