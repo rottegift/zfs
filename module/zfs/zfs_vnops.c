@@ -491,9 +491,12 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	/*
 	 * Create a UPL for the current range and map its
 	 * page list into the kernel virtual address space.
+	 *
+	 * Let the UPL subsystem know we intend to modify the buffer
+	 * cache pages we're gathering.
 	 */
 	error = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl,
-	    UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY);
+	    UPL_SET_LITE | UPL_WILL_MODIFY);
 	if ((error != KERN_SUCCESS) || !upl) {
 		printf("ZFS: update_pages failed to ubc_create_upl: %d\n", error);
 		return;
@@ -514,14 +517,12 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 			ASSERT(error == 0);
 			if (error == 0) {
 				/*
-				  dmu_write(zfsvfs->z_os, zp->z_id,
-				  woff, bytes, (caddr_t)vaddr + off, tx);
-				*/
-				/*
-				 * We don't need a ubc_upl_commit_range()
-				 * here since the dmu_write() effectively
-				 * pushed this page to disk.
+				 * commit the page, but clear its DIRTY bit
+				 * to prevent a later pageout
 				 */
+				ubc_upl_commit_range(upl, upl_start, PAGESIZE,
+				    UPL_COMMIT_CLEAR_DIRTY);
+
 			} else {
 				/*
 				 * page is now in an unknown state so dump it.
@@ -548,8 +549,8 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 */
 	(void) ubc_upl_unmap(upl);
 	/*
-	 * We want to abort here since due to dmu_write()
-	 * we effectively didn't dirty any pages.
+	 * We want to abort here since due to the upl_commit_range calls
+	 * above we effectively didn't dirty any pages.
 	 */
 	(void) ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 
