@@ -97,8 +97,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mnomap_calls;
 	kstat_named_t reclaim_mapped;
 	kstat_named_t null_reclaim;
-	kstat_named_t fsync_ioctl_ubc_msync;
-	kstat_named_t fsync_vnop_ubc_msync;
 	kstat_named_t unexpected_clean_page;
 	kstat_named_t bluster_pageout_calls;
 	kstat_named_t bluster_pageout_error;
