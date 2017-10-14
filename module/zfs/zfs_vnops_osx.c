@@ -107,6 +107,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_lock_held;
 	kstat_named_t pageoutv2_msync_flag;
 	kstat_named_t pageoutv2_to_pageout;
+	kstat_named_t pageoutv2_backscan_pages;
+	kstat_named_t pageoutv2_skip_clean_pages;
 	kstat_named_t pageoutv1_pages;
 	kstat_named_t pagein_pages;
 } vnops_osx_stats_t;
@@ -129,6 +131,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_lock_held",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_msync_flag",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_to_pageout",              KSTAT_DATA_UINT64 },
+	{ "pageoutv2_backscan_pages",          KSTAT_DATA_UINT64 },
+	{ "pageoutv2_skip_clean_pages",        KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 };
@@ -2672,6 +2676,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	 * preceding aborts/completions.
 	 */
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
+		VNOPS_OSX_STAT_BUMP(pageoutv2_backscan_pages);
 		if (upl_page_present(pl, --pg_index))
 			break;
 		ASSERT3S(pg_index, >, 0);
@@ -2711,6 +2716,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 			 * to get back empty slots in the UPL.
 			 * just skip over them
 			 */
+			VNOPS_OSX_STAT_BUMP(pageoutv2_skip_clean_pages);
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
 			isize    -= PAGE_SIZE;
