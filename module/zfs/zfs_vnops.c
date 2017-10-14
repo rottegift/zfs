@@ -848,8 +848,8 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		else {
 			error = dmu_read_uio_dbuf(sa_get_db(zp->z_sa_hdl),
 			    uio, nbytes);
-			if (error == 0) {
-				uint64_t pgs = 1ULL + atop_64((uint64_t)nbytes);
+			if (error == 0 && nbytes > 0) {
+				uint64_t pgs = 1ULL + atop_64(nbytes);
 				VNOPS_STAT_INCR(dmu_read_uio_dbuf_pages, pgs);
 			}
 		}

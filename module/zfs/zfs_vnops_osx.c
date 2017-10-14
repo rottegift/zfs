@@ -94,16 +94,18 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_set;
 	kstat_named_t mmap_idem;
-	kstat_named_t mmap_idem_ubc_msync;
 	kstat_named_t mnomap_calls;
-	kstat_named_t mnomap_ubc_msync;
 	kstat_named_t reclaim_mapped;
 	kstat_named_t null_reclaim;
 	kstat_named_t fsync_ioctl_ubc_msync;
 	kstat_named_t fsync_vnop_ubc_msync;
 	kstat_named_t unexpected_clean_page;
+	kstat_named_t bluster_pageout_calls;
+	kstat_named_t bluster_pageout_error;
+	kstat_named_t bluster_pageout_dmu_bytes;
 	kstat_named_t bluster_pageout_msync_pages;
 	kstat_named_t bluster_pageout_no_msync_pages;
+	kstat_named_t pageoutv2_calls;
 	kstat_named_t pageoutv2_lock_held;
 	kstat_named_t pageoutv2_msync_flag;
 	kstat_named_t pageoutv2_to_pageout;
@@ -116,14 +118,16 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_set",                          KSTAT_DATA_UINT64 },
 	{ "mmap_idem",                         KSTAT_DATA_UINT64 },
-	{ "mmap_idem_ubc_msync",               KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
-	{ "mnomap_ubc_msync",                  KSTAT_DATA_UINT64 },
 	{ "reclaim_mapped",                    KSTAT_DATA_UINT64 },
 	{ "null_reclaim",                      KSTAT_DATA_UINT64 },
 	{ "unexpected_clean_page",             KSTAT_DATA_UINT64 },
+	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
+	{ "bluster_pageout_error",             KSTAT_DATA_UINT64 },
+	{ "bluster_pageout_dmu_bytes",         KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_msync_pages",       KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_no_msync_pages",    KSTAT_DATA_UINT64 },
+	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_lock_held",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_msync_flag",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_to_pageout",              KSTAT_DATA_UINT64 },
@@ -2120,7 +2124,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	ubc_upl_unmap(upl);
 
 	if (bytes_read > 0) {
-		const uint64_t pgs = 1ULL + atop_64((uint64_t)bytes_read);
+		uint64_t pgs = 1ULL + atop_64(bytes_read);
 		VNOPS_OSX_STAT_INCR(pagein_pages, pgs);
 	}
 
@@ -2445,6 +2449,8 @@ static int bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	off_t         max_size;
 	int           is_clcommit = 0;
 
+	VNOPS_OSX_STAT_BUMP(bluster_pageout_calls);
+
 	if ((flags & UPL_NOCOMMIT) == 0)
 		is_clcommit = 1;
 
@@ -2453,6 +2459,7 @@ static int bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	 * we can't issue an abort because we don't know how
 	 * big the upl really is
 	 */
+	ASSERT3S(size, >, 0);
 	if (size <= 0) {
 		dprintf("%s invalid size %d\n", __func__, size);
 		return (EINVAL);
@@ -2461,7 +2468,7 @@ static int bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	if (vnode_vfsisrdonly(ZTOV(zp))) {
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size, UPL_ABORT_FREE_ON_EMPTY);
-		dprintf("%s: readonly fs\n", __func__);
+		printf("ZFS: %s: readonly fs\n", __func__);
 		return (EROFS);
 	}
 
@@ -2475,7 +2482,7 @@ static int bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		(f_offset & PAGE_MASK_64) || (size & PAGE_MASK)) {
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size, UPL_ABORT_FREE_ON_EMPTY);
-		dprintf("%s: invalid offset or size\n", __func__);
+		printf("ZFS: %s: invalid offset or size\n", __func__);
 		return (EINVAL);
 	}
 	max_size = filesize - f_offset;
@@ -2506,12 +2513,13 @@ static int bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 #endif
 
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, &vaddr[upl_offset], tx);
+	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, size);
 
-	if ((flags & UPL_UBC_MSYNC) == UPL_UBC_MSYNC) {
-		const uint64_t pgs = atop_64((uint64_t)size) + 1ULL;
+	if (size > 0 && (flags & UPL_UBC_MSYNC) == UPL_UBC_MSYNC) {
+		uint64_t pgs = atop_64(size) + 1ULL;
 		VNOPS_OSX_STAT_INCR(bluster_pageout_msync_pages, pgs);
-	} else {
-		const uint64_t pgs = atop_64((uint64_t)size) + 1ULL;
+	} else if (size > 0) {
+		uint64_t pgs = atop_64(size) + 1ULL;
 		VNOPS_OSX_STAT_INCR(bluster_pageout_no_msync_pages, pgs);
 	}
 
@@ -2551,6 +2559,8 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	caddr_t vaddr = NULL;
 	int merror = 0;
 	boolean_t need_unlock = B_FALSE;
+
+	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
 	/* We can still get into this function as non-v2 style, by the default
 	 * pager (ie, swap - when we eventually support it)
@@ -2628,7 +2638,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	error = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl,
 						   request_flags );
 	if (error || (upl == NULL)) {
-		dprintf("ZFS: Failed to create UPL! %d\n", error);
+		printf("ZFS: %s: Failed to create UPL! %d\n", __func__, error);
 		goto pageout_done;
 	}
 
@@ -2638,6 +2648,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 	zfs_sa_upgrade_txholds(tx, zp);
 	error = dmu_tx_assign(tx, TXG_WAIT);
+	ASSERT3S(error, ==, 0);
 	if (error != 0) {
 		dmu_tx_abort(tx);
 		if (vaddr) {
@@ -2666,6 +2677,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		if (upl_page_present(pl, --pg_index))
 			break;
+		ASSERT3S(pg_index, ==, 0);
 		if (pg_index == 0) {
 			dprintf("ZFS: failed on pg_index\n");
 			dmu_tx_commit(tx);
@@ -2756,7 +2768,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		if (!vaddr) {
 			if (ubc_upl_map(upl, (vm_offset_t *)&vaddr) != KERN_SUCCESS) {
 				error = EINVAL;
-				dprintf("ZFS: unable to map\n");
+				printf("ZFS: %s: unable to map\n", __func__);
 				goto out;
 			}
 			dprintf("ZFS: Mapped %p\n", vaddr);
@@ -2766,6 +2778,10 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 			   offset, f_offset, xsize, filesize);
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
 								 filesize, a_flags, vaddr, tx);
+		ASSERT3S(merror, ==, 0);
+		if (merror != 0)
+			VNOPS_OSX_STAT_BUMP(bluster_pageout_error);
+
 		/* remember the first error */
 		if ((error == 0) && (merror))
 			error = merror;
@@ -2776,6 +2792,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		pg_index += num_of_pages;
 	} // while isize
 
+	ASSERT3S(error, ==, 0);
 	/* finish off transaction */
 	if (error == 0) {
 		uint64_t mtime[2], ctime[2];
