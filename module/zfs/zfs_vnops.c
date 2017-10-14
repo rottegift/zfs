@@ -100,6 +100,7 @@ typedef struct vnops_stats {
 	kstat_named_t dmu_read_uio_dbuf_pages;
 	kstat_named_t cluster_push;
 	kstat_named_t zfs_fsync;
+	kstat_named_t zfs_fsync_want_lock;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -113,6 +114,7 @@ static vnops_stats_t vnops_stats = {
 	{ "dmu_read_uio_dbuf_pages",                     KSTAT_DATA_UINT64 },
 	{ "cluster_push",                                KSTAT_DATA_UINT64 },
 	{ "zfs_fsync",                                   KSTAT_DATA_UINT64 },
+	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -461,7 +463,10 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 				panic("could not acquire z_map_lock");
 				break;
 			}
-			delay(2);
+                        if (i % 10)
+                                delay(2);
+                        else if (i % 2)
+                                kpreempt(KPREEMPT_SYNC);
 		}
 		if (rw_write_held(&zp->z_map_lock)) {
 			need_unlock = B_TRUE;
@@ -3055,6 +3060,7 @@ zfs_fsync_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upg
 		return;
 
 	for (unsigned int i = 0; !rw_tryupgrade(&zp->z_map_lock); i++) {
+		VNOPS_STAT_BUMP(zfs_fsync_want_lock);
 		if (i > 0 && (i % 512) == 0)
 			printf("ZFS: %s: trying to upgrade z_map_lock (%d)\n", __func__, i);
 		if (i > 1000000)
@@ -3074,13 +3080,17 @@ zfs_fsync_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade)
 		return;
 	}
 	for (unsigned int i=0; !rw_tryenter(&zp->z_map_lock, RW_WRITER) ; i++) {
+		VNOPS_STAT_BUMP(zfs_fsync_want_lock);
 		if (i > 0 && (i % 512) == 0)
 			printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
 		if (i > 1000000) { // 2000 seconds for now, enough time to take manual intervention
 			panic("could not acquire z_map_lock");
 			break;
 		}
-		delay(2);
+		if (i % 10)
+			delay(2);
+		else if (i % 2)
+			kpreempt(KPREEMPT_SYNC);
 	}
 	*need_release = B_TRUE;
 	return;
