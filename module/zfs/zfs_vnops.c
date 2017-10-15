@@ -809,7 +809,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 * if we are in ZFS_SYNC_ALWAYS, or the file is mapped,
 	 * sync out this znode before readng it.
 	 */
-	if (zfsvfs->z_log) {
+	if (zfsvfs->z_log && zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
 		/* XXX: on x86-64 we can probably do this without
 		 * the mutex, or alternatively we can make z_is_mapped
 		 * an _Atomic and then simply not lock it, because we
