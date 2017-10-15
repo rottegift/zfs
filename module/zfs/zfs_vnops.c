@@ -654,9 +654,14 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	/*
 	 * If we're in FRSYNC mode, sync out this znode before reading it.
 	 */
+#ifndef __APPLE__
 	if (zfsvfs->z_log &&
 	    (ioflag & FRSYNC || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS))
 		zil_commit(zfsvfs->z_log, zp->z_id);
+#else
+	if (zfsvfs->z_log && zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
+		zil_commit(zfsvfs->z_log, zp->z_id);
+#endif
 
 	/*
 	 * Lock the range against changes.
