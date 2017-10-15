@@ -538,11 +538,11 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 				 */
 				kern_return_t _kr;
 				_kr = ubc_upl_abort_range(upl, upl_current, PAGESIZE,
-					UPL_ABORT_RESTART);
+					0);
 				if (_kr == KERN_FAILURE)
-					printf("ZFS: %s: commit range failure\n", __func__);
+					printf("ZFS: %s: abort range failure\n", __func__);
 				else if (_kr == KERN_INVALID_ARGUMENT)
-					printf("ZFS: %s: commit range invalid argument\n", __func__);
+					printf("ZFS: %s: abort range invalid argument\n", __func__);
 
 				VNOPS_STAT_BUMP(update_pages_committed_pages);
 			} else {
