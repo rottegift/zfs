@@ -3109,11 +3109,10 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * exit the lop.
 	 */
 
-	static uint64_t mynum_ctr = 0;
-	atomic_inc_64(&mynum_ctr);
-	uint32_t mynum = (uint32_t)(mynum_ctr & (uint64_t)UINT32_MAX);
+	static uint32_t mynum = 0;
+	atomic_inc_32(&mynum);
 	if (mynum == 0)
-		mynum = 1;
+		atomic_inc_32(&mynum);
 	for (int i = 1; ; i++) { // yes, start at 1 because of modulo ops below
 		uint32_t cas = atomic_cas_32(
 		    &zp->z_fsync_flag, 0, mynum);
