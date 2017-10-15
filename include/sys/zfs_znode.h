@@ -230,8 +230,9 @@ typedef struct znode {
 	boolean_t	z_is_mapped;	/* are we mmap'ed */
 	boolean_t	z_is_ctldir;	/* are we .zfs entry */
 
-	krwlock_t   z_map_lock;         /* page map lock */
-	const char *z_map_lock_holder;  /* function that holds the rw_lock */
+	krwlock_t       z_map_lock;     /* page map lock */
+	const char      *z_map_lock_holder;  /* function that holds the rw_lock */
+	uint32_t        z_fsync_cnt;    /* how many fsyncers are working on this file */
 
 #ifdef __APPLE__
 	list_node_t	z_link_reclaim_node;	/* all reclaim znodes in fs link */

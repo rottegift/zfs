@@ -109,6 +109,9 @@ typedef struct vnops_stats {
 	kstat_named_t update_pages_aborted_pages;
 	kstat_named_t update_pages_skipped_pages;
 	kstat_named_t update_pages_error_pages;
+	kstat_named_t zfs_fsync_cas_miss;
+	kstat_named_t fsync_disabled;
+	kstat_named_t fsync_disabled_mapped;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -129,6 +132,9 @@ static vnops_stats_t vnops_stats = {
 	{ "update_pages_aborted_pages",                  KSTAT_DATA_UINT64 },
 	{ "update_pages_skipped_pages",                  KSTAT_DATA_UINT64 },
 	{ "update_pages_error_pages",                    KSTAT_DATA_UINT64 },
+	{ "zfs_fsync_cas_miss",                          KSTAT_DATA_UINT64 },
+	{ "fsync_disabled",                              KSTAT_DATA_UINT64 },
+	{ "fsync_disabled_mapped",                       KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -3085,14 +3091,43 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	znode_t	*zp = VTOZ(vp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 
-	mutex_enter(&zp->z_lock);
-	int mapped = zp->z_is_mapped;
-	mutex_exit(&zp->z_lock);
+	/* for this file, we serialize fsyncs using a
+	 * CAS spin-sleep loop */
+	atomic_inc_32(&zp->z_fsync_cnt);
+
+	for (int i = 0; zp->z_fsync_cnt > 1; i++) {
+		uint32_t cas = atomic_cas_32(
+		    &zp->z_fsync_cnt, 1, 2);
+		if (cas == 1) // we have done 1->2
+			break;
+		else
+			VNOPS_STAT_BUMP(zfs_fsync_cas_miss);
+		if (i % 10)
+			kpreempt(KPREEMPT_SYNC);
+		if (i % 512)
+			printf("ZFS: %s in CAS loop (%i)\n", __func__, i);
+		if (i % 1024)
+			delay(2);
+		if (i > 1000000)
+			panic("%s stuck in CAS loop", __func__);
+	}
+
+	int mapped = 0;
+	if (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
+		mapped = 0;
+		VNOPS_STAT_BUMP(fsync_disabled);
+		if (zp->z_is_mapped)
+			VNOPS_STAT_BUMP(fsync_disabled_mapped);
+	} else {
+		mutex_enter(&zp->z_lock);
+		mapped = zp->z_is_mapped;
+		mutex_exit(&zp->z_lock);
+	}
 
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
 
-	if (mapped > 0 && zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
+	if (mapped > 0) {
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, "zfs_fsync (init)");
 		VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 	}
@@ -3141,6 +3176,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	//tsd_set(zfs_fsyncer_key, NULL);
+	atomic_dec_32(&zp->z_fsync_cnt);
 	return (0);
 }
 
