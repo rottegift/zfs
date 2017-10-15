@@ -3093,6 +3093,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	/* for this file, we serialize fsyncs using a
 	 * CAS spin-sleep loop */
+	ASSERT3U(zp->z_fsync_cnt, <, 1024); // XXX: ARBITRARY
+	ASSERT3S(zp->z_fsync_cnt, >=, 0); // SIGN STUFF
 	atomic_inc_32(&zp->z_fsync_cnt);
 
 	for (int i = 0; zp->z_fsync_cnt > 1; i++) {
@@ -3105,7 +3107,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		if (i % 10)
 			kpreempt(KPREEMPT_SYNC);
 		if (i % 512)
-			printf("ZFS: %s in CAS loop (%i)\n", __func__, i);
+			printf("ZFS: %s in CAS loop (i=%i) (z_fsync_cnt=%u)\n",
+			    __func__, i, zp->z_fsync_cnt);
 		if (i % 1024)
 			delay(2);
 		if (i > 1000000)
