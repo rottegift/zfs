@@ -45,8 +45,11 @@ z_map_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade
 	for (unsigned int i = 0; !rw_tryupgrade(&zp->z_map_lock); i++) {
 		lock_tries++;
 		if (i > 0 && (i % 512) == 0)
-			printf("ZFS: %s: trying to upgrade z_map_lock (%d) for %s\n",
-			    __func__, i, caller);
+			printf("ZFS: %s: trying to upgrade z_map_lock (%d) for %s (held by %s)\n",
+			    __func__, i, caller,
+			    (zp->z_map_lock_holder != NULL)
+			    ? zp->z_map_lock_holder
+			    : "(NULL)");
 		if (i > 1000000)
 			panic("could not upgrade z_map_lock for %s", caller);
 		if (i % 10)
@@ -55,6 +58,7 @@ z_map_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade
 			kpreempt(KPREEMPT_SYNC);
 	}
 
+	zp->z_map_lock_holder = caller;
 	*need_upgrade = B_FALSE;
 	return(lock_tries);
 }
@@ -73,7 +77,11 @@ z_map_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade, con
 	for (unsigned int i=0; !rw_tryenter(&zp->z_map_lock, RW_WRITER) ; i++) {
 		lock_tries++;
 		if (i > 0 && (i % 512) == 0)
-			printf("ZFS: %s: waiting for z_map_lock (%u) for %s\n", __func__, i, caller);
+			printf("ZFS: %s: waiting for z_map_lock (%u) for %s (held by %s)\n",
+			    __func__, i, caller,
+			    (zp->z_map_lock_holder != NULL)
+			    ? zp->z_map_lock_holder
+			    : "(NULL)");
 		if (i > 1000000) { // 2000 seconds for now, enough time to take manual intervention
 			panic("could not acquire z_map_lock");
 			break;
@@ -83,6 +91,9 @@ z_map_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade, con
 		else if (i % 2)
 			kpreempt(KPREEMPT_SYNC);
 	}
+
+	zp->z_map_lock_holder = caller;
+
 	*need_release = B_TRUE;
 	return (lock_tries);
 }
@@ -92,6 +103,10 @@ z_map_drop_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade)
 {
 	if (*need_release == B_FALSE)
 		return;
+
+	VERIFY(rw_lock_held(&zp->z_map_lock));
+
+	zp->z_map_lock_holder = NULL;
 
 	rw_exit(&zp->z_map_lock);
 
