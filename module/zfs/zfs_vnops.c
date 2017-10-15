@@ -3113,18 +3113,20 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		ZFS_ENTER(zfsvfs);
 		ZFS_VERIFY_ZP(zp);
 		if (mapped > 0)
-			z_map_downgrade_lock(zp, &need_release, &need_upgrade);
+			z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
 		if (mapped > 0) {
-			uint64_t tries = z_map_upgrade_lock(zp, &need_release, &need_upgrade, "zfs_fsync (post zil_commit)");
+			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, "zfs_fsync (post zil_commit)");
 			VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			if (ubc_msync(vp, 0, ubc_getsize(vp),
 				NULL, UBC_PUSHALL | UBC_SYNC)) {
 				printf("ZFS: %s: ubc_msync failed!\n", __func__);
 			}
+			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, "zfs_fsync (post ubc_msync)");
+			VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 		}
 		ZFS_EXIT(zfsvfs);
 		VNOPS_STAT_BUMP(zfs_fsync);
