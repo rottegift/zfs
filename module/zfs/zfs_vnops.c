@@ -3199,7 +3199,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	ASSERT3U(&zp->z_fsync_cnt, >, 0);
 	atomic_dec_32(&zp->z_fsync_cnt);
 	/* open the gate for another thread */
-	uint8_t cas = atomic_cas_8(&zp->z_fsync_flag, 1, 0);
+	uint32_t cas = atomic_cas_8(&zp->z_fsync_flag, 1, 0);
 	ASSERT(cas == 0);
 	return (0);
 }
