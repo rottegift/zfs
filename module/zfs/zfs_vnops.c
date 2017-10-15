@@ -536,8 +536,14 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 				 * here since the dmu_write() effectively
 				 * pushed this page to disk.
 				 */
-				ubc_upl_commit_range(upl, upl_current, PAGESIZE,
-					UPL_COMMIT_CLEAR_DIRTY);
+				kern_return_t _kr;
+				_kr = ubc_upl_commit_range(upl, upl_current, PAGESIZE,
+					UPL_COMMIT_SET_DIRTY);
+				if (_kr == KERN_FAILURE)
+					printf("ZFS: %s: commit range failure\n", __func__);
+				else if (_kr == KERN_INVALID_ARGUMENT)
+					printf("ZFS: %s: commit range invalid argument\n", __func__);
+
 				VNOPS_STAT_BUMP(update_pages_committed_pages);
 			} else {
 				/*
@@ -553,7 +559,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 			  error = dmu_write_uio(zfsvfs->z_os, zp->z_id,
 			  uio, bytes, tx);
 			*/
-			printf("ZFS: %s invalid upl page cur = %llu, len = %d \n",
+			dprintf("ZFS: %s invalid upl page cur = %llu, len = %d \n",
 			    __func__, upl_current, len);
 			VNOPS_STAT_BUMP(update_pages_skipped_pages);
 		}
