@@ -103,7 +103,7 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t write_updatepage_uio_copy;
 	kstat_named_t write_updatepage_uio;
-	kstat_named_t update_pages_committed_pages;
+	kstat_named_t update_pages_updated_pages;
 	kstat_named_t update_pages_aborted_pages;
 	kstat_named_t update_pages_skipped_pages;
 	kstat_named_t update_pages_error_pages;
@@ -123,7 +123,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "write_updatepage_uio_copy",                   KSTAT_DATA_UINT64 },
 	{ "write_updatepage_uio",                        KSTAT_DATA_UINT64 },
-	{ "update_pages_committed_pages",                KSTAT_DATA_UINT64 },
+	{ "update_pages_updated_pages",                  KSTAT_DATA_UINT64 },
 	{ "update_pages_aborted_pages",                  KSTAT_DATA_UINT64 },
 	{ "update_pages_skipped_pages",                  KSTAT_DATA_UINT64 },
 	{ "update_pages_error_pages",                    KSTAT_DATA_UINT64 },
@@ -527,24 +527,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 			error = uiomove((caddr_t)vaddr + off, bytes, UIO_WRITE, uio);
 			ASSERT(error == 0);
 			if (error == 0) {
-				/*
-				  dmu_write(zfsvfs->z_os, zp->z_id,
-				  woff, bytes, (caddr_t)vaddr + off, tx);
-				*/
-				/*
-				 * We don't need a ubc_upl_commit_range()
-				 * here since the dmu_write() effectively
-				 * pushed this page to disk.
-				 */
-				kern_return_t _kr;
-				_kr = ubc_upl_abort_range(upl, upl_current, PAGESIZE,
-					0);
-				if (_kr == KERN_FAILURE)
-					printf("ZFS: %s: abort range failure\n", __func__);
-				else if (_kr == KERN_INVALID_ARGUMENT)
-					printf("ZFS: %s: abort range invalid argument\n", __func__);
-
-				VNOPS_STAT_BUMP(update_pages_committed_pages);
+				VNOPS_STAT_BUMP(update_pages_updated_pages);
 			} else {
 				/*
 				 * page is now in an unknown state so dump it.
