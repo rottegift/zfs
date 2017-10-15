@@ -180,6 +180,7 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	zp->z_fastpath = B_FALSE;
 
 	zp->z_map_lock_holder = NULL;
+	zp->z_fsync_flag = 0;
 	zp->z_fsync_cnt = 0;
 	return (0);
 }
@@ -208,6 +209,7 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 
 	ASSERT3U(zp->z_sync_cnt, ==, 0);
 	ASSERT3P(zp->z_map_lock_holder, ==, NULL);
+	ASSERT3U(zp->z_fsync_flag, ==, 0);
 	ASSERT3U(zp->z_fsync_cnt, ==, 0);
 }
 

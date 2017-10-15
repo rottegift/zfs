@@ -3095,25 +3095,41 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * CAS spin-sleep loop */
 	ASSERT3U(zp->z_fsync_cnt, <, 1024); // XXX: ARBITRARY
 	ASSERT3S(zp->z_fsync_cnt, >=, 0); // SIGN STUFF
+	/* increase the number of threads fsyncing on this file */
 	atomic_inc_32(&zp->z_fsync_cnt);
 
-	for (int i = 0; zp->z_fsync_cnt > 1; i++) {
-		uint32_t cas = atomic_cas_32(
-		    &zp->z_fsync_cnt, 1, 2);
-		if (cas == 1) // we have done 1->2
+	/* first thread into the loop turns 0->1 and
+	 * exits the loop immediately.
+	 *
+	 * second thread fails to set 0->1 (because it's 1),
+	 * so loops around.
+	 *
+	 * third (or nth) thread fails to set 0->1 (because it's 1), so
+	 * loops around.
+	 *
+	 * ultimately first thread finishes up, turns 1->0, and returns.
+	 * this lets the second or third (or nth) thread turn 0->1 and
+	 * exit the lop.
+	 */
+
+	uint32_t mynum = zp->z_fsync_cnt;
+	for (int i = 0; ; i++) {
+		uint32_t cas = atomic_cas_8(
+		    &zp->z_fsync_flag, 0, 1);
+		if (cas == 1)  // we have done 0->1
 			break;
-		else
-			VNOPS_STAT_BUMP(zfs_fsync_cas_miss);
+		VNOPS_STAT_BUMP(zfs_fsync_cas_miss);
 		if (i % 10)
 			kpreempt(KPREEMPT_SYNC);
 		if (i % 512)
-			printf("ZFS: %s in CAS loop (i=%i) (z_fsync_cnt=%u)\n",
-			    __func__, i, zp->z_fsync_cnt);
+			printf("ZFS: %s in CAS loop (i=%d) (z_fsync_cnt=%u) (mynum=%u)\n",
+			    __func__, i, zp->z_fsync_cnt, mynum);
 		if (i % 1024)
 			delay(2);
 		if (i > 1000000)
 			panic("%s stuck in CAS loop", __func__);
 	}
+	ASSERT(zp->z_fsync_flag == 1);
 
 	int mapped = 0;
 	if (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
@@ -3179,7 +3195,12 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	//tsd_set(zfs_fsyncer_key, NULL);
+	/* reduce counter of threads fsyncing on this file */
+	ASSERT3U(&zp->z_fsync_cnt, >, 0);
 	atomic_dec_32(&zp->z_fsync_cnt);
+	/* open the gate for another thread */
+	uint8_t cas = atomic_cas_8(&zp->z_fsync_flag, 1, 0);
+	ASSERT(cas == 0);
 	return (0);
 }
 
