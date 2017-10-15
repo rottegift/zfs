@@ -3108,8 +3108,10 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * this lets the second or third (or nth) thread turn 0->1 and
 	 * exit the lop.
 	 */
-	VNOPS_STAT_BUMP(zfs_fsync);
-	uint32_t mynum = (uint32_t)(VNOPS_STAT(zfs_fsync) & (uint64_t)UINT32_MAX);
+
+	static uint64_t mynum_ctr = 0;
+	atomic_inc_64(&mynum_ctr);
+	uint32_t mynum = (uint32_t)(mynum_ctr & (uint64_t)UINT32_MAX);
 	if (mynum == 0)
 		mynum = 1;
 	for (int i = 1; ; i++) { // yes, start at 1 because of modulo ops below
@@ -3189,6 +3191,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			tries = z_map_rw_lock(zp, &need_release, &need_upgrade, "zfs_fsync (post ubc_msync)");
 			VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 		}
+		VNOPS_STAT_BUMP(zfs_fsync);
 		ZFS_EXIT(zfsvfs);
 	}
 
