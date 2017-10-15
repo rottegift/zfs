@@ -3110,7 +3110,9 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 */
 	VNOPS_STAT_BUMP(zfs_fsync);
 	uint32_t mynum = (uint32_t)(VNOPS_STAT(zfs_fsync) & (uint64_t)UINT32_MAX);
-	for (int i = 0; ; i++) {
+	if (mynum == 0)
+		mynum = 1;
+	for (int i = 1; ; i++) { // yes, start at 1 because of modulo ops below
 		uint32_t cas = atomic_cas_32(
 		    &zp->z_fsync_flag, 0, mynum);
 		if (cas == mynum)  // we have done 0->mynum
