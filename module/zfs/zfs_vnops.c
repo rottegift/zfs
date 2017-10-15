@@ -3132,7 +3132,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	ASSERT(zp->z_fsync_flag == 1);
 
 	int mapped = 0;
-	if (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
+	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED) {
 		mapped = 0;
 		VNOPS_STAT_BUMP(fsync_disabled);
 		if (zp->z_is_mapped)
