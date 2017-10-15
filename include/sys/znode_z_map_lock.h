@@ -53,9 +53,9 @@ z_map_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade
 			    : "(NULL)");
 		if (i > 1000000)
 			panic("could not upgrade z_map_lock for %s", caller);
-		if (i % 10)
+		if ((i % 10)==0)
 			delay(2);
-		else if (i % 2)
+		else if ((i % 2)==0)
 			kpreempt(KPREEMPT_SYNC);
 	}
 
@@ -89,9 +89,9 @@ z_map_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade, con
 			panic("could not acquire z_map_lock");
 			break;
 		}
-		if (i % 10)
+		if ((i % 10)==0)
 			delay(2);
-		else if (i % 2)
+		else if ((i % 2)==0)
 			kpreempt(KPREEMPT_SYNC);
 	}
 

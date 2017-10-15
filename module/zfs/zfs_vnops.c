@@ -3118,12 +3118,12 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		if (cas == mynum)  // we have done 0->mynum
 			break;
 		VNOPS_STAT_BUMP(zfs_fsync_cas_miss);
-		if (i % 10)
+		if ((i % 10)==0)
 			kpreempt(KPREEMPT_SYNC);
-		if (i % 512)
+		if ((i % 512)==0)
 			printf("ZFS: %s in CAS loop (i=%d) (z_fsync_cnt=%u) (mynum=%u)\n",
 			    __func__, i, zp->z_fsync_cnt, mynum);
-		if (i % 1024)
+		if ((i % 1024)==0)
 			delay(2);
 		if (i > 1000000)
 			panic("%s stuck in CAS loop", __func__);
