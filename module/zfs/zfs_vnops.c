@@ -537,8 +537,8 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 				 * pushed this page to disk.
 				 */
 				kern_return_t _kr;
-				_kr = ubc_upl_commit_range(upl, upl_current, PAGESIZE,
-					UPL_COMMIT_SET_DIRTY);
+				_kr = ubc_upl_abort_range(upl, upl_current, PAGESIZE,
+					UPL_ABORT_RESTART);
 				if (_kr == KERN_FAILURE)
 					printf("ZFS: %s: commit range failure\n", __func__);
 				else if (_kr == KERN_INVALID_ARGUMENT)
@@ -551,7 +551,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 				 */
 				printf("ZFS: %s: dumping page\n", __func__);
 				ubc_upl_abort_range(upl, upl_current, PAGESIZE,
-                                    UPL_ABORT_DUMP_PAGES);
+                                    UPL_ABORT_DUMP_PAGES | UPL_ABORT_ERROR);
 				VNOPS_STAT_BUMP(update_pages_aborted_pages);
 			}
 		} else { // !upl_valid_page
