@@ -291,8 +291,11 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 #endif
 
 	/* Keep a count of the synchronous opens in the znode */
-	if (flag & (FSYNC | FDSYNC))
+	if (flag & (FSYNC | FDSYNC)) {
+		ASSERT3S(&zp->z_sync_cnt, <, UINT32_MAX);
+		ASSERT3S(&zp->z_sync_cnt, <, 1024);  // XXX: ARBITRARY
 		atomic_inc_32(&zp->z_sync_cnt);
+	}
 
 	ZFS_EXIT(zfsvfs);
 	return (0);
@@ -323,8 +326,10 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	ZFS_VERIFY_ZP(zp);
 
 	/* Decrement the synchronous opens in the znode */
-	if ((flag & (FSYNC | FDSYNC)) && (count == 1))
+	if ((flag & (FSYNC | FDSYNC)) && (count == 1)) {
+		ASSERT3U(&zp->z_sync_cnt, >, 0);
 		atomic_dec_32(&zp->z_sync_cnt);
+	}
 
 #if 0
 	if (!zfs_has_ctldir(zp) && zp->z_zfsvfs->z_vscan &&
@@ -3125,7 +3130,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 				NULL, UBC_PUSHALL | UBC_SYNC)) {
 				printf("ZFS: %s: ubc_msync failed!\n", __func__);
 			}
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, "zfs_fsync (post ubc_msync)");
+			tries = z_map_rw_lock(zp, &need_release, &need_upgrade, "zfs_fsync (post ubc_msync)");
 			VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 		}
 		ZFS_EXIT(zfsvfs);
