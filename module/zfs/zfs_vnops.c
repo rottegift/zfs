@@ -3195,9 +3195,9 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	//tsd_set(zfs_fsyncer_key, NULL);
 	/* reduce counter of threads fsyncing on this file */
-	ASSERT3U(&zp->z_fsync_cnt, ==, 1);
+	ASSERT3U(zp->z_fsync_cnt, ==, 1);
 	atomic_dec_32(&zp->z_fsync_cnt);
-	ASSERT3U(&zp->z_fsync_cnt, ==, 0);
+	ASSERT3U(zp->z_fsync_cnt, ==, 0);
 
 	/* open the gate for another thread */
 	ASSERT3U(zp->z_fsync_flag, ==, mynum);
