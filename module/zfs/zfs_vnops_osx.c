@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2013 Will Andrews <will@firepipe.net>
  * Copyright (c) 2013, 2016 Jorgen Lundman <lundman@lundman.net>
+ * Copyright (c) 2017 Sean Doran <smd@use.net>.  All rights reserved.
  */
 
 /*
@@ -89,6 +90,8 @@
 #include <miscfs/specfs/specdev.h>
 #include <vfs/vfs_support.h>
 #include <sys/ioccom.h>
+
+#include <sys/znode_z_map_lock.h>
 
 typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
@@ -2025,7 +2028,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	caddr_t vaddr = NULL;
 	/* vm_offset_t vaddr = NULL; */
 	int flags = ap->a_flags;
-	int need_unlock = 0;
 	int error = 0;
 	uint64_t file_sz;
 
@@ -2076,22 +2078,12 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	 * zfs_vnop_mnomap(), since those may update the file as well.
 	 */
 
+	boolean_t need_release = B_FALSE;
+	boolean_t need_upgrade = B_FALSE;
 	if (!rw_write_held(&zp->z_map_lock)) {
 		ASSERT3S(zp->z_is_mapped, >, 0);
-		for (int i = 0; !rw_tryenter(&zp->z_map_lock, RW_WRITER); i++) {
-			VNOPS_OSX_STAT_BUMP(pagein_want_lock);
-			if (i > 0 && (i % 512) == 0)
-				printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
-			if (i > 1000000) { // enough time to take manual intervention
-				panic("could not acquire z_map_lock");
-				break;
-			}
-			if (i % 10)
-				delay(2);
-			else if (i % 2)
-				kpreempt(KPREEMPT_SYNC);
-		}
-		need_unlock = B_TRUE;
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		VNOPS_OSX_STAT_INCR(pagein_want_lock, tries);
 	} else {
 		ASSERT3S(zp->z_is_mapped, >, 0);
 		printf("ZFS: %s: already have z_map_lock\n", __func__);
@@ -2101,8 +2093,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		dprintf("zfs_vnop_pagein: failed to ubc_upl_map");
 		if (!(flags & UPL_NOCOMMIT))
 			(void) ubc_upl_abort(upl, 0);
-		if (need_unlock)
-			rw_exit(&zp->z_map_lock);
+		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ZFS_EXIT(zfsvfs);
 		return (ENOMEM);
 	}
@@ -2169,8 +2160,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	 */
 	if (ap->a_f_offset >= file_sz)
 		error = EFAULT;
-	if (need_unlock)
-		rw_exit(&zp->z_map_lock);
+
+	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	ZFS_EXIT(zfsvfs);
 	if (error) dprintf("%s error %d\n", __func__, error);
@@ -2438,26 +2429,15 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	 * for this file.
 	 */
 
-	boolean_t need_unlock = B_FALSE;
+	boolean_t need_release = B_FALSE;
+	boolean_t need_upgrade = B_FALSE;
 
 	if (!rw_write_held(&zp->z_map_lock)) {
 		ASSERT3S(zp->z_is_mapped, >, 0);
-		VNOPS_OSX_STAT_BUMP(pageoutv1_want_lock);
-		for (int i = 0; !rw_tryenter(&zp->z_map_lock, RW_WRITER); i++) {
-			if (i > 0 && (i % 512) == 0)
-				printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
-			if (i > 1000000) { // enough time to take manual intervention
-				panic("could not acquire z_map_lock");
-				break;
-			}
-			if (i % 10)
-				delay(2);
-			else if (i % 2)
-				kpreempt(KPREEMPT_SYNC);
-		}
-		need_unlock = B_TRUE;
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		VNOPS_OSX_STAT_INCR(pageoutv1_want_lock, tries);
 	} else {
-		printf("ZFS: %s: z_map_lock already heald\n", __func__);
+		printf("ZFS: %s: z_map_lock already held\n", __func__);
 	}
 
 	/*
@@ -2468,8 +2448,7 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	int retval =  zfs_pageout(zfsvfs, zp, upl, upl_offset, ap->a_f_offset,
 					   len, flags);
 
-	if (need_unlock)
-		rw_exit(&zp->z_map_lock);
+	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	return (retval);
 }
@@ -2593,7 +2572,6 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	dmu_tx_t *tx;
 	caddr_t vaddr = NULL;
 	int merror = 0;
-	boolean_t need_unlock = B_FALSE;
 
 	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
@@ -2644,22 +2622,12 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	 * file.
 	 */
 
+	boolean_t need_release = B_FALSE;
+	boolean_t need_upgrade = B_FALSE;
 	if (!rw_write_held(&zp->z_map_lock)) {
 		ASSERT3S(zp->z_is_mapped, >, 0);
-		for (int i = 0; !rw_tryenter(&zp->z_map_lock, RW_WRITER); i++) {
-			VNOPS_OSX_STAT_BUMP(pageoutv2_want_lock);
-			if (i > 0 && (i % 512) == 0)
-				printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
-			if (i > 1000000) { // enough time to take manual intervention
-				panic("could not acquire z_map_lock");
-				break;
-			}
-			if (i % 10)
-				delay(2);
-			else if (i % 2)
-				kpreempt(KPREEMPT_SYNC);
-		}
-		need_unlock = B_TRUE;
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
 	} else {
 		VNOPS_OSX_STAT_BUMP(pageoutv2_lock_held);
 		dprintf("ZFS: %s: z_map_lock already held\n", __func__);
@@ -2774,8 +2742,8 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		if ( !upl_dirty_page(pl, pg_index)) {
 			/* hfs has a call to panic here, but we trigger this *a lot* so
 			 * unsure what is going on */
-			printf ("ZFS: %s: unforeseen clean page @ index %lld for UPL %p, need_unlock = %d\n",
-			    __func__,  pg_index, upl, need_unlock);
+			printf ("ZFS: %s: unforeseen clean page @ index %lld for UPL %p, need_release = %d\n",
+			    __func__,  pg_index, upl, need_release);
 			VNOPS_OSX_STAT_BUMP(unexpected_clean_page);
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
@@ -2870,8 +2838,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		vaddr = NULL;
 	}
 
-	if (need_unlock)
-		rw_exit(&zp->z_map_lock);
+	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	zfs_range_unlock(rl);
 
@@ -2890,8 +2857,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	return (error);
 
   pageout_done:
-	if (need_unlock)
-		rw_exit(&zp->z_map_lock);
+	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	zfs_range_unlock(rl);
 
