@@ -2899,6 +2899,12 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		ZFS_EXIT(zfsvfs);
 		return (ENODEV);
 	}
+	/*
+	 * XXX: we set z_is_mapped only once but read it often, so a
+	 *      mutex is overkill; instead, it should be a proper
+	 *      _Atomic structure member, or at least be set atomically
+	 *      with one of the Illumos atomic functions.
+	 */
 	mutex_enter(&zp->z_lock);
 	if (zp->z_is_mapped > 0) {
 		mutex_exit(&zp->z_lock);

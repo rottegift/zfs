@@ -786,12 +786,39 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	}
 #endif
 
+#ifndef __APPLE__
 	/*
 	 * If we're in FRSYNC mode, sync out this znode before reading it.
 	 */
 	if (zfsvfs->z_log &&
 	    (ioflag & FRSYNC || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS))
 		zil_commit(zfsvfs->z_log, zp->z_id);
+#else
+	/*
+	 * if we are in ZFS_SYNC_ALWAYS, or the file is mapped,
+	 * sync out this znode before readng it.
+	 */
+	if (zfsvfs->z_log) {
+		/* XXX: on x86-64 we can probably do this without
+		 * the mutex, or alternatively we can make z_is_mapped
+		 * an _Atomic and then simply not lock it, because we
+		 * only ever set it from 0->1, but we read it fairly often
+		 */
+		int mapped = 0;
+		boolean_t need_unlock = B_FALSE;
+		if (!MUTEX_HELD(&zp->z_lock)) {
+			mutex_enter(&zp->z_lock);
+			need_unlock = B_TRUE;
+		}
+		mapped = zp->z_is_mapped;
+		if (need_unlock == B_TRUE)
+			mutex_exit(&zp->z_lock);
+		if (mapped == B_TRUE)
+			zfs_fsync(vp, 0, cr, ct); // does a zil commit
+		else if (zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
+			zil_commit(zfsvfs->z_log, zp->z_id);
+	}
+#endif
 
 	/*
 	 * Lock the range against changes.
