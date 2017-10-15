@@ -3116,7 +3116,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	for (int i = 0; ; i++) {
 		uint32_t cas = atomic_cas_32(
 		    &zp->z_fsync_flag, 0, mynum);
-		if (cas == mynum)  // we have done 0->1
+		if (cas == mynum)  // we have done 0->mynum
 			break;
 		VNOPS_STAT_BUMP(zfs_fsync_cas_miss);
 		if (i % 10)
