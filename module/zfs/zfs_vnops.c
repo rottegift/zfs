@@ -3095,9 +3095,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * CAS spin-sleep loop */
 	ASSERT3U(zp->z_fsync_cnt, <, 1024); // XXX: ARBITRARY
 	ASSERT3S(zp->z_fsync_cnt, >=, 0); // SIGN STUFF
-	/* increase the number of threads fsyncing on this file */
-	atomic_inc_32(&zp->z_fsync_cnt);
-
 	/* first thread into the loop turns 0->1 and
 	 * exits the loop immediately.
 	 *
@@ -3130,7 +3127,9 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			panic("%s stuck in CAS loop", __func__);
 	}
 	ASSERT3U(zp->z_fsync_flag, ==, mynum);
-
+	/* increase the number of threads fsyncing on this file */
+	atomic_inc_32(&zp->z_fsync_cnt);
+	ASSERT3U(zp->z_fsync_cnt, ==, 1);
 
 	int mapped = 0;
 	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED) {
@@ -3196,8 +3195,10 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	//tsd_set(zfs_fsyncer_key, NULL);
 	/* reduce counter of threads fsyncing on this file */
-	ASSERT3U(&zp->z_fsync_cnt, >, 0);
+	ASSERT3U(&zp->z_fsync_cnt, ==, 1);
 	atomic_dec_32(&zp->z_fsync_cnt);
+	ASSERT3U(&zp->z_fsync_cnt, ==, 0);
+
 	/* open the gate for another thread */
 	ASSERT3U(zp->z_fsync_flag, ==, mynum);
 	uint32_t cas = atomic_cas_32(&zp->z_fsync_flag, mynum, 0);
