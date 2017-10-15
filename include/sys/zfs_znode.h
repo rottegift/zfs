@@ -232,7 +232,7 @@ typedef struct znode {
 
 	krwlock_t       z_map_lock;     /* page map lock */
 	const char      *z_map_lock_holder;  /* function that holds the rw_lock */
-	uint8_t         z_fsync_flag;   /* are we fsyncing? */
+	uint32_t        z_fsync_flag;   /* are we fsyncing? */
 	uint32_t        z_fsync_cnt;    /* how many fsyncers are working on this file */
 
 #ifdef __APPLE__

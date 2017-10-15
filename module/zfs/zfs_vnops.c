@@ -3111,12 +3111,12 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * this lets the second or third (or nth) thread turn 0->1 and
 	 * exit the lop.
 	 */
-
-	uint32_t mynum = zp->z_fsync_cnt;
+	VNOPS_STAT_BUMP(zfs_fsync);
+	uint32_t mynum = (uint32_t)(VNOPS_STAT(zfs_fsync) & (uint64_t)UINT32_MAX);
 	for (int i = 0; ; i++) {
-		uint8_t cas = atomic_cas_8(
-		    &zp->z_fsync_flag, (uint8_t)0, (uint8_t)1);
-		if (cas == 1)  // we have done 0->1
+		uint32_t cas = atomic_cas_32(
+		    &zp->z_fsync_flag, 0, mynum);
+		if (cas == mynum)  // we have done 0->1
 			break;
 		VNOPS_STAT_BUMP(zfs_fsync_cas_miss);
 		if (i % 10)
@@ -3129,7 +3129,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		if (i > 1000000)
 			panic("%s stuck in CAS loop", __func__);
 	}
-	ASSERT3U(zp->z_fsync_flag, ==, 1);
+	ASSERT3U(zp->z_fsync_flag, ==, mynum);
+
 
 	int mapped = 0;
 	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED) {
@@ -3188,7 +3189,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 		}
 		ZFS_EXIT(zfsvfs);
-		VNOPS_STAT_BUMP(zfs_fsync);
 	}
 
 	if (need_release != B_FALSE)
@@ -3199,8 +3199,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	ASSERT3U(&zp->z_fsync_cnt, >, 0);
 	atomic_dec_32(&zp->z_fsync_cnt);
 	/* open the gate for another thread */
-	ASSERT3U(zp->z_fsync_flag, ==, 1);
-	uint8_t cas = atomic_cas_8(&zp->z_fsync_flag, (uint8_t)1, (uint8_t)0);
+	ASSERT3U(zp->z_fsync_flag, ==, mynum);
+	uint32_t cas = atomic_cas_8(&zp->z_fsync_flag, mynum, 0);
 	ASSERT3U(cas, ==, 0);
 	return (0);
 }
