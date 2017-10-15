@@ -3201,7 +3201,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	/* open the gate for another thread */
 	ASSERT3U(zp->z_fsync_flag, ==, mynum);
 	uint32_t cas = atomic_cas_32(&zp->z_fsync_flag, mynum, 0);
-	ASSERT3U(cas, ==, 0);
+	ASSERT3U(cas, ==, mynum);
 	return (0);
 }
 
