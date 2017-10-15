@@ -3088,7 +3088,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	boolean_t need_upgrade = B_FALSE;
 
 	if (mapped > 0 && zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, "zfs_fsync (init)");
 		VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 	}
 
@@ -3102,7 +3102,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	if (mapped > 0) {
-		uint64_t tries = z_map_upgrade_lock(zp, &need_release, &need_upgrade, __func__);
+		uint64_t tries = z_map_upgrade_lock(zp, &need_release, &need_upgrade, "zfs_fsync (post clpush)");
 		VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 	}
 
@@ -3118,7 +3118,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
 		if (mapped > 0) {
-			uint64_t tries = z_map_upgrade_lock(zp, &need_release, &need_upgrade, __func__);
+			uint64_t tries = z_map_upgrade_lock(zp, &need_release, &need_upgrade, "zfs_fsync (post zil_commit)");
 			VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			if (ubc_msync(vp, 0, ubc_getsize(vp),
