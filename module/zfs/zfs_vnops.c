@@ -101,6 +101,8 @@ typedef struct vnops_stats {
 	kstat_named_t cluster_push;
 	kstat_named_t zfs_fsync;
 	kstat_named_t zfs_fsync_want_lock;
+	kstat_named_t write_updatepage_uio_copy;
+	kstat_named_t write_updatepage_uio;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -115,6 +117,8 @@ static vnops_stats_t vnops_stats = {
 	{ "cluster_push",                                KSTAT_DATA_UINT64 },
 	{ "zfs_fsync",                                   KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
+	{ "write_updatepage_uio_copy",                   KSTAT_DATA_UINT64 },
+	{ "write_updatepage_uio",                        KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -493,7 +497,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 * page list into the kernel virtual address space.
 	 */
 	error = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl,
-	    UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY);
+	    UPL_SET_LITE | UPL_WILL_MODIFY);
 	if ((error != KERN_SUCCESS) || !upl) {
 		printf("ZFS: update_pages failed to ubc_create_upl: %d\n", error);
 		return;
@@ -1168,8 +1172,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 
 		if (abuf == NULL) {
 
-            if ( vn_has_cached_data(vp) )
-                uio_copy = uio_duplicate(uio);
+			if ( vn_has_cached_data(vp) )
+				uio_copy = uio_duplicate(uio);
 
 			tx_bytes = uio_resid(uio);
 
@@ -1205,12 +1209,14 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		if (tx_bytes && vn_has_cached_data(vp)) {
 #ifdef __APPLE__
 			if (uio_copy) {
+				VNOPS_STAT_BUMP(write_updatepage_uio_copy);
 				dprintf("Updatepage copy call %llu vs %llu (tx_bytes %llu) numvecs %d\n",
 				    woff, uio_offset(uio_copy), tx_bytes, uio_iovcnt(uio_copy));
 				update_pages(vp, tx_bytes, uio_copy, tx);
 				uio_free(uio_copy);
 				uio_copy = NULL;
 			} else {
+				VNOPS_STAT_BUMP(write_updatepage_uio);
 				dprintf("XXXXUpdatepage call %llu vs %llu (tx_bytes %llu) numvecs %d\n",
 				    woff, uio_offset(uio), tx_bytes, uio_iovcnt(uio));
 				update_pages(vp, tx_bytes, uio, tx);
