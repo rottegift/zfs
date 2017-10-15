@@ -3114,7 +3114,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	uint32_t mynum = zp->z_fsync_cnt;
 	for (int i = 0; ; i++) {
-		uint32_t cas = atomic_cas_8(
+		uint8_t cas = atomic_cas_8(
 		    &zp->z_fsync_flag, (uint8_t)0, (uint8_t)1);
 		if (cas == 1)  // we have done 0->1
 			break;
@@ -3200,7 +3200,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	atomic_dec_32(&zp->z_fsync_cnt);
 	/* open the gate for another thread */
 	ASSERT3U(zp->z_fsync_flag, ==, 1);
-	uint32_t cas = atomic_cas_8(&zp->z_fsync_flag, (uint8_t)1, (uint8_t)0);
+	uint8_t cas = atomic_cas_8(&zp->z_fsync_flag, (uint8_t)1, (uint8_t)0);
 	ASSERT3U(cas, ==, 0);
 	return (0);
 }
