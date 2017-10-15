@@ -73,7 +73,7 @@ z_map_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade, con
 	for (unsigned int i=0; !rw_tryenter(&zp->z_map_lock, RW_WRITER) ; i++) {
 		lock_tries++;
 		if (i > 0 && (i % 512) == 0)
-			printf("ZFS: %s: waiting for z_map_lock (%u)\n", __func__, i);
+			printf("ZFS: %s: waiting for z_map_lock (%u) for %s\n", __func__, i, caller);
 		if (i > 1000000) { // 2000 seconds for now, enough time to take manual intervention
 			panic("could not acquire z_map_lock");
 			break;
