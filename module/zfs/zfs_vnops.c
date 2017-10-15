@@ -103,6 +103,10 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t write_updatepage_uio_copy;
 	kstat_named_t write_updatepage_uio;
+	kstat_named_t update_pages_committed_pages;
+	kstat_named_t update_pages_aborted_pages;
+	kstat_named_t update_pages_skipped_pages;
+	kstat_named_t update_pages_error_pages;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -119,6 +123,10 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "write_updatepage_uio_copy",                   KSTAT_DATA_UINT64 },
 	{ "write_updatepage_uio",                        KSTAT_DATA_UINT64 },
+	{ "update_pages_committed_pages",                KSTAT_DATA_UINT64 },
+	{ "update_pages_aborted_pages",                  KSTAT_DATA_UINT64 },
+	{ "update_pages_skipped_pages",                  KSTAT_DATA_UINT64 },
+	{ "update_pages_error_pages",                    KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -412,6 +420,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
     upl_t upl;
     upl_page_info_t *pl = NULL;
     off_t upl_start;
+    off_t upl_current;
     int upl_size;
     int upl_page;
     off_t off;
@@ -509,6 +518,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		return;
 	}
 
+	upl_current = upl_start;
 	for (upl_page = 0; len > 0; ++upl_page) {
 		uint64_t bytes = MIN(PAGESIZE - off, len);
 
@@ -526,25 +536,38 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 				 * here since the dmu_write() effectively
 				 * pushed this page to disk.
 				 */
+				ubc_upl_commit_range(upl, upl_current, PAGESIZE,
+					UPL_COMMIT_CLEAR_DIRTY);
+				VNOPS_STAT_BUMP(update_pages_committed_pages);
 			} else {
 				/*
 				 * page is now in an unknown state so dump it.
 				 */
-				ubc_upl_abort_range(upl, upl_start, PAGESIZE,
+				printf("ZFS: %s: dumping page\n", __func__);
+				ubc_upl_abort_range(upl, upl_current, PAGESIZE,
                                     UPL_ABORT_DUMP_PAGES);
+				VNOPS_STAT_BUMP(update_pages_aborted_pages);
 			}
 		} else { // !upl_valid_page
 			/*
 			  error = dmu_write_uio(zfsvfs->z_os, zp->z_id,
 			  uio, bytes, tx);
 			*/
+			printf("ZFS: %s invalid upl page cur = %llu, len = %d \n",
+			    __func__, upl_current, len);
+			VNOPS_STAT_BUMP(update_pages_skipped_pages);
+		}
+		if (error) {
+			uint64_t pgs = 1ULL + atop_64(len);
+			VNOPS_STAT_INCR(update_pages_error_pages, pgs);
+			printf("ZFS: %s: uiomove error, cur = %llu, len = %d\n",
+			    __func__, upl_current, len);
+			break;
 		}
 		vaddr += PAGE_SIZE;
-		upl_start += PAGE_SIZE;
+		upl_current += PAGE_SIZE;
 		len -= bytes;
 		off = 0;
-		if (error)
-			break;
 	}
 
 	/*
