@@ -94,9 +94,7 @@ int zfs_vnop_force_formd_normalized_output = 0; /* disabled by default */
 typedef struct vnops_stats {
 	kstat_named_t update_pages;
 	kstat_named_t update_pages_want_lock;
-	kstat_named_t update_pages_acquired_lock;
 	kstat_named_t update_pages_lock_timeout;
-	kstat_named_t update_pages_had_lock;
 	kstat_named_t update_pages_not_mapped;
 	kstat_named_t mappedread_pages;
 	kstat_named_t dmu_read_uio_dbuf_pages;
@@ -119,9 +117,7 @@ typedef struct vnops_stats {
 static vnops_stats_t vnops_stats = {
 	{ "update_pages",                                KSTAT_DATA_UINT64 },
 	{ "update_pages_want_lock",                      KSTAT_DATA_UINT64 },
-	{ "update_pages_acquired_lock",                  KSTAT_DATA_UINT64 },
 	{ "update_pages_lock_timeout",                   KSTAT_DATA_UINT64 },
-	{ "update_pages_had_lock",                       KSTAT_DATA_UINT64 },
 	{ "update_pages_not_mapped",                     KSTAT_DATA_UINT64 },
 	{ "mappedread_pages",                            KSTAT_DATA_UINT64 },
 	{ "dmu_read_uio_dbuf_pages",                     KSTAT_DATA_UINT64 },
@@ -488,15 +484,13 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		ASSERT3U((uint64_t)z_lock_held, ==, (uint64_t)B_FALSE);
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		VNOPS_STAT_INCR(update_pages_want_lock, tries);
-		VNOPS_STAT_BUMP(update_pages_acquired_lock);
 	} else if (mapped > 0) {
 		ASSERT(!MUTEX_HELD(&zp->z_lock));
 		ASSERT3U((uint64_t)z_lock_held, ==, (uint64_t)B_FALSE);
-		VNOPS_STAT_BUMP(update_pages_had_lock);
 		printf("ZFS: %s: already holds z_map_lock\n", __func__);
 	} else {
 		ASSERT(MUTEX_HELD(&zp->z_lock));
-		VNOPS_STAT_BUMP(update_pages_not_mapped);
+		printf("ZFS: %s: file not mapped\n", __func__);
 	}
 
 	/* we now hold EITHER z_lock or z_map_lock, but not both */

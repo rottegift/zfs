@@ -99,16 +99,12 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_idem;
 	kstat_named_t mnomap_calls;
 	kstat_named_t reclaim_mapped;
-	kstat_named_t null_reclaim;
-	kstat_named_t unexpected_clean_page;
 	kstat_named_t bluster_pageout_calls;
 	kstat_named_t bluster_pageout_error;
 	kstat_named_t bluster_pageout_dmu_bytes;
-	kstat_named_t bluster_pageout_msync_pages;
-	kstat_named_t bluster_pageout_no_msync_pages;
+	kstat_named_t bluster_pageout_pages;
 	kstat_named_t pageoutv2_calls;
 	kstat_named_t pageoutv2_want_lock;
-	kstat_named_t pageoutv2_lock_held;
 	kstat_named_t pageoutv2_msync_flag;
 	kstat_named_t pageoutv2_to_pageout;
 	kstat_named_t pageoutv2_backscan_pages;
@@ -126,16 +122,12 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_idem",                         KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
 	{ "reclaim_mapped",                    KSTAT_DATA_UINT64 },
-	{ "null_reclaim",                      KSTAT_DATA_UINT64 },
-	{ "unexpected_clean_page",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_error",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_dmu_bytes",         KSTAT_DATA_UINT64 },
-	{ "bluster_pageout_msync_pages",       KSTAT_DATA_UINT64 },
-	{ "bluster_pageout_no_msync_pages",    KSTAT_DATA_UINT64 },
+	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
-	{ "pageoutv2_lock_held",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_msync_flag",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_to_pageout",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_backscan_pages",          KSTAT_DATA_UINT64 },
@@ -2529,12 +2521,9 @@ static int bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, &vaddr[upl_offset], tx);
 	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, size);
 
-	if (size > 0 && (flags & UPL_UBC_MSYNC) == UPL_UBC_MSYNC) {
+	if (size > 0) {
 		uint64_t pgs = atop_64(size) + 1ULL;
-		VNOPS_OSX_STAT_INCR(bluster_pageout_msync_pages, pgs);
-	} else if (size > 0) {
-		uint64_t pgs = atop_64(size) + 1ULL;
-		VNOPS_OSX_STAT_INCR(bluster_pageout_no_msync_pages, pgs);
+		VNOPS_OSX_STAT_INCR(bluster_pageout_pages, pgs);
 	}
 
 	return 0;
@@ -2629,7 +2618,6 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
 	} else {
-		VNOPS_OSX_STAT_BUMP(pageoutv2_lock_held);
 		dprintf("ZFS: %s: z_map_lock already held\n", __func__);
 	}
 
@@ -2744,7 +2732,6 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 			 * unsure what is going on */
 			printf ("ZFS: %s: unforeseen clean page @ index %lld for UPL %p, need_release = %d\n",
 			    __func__,  pg_index, upl, need_release);
-			VNOPS_OSX_STAT_BUMP(unexpected_clean_page);
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
 			isize    -= PAGE_SIZE;
@@ -3067,7 +3054,6 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	zp = VTOZ(vp);
 	ASSERT(zp != NULL);
 	dprintf("+vnop_reclaim zp %p/%p type %d\n", zp, vp, vnode_vtype(vp));
-	if (!zp) VNOPS_OSX_STAT_BUMP(null_reclaim);
 	if (!zp) goto out;
 
 	if (zp->z_is_mapped > 0) {
