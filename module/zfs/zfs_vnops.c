@@ -112,6 +112,8 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_cas_miss;
 	kstat_named_t fsync_disabled;
 	kstat_named_t fsync_disabled_mapped;
+	kstat_named_t zfs_read_sync_mapped;
+	kstat_named_t zfs_read_zil_commit;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -135,6 +137,8 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_cas_miss",                          KSTAT_DATA_UINT64 },
 	{ "fsync_disabled",                              KSTAT_DATA_UINT64 },
 	{ "fsync_disabled_mapped",                       KSTAT_DATA_UINT64 },
+	{ "zfs_read_sync_mapped",                        KSTAT_DATA_UINT64 },
+	{ "zfs_read_zil_commit",                         KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -824,10 +828,13 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		mapped = zp->z_is_mapped;
 		if (need_unlock == B_TRUE)
 			mutex_exit(&zp->z_lock);
-		if (mapped == B_TRUE)
+		if (mapped == B_TRUE) {
 			zfs_fsync(vp, 0, cr, ct); // does a zil commit
-		else if (zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
+			VNOPS_STAT_BUMP(zfs_read_sync_mapped);
+		} else if (zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS) {
 			zil_commit(zfsvfs->z_log, zp->z_id);
+			VNOPS_STAT_BUMP(zfs_read_zil_commit);
+		}
 	}
 #endif
 
