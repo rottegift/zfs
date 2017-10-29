@@ -750,12 +750,13 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     /* give the cluster layer a chance to fill in whatever data it already has */
     const int orig_nbytes = nbytes;
     const user_ssize_t orig_resid = uio_resid(uio);
-    ASSERT3S(orig_resid, >, 0);
+    const off_t orig_ubc_size = ubc_getsize(vp);
+    ASSERT3S(orig_resid, >=, 0);
     const int orig_cache_resid = (orig_resid > INT_MAX) ? INT_MAX : orig_resid;
     int cache_resid = orig_cache_resid;
     // ask UBC to work in the uio
     int cache_error = 0;
-    if (orig_resid > 0) {
+    if (orig_ubc_size > 0 && orig_resid > 0) {
 	    ASSERT3S(cache_resid, >, 0);
 	    cache_error = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
     }
@@ -766,22 +767,28 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 	    return (cache_error);
     }
     /* did we satisfy everything from UBC ? */
-    if (orig_resid > 0 && cache_resid == 0) {
+    if (orig_ubc_size > 0 && orig_resid > 0 && cache_resid == 0) {
 	    VNOPS_STAT_BUMP(mappedread_ubc_satisfied_all);
 	    VNOPS_STAT_INCR(mappedread_ubc_copied, orig_cache_resid);
 	    return (0);
     }
     user_ssize_t found_bytes = orig_resid - cache_resid;
     int64_t nb = nbytes;
-    if (orig_resid > 0)
+    if (orig_ubc_size > 0 && orig_resid > 0) {
 	    ASSERT3S(found_bytes, <=, nb);
+
+    } else {
+	    ASSERT3S(found_bytes, ==, 0);
+	    found_bytes = 0;
+    }
     if (found_bytes > 0) {
 	    VNOPS_STAT_INCR(mappedread_ubc_copied, found_bytes);
     }
     int64_t bytes_left_after_ubc = nb - found_bytes;
     ASSERT3S(bytes_left_after_ubc, >, 0);
+    EQUIV(orig_ubc_size == 0, bytes_left_after_ubc == nb);
 
-    if (bytes_left_after_ubc <= 0) {
+    if (orig_ubc_size > 0 && bytes_left_after_ubc == 0) {
 	    if (nbytes > 0)
 		    VNOPS_STAT_BUMP(mappedread_ubc_satisfied_all);
 	    return (0);
@@ -803,7 +810,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     upl_start &= ~PAGE_MASK;
     upl_size = (off + nbytes + (PAGE_SIZE - 1)) & ~PAGE_MASK;
 
-    ASSERT3S(upl_start + upl_size, >=, zp->z_size);
+    ASSERT3S(upl_start + upl_size, <=, zp->z_size);
 
     dprintf("zfs_mappedread: %llu - %d (adj %llu - %llu)\n",
             uio_offset(uio), nbytes,
