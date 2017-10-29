@@ -748,12 +748,25 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     ASSERT3S(ubc_getsize(vp), ==, zp->z_size); // ought not to  be 0
 
     /* give the cluster layer a chance to fill in whatever data it already has */
-    const int orig_nbytes = nbytes;
+    const int64_t orig_file_size = zp->z_size;
+    const int64_t orig_nbytes = nbytes;
+    ASSERT3S(orig_nbytes, <=, orig_file_size);
     const user_ssize_t orig_resid = uio_resid(uio);
+    const off_t orig_offset = uio_offset(uio);
     const off_t orig_ubc_size = ubc_getsize(vp);
     ASSERT3S(orig_resid, >=, 0);
-    const int orig_cache_resid = (orig_resid > INT_MAX) ? INT_MAX : orig_resid;
+    ASSERT3S(orig_resid, <=, orig_file_size);
+    ASSERT3S(orig_resid + orig_offset, <=, orig_file_size);
+    ASSERT3S(orig_resid + orig_offset, <=, orig_nbytes);
+    ASSERT3S(orig_nbytes, <=, orig_resid);
+    const int64_t target_resid = MIN(orig_nbytes, orig_resid);
+    const int orig_cache_resid = (target_resid > INT_MAX) ? INT_MAX : target_resid;
+    ASSERT3S(orig_cache_resid, <=, nbytes);
+    ASSERT3S((int64_t)orig_cache_resid + orig_offset, <=, orig_file_size);
     IMPLY(orig_resid > 0, orig_cache_resid > 0);
+    EQUIV(target_resid > 0, orig_cache_resid > 0);
+    EQUIV(target_resid == 0, orig_cache_resid == 0);
+    EQUIV(orig_resid == 0, orig_cache_resid == 0);
     int cache_resid = orig_cache_resid;
     // ask UBC to work in the uio
     int cache_error = 0;
@@ -761,6 +774,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 	    ASSERT3S(cache_resid, >, 0);
 	    cache_error = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
 	    ASSERT3S(cache_resid, >=, 0);
+	    ASSERT3S(orig_cache_resid, >=, cache_resid);
     }
     ASSERT3S(cache_error, ==, 0);
     if (cache_error != 0) {
@@ -769,19 +783,26 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 	    return (cache_error);
     }
     /* did we satisfy everything from UBC ? */
-    if (orig_ubc_size > 0 && orig_resid > 0 && cache_resid == 0) {
-	    ASSERT3S(orig_cache_resid, >, 0);
+    if (orig_ubc_size > 0 && orig_cache_resid > 0 && cache_resid == 0) {
 	    VNOPS_STAT_BUMP(mappedread_ubc_satisfied_all);
-	    VNOPS_STAT_INCR(mappedread_ubc_copied, orig_cache_resid);
+	    VNOPS_STAT_INCR(mappedread_ubc_copied, nbytes);
 	    return (0);
     }
-    ASSERT3S(cache_resid, <=, orig_cache_resid);
-    int fb = orig_cache_resid - cache_resid;
+    ASSERT3S(orig_cache_resid, >=, cache_resid);
+    const int fb = orig_cache_resid - cache_resid;
     int64_t found_bytes = fb;
-    int64_t nb = nbytes;
+    ASSERT3S(found_bytes, >=, 0);
+    const int64_t nb = nbytes;
     if (orig_ubc_size > 0 && orig_resid > 0) {
+	    off_t cur_offset = uio_offset(uio);
+	    if (cur_offset >= orig_offset + nb) {
+		    printf("ZFS: %s: cur offset %lld >= orig %lld + nb %lld = %lld (returning)\n",
+			__func__, cur_offset, orig_offset, nb, orig_offset + nb);
+		    VNOPS_STAT_BUMP(mappedread_ubc_satisfied_all);
+		    VNOPS_STAT_INCR(mappedread_ubc_copied, nbytes);
+		    return (0);
+	    }
 	    ASSERT3S(found_bytes, <=, nb);
-
     } else {
 	    ASSERT3S(found_bytes, ==, 0);
 	    found_bytes = 0;
@@ -789,7 +810,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     if (found_bytes > 0) {
 	    VNOPS_STAT_INCR(mappedread_ubc_copied, found_bytes);
     }
-    int64_t bytes_left_after_ubc = nb - found_bytes;
+    const int64_t bytes_left_after_ubc = nb - found_bytes;
     ASSERT3S(bytes_left_after_ubc, >, 0);
     IMPLY(orig_ubc_size == 0, bytes_left_after_ubc == nb);
 
