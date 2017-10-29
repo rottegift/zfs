@@ -742,32 +742,50 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     off_t off;
 
     /* give the cluster layer a chance to fill in whatever data it already has */
-    off_t cache_upl_start = uio_offset(uio);
-    off_t cache_off = cache_upl_start & PAGE_MASK;
-    cache_upl_start &= ~PAGE_MASK;
-    off_t cache_upl_size = (cache_off + nbytes + (PAGE_SIZE - 1)) & ~PAGE_MASK;
-    ASSERT3S(cache_upl_size, <=, INT_MAX);
-    int cache_resid = (cache_upl_size > INT_MAX) ? INT_MAX : cache_upl_size;
-    int cache_error = 0;
-    cache_error = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+    const int orig_nbytes = nbytes;
+    const user_ssize_t orig_resid = uio_resid(uio);
+    ASSERT3S(orig_resid, >, 0);
+    const int orig_cache_resid = (orig_resid > INT_MAX) ? INT_MAX : 0;
+    int cache_resid = orig_cache_resid;
+    ASSERT3S(cache_resid, >, 0);
+    // ask UBC to work in the uio
+    int cache_error = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
     ASSERT3S(cache_error, ==, 0);
+    ASSERT3S(cache_resid, <=, orig_cache_resid);
     if (cache_error != 0) {
 	    VNOPS_STAT_BUMP(mappedread_ubc_copy_error);
 	    return (cache_error);
     }
-    if (cache_upl_size - cache_resid > 0) {
-	    VNOPS_STAT_INCR(mappedread_ubc_copied, (cache_upl_size - cache_resid));
-    }
-
-    /* update nbytes and len */
-    nbytes = uio_resid(uio);
-    len = nbytes;
-
     /* did we satisfy everything from UBC ? */
-    if (nbytes == 0) {
+    if (cache_resid == 0) {
 	    VNOPS_STAT_BUMP(mappedread_ubc_satisfied_all);
+	    VNOPS_STAT_INCR(mappedread_ubc_copied, orig_cache_resid);
 	    return (0);
     }
+    user_ssize_t found_bytes = orig_resid - cache_resid;
+    int64_t nb = nbytes;
+    ASSERT3S(found_bytes, <=, nb);
+    if (found_bytes > 0) {
+	    VNOPS_STAT_INCR(mappedread_ubc_copied, found_bytes);
+    }
+    int64_t bytes_left_after_ubc = nb - found_bytes;
+    ASSERT3S(bytes_left_after_ubc, >, 0);
+
+    if (bytes_left_after_ubc <= 0) {
+	    if (nbytes > 0)
+		    VNOPS_STAT_BUMP(mappedread_ubc_satisfied_all);
+	    return (0);
+    }
+
+    ASSERT3S(bytes_left_after_ubc, <=, nb);
+    ASSERT3S(bytes_left_after_ubc, <=, INT_MAX);
+
+    // update nbytes, shrinking down to 32 bits
+    nbytes = (bytes_left_after_ubc > INT_MAX) ? INT_MAX : bytes_left_after_ubc;
+    ASSERT3S(nbytes, <=, orig_nbytes);
+    ASSERT3S(nbytes, >, 0);
+
+    len = nbytes;
 
     upl_start = uio_offset(uio);
     off = upl_start & PAGE_MASK;
