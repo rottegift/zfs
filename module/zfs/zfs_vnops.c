@@ -741,6 +741,12 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     int upl_page;
     off_t off;
 
+    ASSERT3S(nbytes, >, 0);
+    ASSERT3S(uio_offset(uio), <=, zp->z_size); // offset is within file
+    ASSERT3S(uio_resid(uio), <=, zp->z_size);  // resid is smaller than file
+    ASSERT3S(uio_resid(uio) + uio_offset(uio), <=, zp->z_size); // both fit within file
+    ASSERT3S(ubc_getsize(vp), ==, zp->z_size); // ought not to  be 0
+
     /* give the cluster layer a chance to fill in whatever data it already has */
     const int orig_nbytes = nbytes;
     const user_ssize_t orig_resid = uio_resid(uio);
@@ -782,6 +788,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 
     // update nbytes, shrinking down to 32 bits
     nbytes = (bytes_left_after_ubc > INT_MAX) ? INT_MAX : bytes_left_after_ubc;
+
     ASSERT3S(nbytes, <=, orig_nbytes);
     ASSERT3S(nbytes, >, 0);
 
@@ -791,6 +798,8 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     off = upl_start & PAGE_MASK;
     upl_start &= ~PAGE_MASK;
     upl_size = (off + nbytes + (PAGE_SIZE - 1)) & ~PAGE_MASK;
+
+    ASSERT3S(upl_start + upl_size, <=, zp->z_size);
 
     dprintf("zfs_mappedread: %llu - %d (adj %llu - %llu)\n",
             uio_offset(uio), nbytes,
