@@ -29,6 +29,15 @@
 /* Portions Copyright 2007 Jeremy Teo */
 /* Portions Copyright 2010 Robert Milkowski */
 /* Portions Copyright 2013 Jorgen Lundman */
+/* Portions Copyright 2017 Sean Doran */
+
+#ifdef __APPLE__
+/*
+ * cluster_copy_ubc_data takes XNU's uio_t which is (struct uio *)
+ * whereas ZFS's uio_t is (struct uio)
+ */
+#define cluster_copy_ubc_data kern_cluster_copy_ubc_data
+#endif
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -87,6 +96,15 @@
 #include <sys/vdev.h>
 #include <sys/znode_z_map_lock.h>
 
+#ifdef __APPLE__
+/*
+ * cluster_copy_ubc_data takes XNU's uio_t which is (struct uio *)
+ * whereas ZFS's uio_t is (struct uio)
+ */
+#undef cluster_copy_ubc_data
+extern int cluster_copy_ubc_data(vnode_t *, uio_t *, int *, int);
+#endif
+
 //#define dprintf printf
 
 int zfs_vnop_force_formd_normalized_output = 0; /* disabled by default */
@@ -97,6 +115,9 @@ typedef struct vnops_stats {
 	kstat_named_t update_pages_lock_timeout;
 	kstat_named_t update_pages_not_mapped;
 	kstat_named_t mappedread_pages;
+	kstat_named_t mappedread_ubc_copy_error;
+	kstat_named_t mappedread_ubc_copied;
+	kstat_named_t mappedread_ubc_satisfied_all;
 	kstat_named_t dmu_read_uio_dbuf_pages;
 	kstat_named_t zfs_fsync_zil_commit;
 	kstat_named_t zfs_fsync_ubc_msync;
@@ -131,6 +152,9 @@ static vnops_stats_t vnops_stats = {
 	{ "update_pages_lock_timeout",                   KSTAT_DATA_UINT64 },
 	{ "update_pages_not_mapped",                     KSTAT_DATA_UINT64 },
 	{ "mappedread_pages",                            KSTAT_DATA_UINT64 },
+	{ "mappedread_ubc_copy_error",                   KSTAT_DATA_UINT64 },
+	{ "mappedread_ubc_copied",                       KSTAT_DATA_UINT64 },
+	{ "mappedread_ubc_satisfied_all",                KSTAT_DATA_UINT64 },
 	{ "dmu_read_uio_dbuf_pages",                     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit",                        KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
@@ -716,6 +740,34 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     int upl_size;
     int upl_page;
     off_t off;
+
+    /* give the cluster layer a chance to fill in whatever data it already has */
+    off_t cache_upl_start = uio_offset(uio);
+    off_t cache_off = cache_upl_start & PAGE_MASK;
+    cache_upl_start &= ~PAGE_MASK;
+    off_t cache_upl_size = (cache_off + nbytes + (PAGE_SIZE - 1)) & ~PAGE_MASK;
+    ASSERT3S(cache_upl_size, <=, INT_MAX);
+    int cache_resid = (cache_upl_size > INT_MAX) ? INT_MAX : cache_upl_size;
+    int cache_error = 0;
+    cache_error = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+    ASSERT3S(cache_error, ==, 0);
+    if (cache_error != 0) {
+	    VNOPS_STAT_BUMP(mappedread_ubc_copy_error);
+	    return (cache_error);
+    }
+    if (cache_upl_size - cache_resid > 0) {
+	    VNOPS_STAT_INCR(mappedread_ubc_copied, (cache_upl_size - cache_resid));
+    }
+
+    /* update nbytes and len */
+    nbytes = uio_resid(uio);
+    len = nbytes;
+
+    /* did we satisfy everything from UBC ? */
+    if (nbytes == 0) {
+	    VNOPS_STAT_BUMP(mappedread_ubc_satisfied_all);
+	    return (0);
+    }
 
     upl_start = uio_offset(uio);
     off = upl_start & PAGE_MASK;
