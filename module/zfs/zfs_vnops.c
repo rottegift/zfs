@@ -753,16 +753,18 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     const off_t orig_ubc_size = ubc_getsize(vp);
     ASSERT3S(orig_resid, >=, 0);
     const int orig_cache_resid = (orig_resid > INT_MAX) ? INT_MAX : orig_resid;
+    IMPLY(orig_resid > 0, orig_cache_resid > 0);
     int cache_resid = orig_cache_resid;
     // ask UBC to work in the uio
     int cache_error = 0;
     if (orig_ubc_size > 0 && orig_resid > 0) {
 	    ASSERT3S(cache_resid, >, 0);
 	    cache_error = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+	    ASSERT3S(cache_resid, >=, 0);
     }
     ASSERT3S(cache_error, ==, 0);
-    ASSERT3S(cache_resid, <=, orig_cache_resid);
     if (cache_error != 0) {
+	    printf("ZFS: %s: cache_error = %d\n", __func__, cache_error);
 	    VNOPS_STAT_BUMP(mappedread_ubc_copy_error);
 	    return (cache_error);
     }
@@ -773,7 +775,9 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 	    VNOPS_STAT_INCR(mappedread_ubc_copied, orig_cache_resid);
 	    return (0);
     }
-    user_ssize_t found_bytes = orig_cache_resid - cache_resid;
+    ASSERT3S(cache_resid, <=, orig_cache_resid);
+    int fb = orig_cache_resid - cache_resid;
+    int64_t found_bytes = fb;
     int64_t nb = nbytes;
     if (orig_ubc_size > 0 && orig_resid > 0) {
 	    ASSERT3S(found_bytes, <=, nb);
