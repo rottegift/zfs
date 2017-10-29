@@ -757,7 +757,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     ASSERT3S(orig_resid, >=, 0);
     ASSERT3S(orig_resid, <=, orig_file_size);
     ASSERT3S(orig_resid + orig_offset, <=, orig_file_size);
-    ASSERT3S(orig_resid + orig_offset, <=, orig_nbytes);
+    ASSERT3S(orig_resid + orig_offset, >=, orig_nbytes);
     ASSERT3S(orig_nbytes, <=, orig_resid);
     const int64_t target_resid = MIN(orig_nbytes, orig_resid);
     const int orig_cache_resid = (target_resid > INT_MAX) ? INT_MAX : target_resid;
