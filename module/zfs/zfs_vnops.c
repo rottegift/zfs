@@ -836,7 +836,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     upl_start &= ~PAGE_MASK;
     upl_size = (off + nbytes + (PAGE_SIZE - 1)) & ~PAGE_MASK;
 
-    ASSERT3S(upl_start + upl_size, <=, zp->z_size);
+    ASSERT3S(upl_start + upl_size, <=, zp->z_size | PAGE_MASK);
 
     dprintf("zfs_mappedread: %llu - %d (adj %llu - %llu)\n",
             uio_offset(uio), nbytes,
