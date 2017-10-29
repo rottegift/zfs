@@ -753,9 +753,12 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     ASSERT3S(orig_resid, >, 0);
     const int orig_cache_resid = (orig_resid > INT_MAX) ? INT_MAX : orig_resid;
     int cache_resid = orig_cache_resid;
-    ASSERT3S(cache_resid, >, 0);
     // ask UBC to work in the uio
-    int cache_error = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+    int cache_error = 0;
+    if (orig_resid > 0) {
+	    ASSERT3S(cache_resid, >, 0);
+	    cache_error = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+    }
     ASSERT3S(cache_error, ==, 0);
     ASSERT3S(cache_resid, <=, orig_cache_resid);
     if (cache_error != 0) {
@@ -763,14 +766,15 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 	    return (cache_error);
     }
     /* did we satisfy everything from UBC ? */
-    if (cache_resid == 0) {
+    if (orig_resid > 0 && cache_resid == 0) {
 	    VNOPS_STAT_BUMP(mappedread_ubc_satisfied_all);
 	    VNOPS_STAT_INCR(mappedread_ubc_copied, orig_cache_resid);
 	    return (0);
     }
     user_ssize_t found_bytes = orig_resid - cache_resid;
     int64_t nb = nbytes;
-    ASSERT3S(found_bytes, <=, nb);
+    if (orig_resid > 0)
+	    ASSERT3S(found_bytes, <=, nb);
     if (found_bytes > 0) {
 	    VNOPS_STAT_INCR(mappedread_ubc_copied, found_bytes);
     }
