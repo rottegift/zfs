@@ -751,7 +751,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     const int orig_nbytes = nbytes;
     const user_ssize_t orig_resid = uio_resid(uio);
     ASSERT3S(orig_resid, >, 0);
-    const int orig_cache_resid = (orig_resid > INT_MAX) ? INT_MAX : 0;
+    const int orig_cache_resid = (orig_resid > INT_MAX) ? INT_MAX : orig_resid;
     int cache_resid = orig_cache_resid;
     ASSERT3S(cache_resid, >, 0);
     // ask UBC to work in the uio
