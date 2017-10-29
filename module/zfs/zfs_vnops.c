@@ -770,12 +770,12 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
     }
     user_ssize_t found_bytes = orig_resid - cache_resid;
     int64_t nb = nbytes;
-    //ASSERT3S(found_bytes, <=, nb);
+    ASSERT3S(found_bytes, <=, nb);
     if (found_bytes > 0) {
 	    VNOPS_STAT_INCR(mappedread_ubc_copied, found_bytes);
     }
     int64_t bytes_left_after_ubc = nb - found_bytes;
-    //ASSERT3S(bytes_left_after_ubc, >, 0);
+    ASSERT3S(bytes_left_after_ubc, >, 0);
 
     if (bytes_left_after_ubc <= 0) {
 	    if (nbytes > 0)
