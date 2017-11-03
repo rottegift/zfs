@@ -114,7 +114,8 @@ typedef struct vnops_stats {
 	kstat_named_t update_pages_want_lock;
 	kstat_named_t update_pages_lock_timeout;
 	kstat_named_t update_pages_not_mapped;
-	kstat_named_t mappedread_vn_has_cached_data;
+	kstat_named_t mappedread_vn_and_ubc_have_cached_data;
+	kstat_named_t mappedread_vn_has_cached_data_only;
 	kstat_named_t mappedread_with_ubc_only;
 	kstat_named_t mappedread_ubc_copy_error;
 	kstat_named_t mappedread_ubc_satisfied_all;
@@ -153,7 +154,8 @@ static vnops_stats_t vnops_stats = {
 	{ "update_pages_want_lock",                      KSTAT_DATA_UINT64 },
 	{ "update_pages_lock_timeout",                   KSTAT_DATA_UINT64 },
 	{ "update_pages_not_mapped",                     KSTAT_DATA_UINT64 },
-	{ "mappedread_vn_has_cached_data",               KSTAT_DATA_UINT64 },
+	{ "mappedread_vn_and_ubc_have_cached_data",      KSTAT_DATA_UINT64 },
+	{ "mappedread_vn_has_cached_data_only",          KSTAT_DATA_UINT64 },
 	{ "mappedread_with_ubc_only",                    KSTAT_DATA_UINT64 },
 	{ "mappedread_ubc_copy_error",                   KSTAT_DATA_UINT64 },
 	{ "mappedread_ubc_satisfied_all",                KSTAT_DATA_UINT64 },
@@ -411,9 +413,10 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	}
 	ASSERT3S(vnode_isinuse(vp, 1), !=, 0);
 
-	if ((vn_has_cached_data(vp) || ubc_pages_resident(vp)) &&
+	if ((ubc_pages_resident(vp) || (vn_has_cached_data(vp))) &&
 	    vnode_isreg(vp) && !vnode_isswap(vp)) {
 		//ASSERT(ubc_pages_resident(vp));
+		ASSERT(vn_has_cached_data(vp));
 		off_t ubcsize = ubc_getsize(vp);
 		ASSERT3S(zp->z_size, ==, ubcsize);
 		off_t resid_off = 0;
@@ -1117,16 +1120,17 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		nbytes = MIN(n, zfs_read_chunk_size -
                      P2PHASE(uio_offset(uio), zfs_read_chunk_size));
 
-#ifdef __FreeBSD__
-		if (uio->uio_segflg == UIO_NOCOPY)
-			error = mappedread_sf(vp, nbytes, uio);
-		else
-#endif /* __FreeBSD__ */
-		if (vn_has_cached_data(vp) || ubc_pages_resident(vp)) {
-			if (vn_has_cached_data(vp))
-				VNOPS_STAT_BUMP(mappedread_vn_has_cached_data);
-		        else
+		if (ubc_pages_resident(vp) || vn_has_cached_data(vp)) {
+			ASSERT(vn_has_cached_data(vp));
+			if (vn_has_cached_data(vp) && ubc_pages_resident(vp)) {
+				VNOPS_STAT_BUMP(mappedread_vn_and_ubc_have_cached_data);
+			} else if (ubc_pages_resident(vp) && !vn_has_cached_data(vp)) {
 				VNOPS_STAT_BUMP(mappedread_with_ubc_only);
+			} else if (!ubc_pages_resident(vp) && vn_has_cached_data(vp)) {
+				VNOPS_STAT_BUMP(mappedread_vn_has_cached_data_only);
+			} else {
+				printf("ZFS: %s: we shouldn't be here\n", __func__);
+			}
 			error = mappedread(vp, nbytes, uio);
 		} else {
 			error = dmu_read_uio_dbuf(sa_get_db(zp->z_sa_hdl),
@@ -1445,8 +1449,10 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 
 		if (abuf == NULL) {
 
-			if ( vn_has_cached_data(vp) || ubc_pages_resident(vp) )
+			if (  ubc_pages_resident(vp) || vn_has_cached_data(vp) ) {
+				ASSERT(vn_has_cached_data(vp));
 				uio_copy = uio_duplicate(uio);
+			}
 
 			tx_bytes = uio_resid(uio);
 
@@ -1479,8 +1485,9 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 			uioskip(uio, tx_bytes);
 		}
 
-		if (tx_bytes && (vn_has_cached_data(vp) || ubc_pages_resident(vp))) {
+		if (tx_bytes && (ubc_pages_resident(vp) || vn_has_cached_data(vp))) {
 #ifdef __APPLE__
+			ASSERT(vn_has_cached_data(vp));
 			if (uio_copy) {
 				VNOPS_STAT_BUMP(write_updatepage_uio_copy);
 				dprintf("Updatepage copy call %llu vs %llu (tx_bytes %llu) numvecs %d\n",
