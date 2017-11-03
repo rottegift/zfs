@@ -340,6 +340,7 @@ atomic_dec_s32_nv(_Atomic int32_t *target)
 int
 zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 {
+	vnode_t *vp = *vpp;
 	znode_t	*zp = VTOZ(*vpp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 
@@ -371,6 +372,12 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 		atomic_inc_32(&zp->z_sync_cnt);
 	}
 
+	int error = 0;
+	if ((error = vnode_ref(vp)) != 0) {
+		printf("ZFS: %s: vnode_ref == %d\n", __func__, error);
+	}
+	ASSERT3S(vnode_isinuse(vp, 0), !=, 0);
+
 	ZFS_EXIT(zfsvfs);
 	return (0);
 }
@@ -390,7 +397,20 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	cleanlocks(vp, ddi_get_pid(), 0);
 	cleanshares(vp, ddi_get_pid());
 #else
-	vnode_ref(vp); // hold usecount ref while syncing
+	int error = 0;
+	int usecount = 0;
+	// increment usecount
+	ASSERT3S(vnode_isinuse(vp, 0), !=, 0);
+	if ((error = vnode_ref(vp)) != 0) {
+		printf("ZFS: %s: vnode_ref == %d\n", __func__, error);
+	} else {
+		if (vnode_isinuse(vp, 1) == 0)
+			usecount = 2;
+		else
+			usecount = 1;
+	}
+	ASSERT3S(vnode_isinuse(vp, 1), !=, 0);
+
 	if ((vn_has_cached_data(vp) || ubc_pages_resident(vp)) &&
 	    vnode_isreg(vp) && !vnode_isswap(vp)) {
 		//ASSERT(ubc_pages_resident(vp));
@@ -425,7 +445,15 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 #endif
 
 #ifdef __APPLE__
-	vnode_rele(vp);
+	if (usecount == 2) {
+		ASSERT3S(vnode_isinuse(vp, 1), !=, 0);
+		vnode_rele(vp);
+		usecount--;
+	}
+	if (usecount == 1) {
+		ASSERT3S(vnode_isinuse(vp, 0), !=, 0);
+		vnode_rele(vp);
+	}
 #endif
 
 	ZFS_EXIT(zfsvfs);
