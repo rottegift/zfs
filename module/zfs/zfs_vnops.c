@@ -110,6 +110,8 @@ extern int cluster_copy_ubc_data(vnode_t *, uio_t *, int *, int);
 int zfs_vnop_force_formd_normalized_output = 0; /* disabled by default */
 
 typedef struct vnops_stats {
+	kstat_named_t zfs_open_has_z_vnode;
+	kstat_named_t zfs_open_zfs_get_vnode;
 	kstat_named_t update_pages;
 	kstat_named_t update_pages_want_lock;
 	kstat_named_t update_pages_lock_timeout;
@@ -150,6 +152,8 @@ typedef struct vnops_stats {
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
+	{ "zfs_open_has_z_vnode",                        KSTAT_DATA_UINT64 },
+	{ "zfs_open_zfs_get_vnode",                      KSTAT_DATA_UINT64 },
 	{ "update_pages",                                KSTAT_DATA_UINT64 },
 	{ "update_pages_want_lock",                      KSTAT_DATA_UINT64 },
 	{ "update_pages_lock_timeout",                   KSTAT_DATA_UINT64 },
@@ -372,6 +376,13 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 		ASSERT3U(zp->z_sync_cnt, <, UINT32_MAX);
 		ASSERT3U(zp->z_sync_cnt, <, 1024);  // XXX: ARBITRARY
 		atomic_inc_32(&zp->z_sync_cnt);
+	}
+
+	if (zp->z_vnode != NULL) {
+		VNOPS_STAT_BUMP(zfs_open_has_z_vnode);
+	} else {
+		zfs_znode_get_vnode(zp, zfsvfs);
+		VNOPS_STAT_BUMP(zfs_open_zfs_get_vnode);
 	}
 
 	int error = 0;
