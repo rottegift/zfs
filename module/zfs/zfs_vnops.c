@@ -1078,8 +1078,11 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 			// cluster copy this page into userland
 			ASSERT3S(bytes, <, INT_MAX);
 			int io_requested = bytes;
-			ASSERT3S(upl_current, <, INT_MAX);
-			int upl_offset = upl_current; // i think
+			ASSERT3S(io_requested, >, 0);
+			ASSERT3S(upl_current, >=, upl_start);
+			int upl_offset = upl_current - upl_start;
+			ASSERT3S(upl_offset, <=, upl_size);
+			ASSERT3S(upl_offset + io_requested, <=, upl_size);
 			// uio_iodirection is UIO_READ
 			// and this does uiomove64(uplphyspage+uploffset, iorequested, uio)
 			// where physpage is the upl_offset from the start of the upl
