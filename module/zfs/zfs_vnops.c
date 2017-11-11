@@ -961,7 +961,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
      * off is some value that is within the first page of the upl.
      */
     error = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl,
-	UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY);
+	UPL_FILE_IO | UPL_SET_LITE);
 	if ((error != KERN_SUCCESS) || !upl) {
 		printf("ZFS: mappedread failed to ubc_create_upl: %d\n", error);
 		return EIO;
@@ -978,7 +978,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 	typedef enum upl_page_diposition {
 		D_UNDEFINED = 0,
 		D_COMMIT,
-		D_ABORT,
+		D_ABORT_REFERENCE,
 		D_ABORT_ERROR,
 	} __attribute__((packed)) upl_page_disposition_t;
 	const int should_commit_size = upl_pages * sizeof(upl_page_disposition_t);
@@ -1020,7 +1020,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 	    // originally we aborted the entire upl because
 	    // we were only reading from it above; here we
 	    // just indicate that we should abort this page
-	    should_commit[upl_page] = D_ABORT;
+	    should_commit[upl_page] = D_ABORT_REFERENCE;
 	} else if (off + len > zp->z_size || bytes < PAGE_SIZE) {
 		/*
 		 * Here we have an absent page (assert that),
@@ -1039,7 +1039,7 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 		if (error == 0) {
 			VNOPS_STAT_INCR(mappedread_short_read_bytes, bytes);
 			/* we want to preserve this page's state */
-			should_commit[upl_page] = D_ABORT;
+			should_commit[upl_page] = D_ABORT_REFERENCE;
 		} else {
 			VNOPS_STAT_BUMP(mappedread_short_read_errors);
 			printf("ZFS: %s: (short read) dmu_read_uio returned error %d for %llu bytes\n",
@@ -1087,15 +1087,16 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 			// cluster_copy_upl_data may return EFAULT
 			// and should return 0 if we completed OK
 			int ccpud_error = cluster_copy_upl_data(uio, upl, upl_offset, &io_requested);
-			ASSERT3S(ccpud_error, ==, 0);
 			if (ccpud_error == 0) {
 				ASSERT3S(io_requested, ==, 0);
 				should_commit[upl_page] = D_COMMIT;
 				absent_bytes_dmu_read += bytes;
 			} else {
-				ASSERT3S(io_requested, ==, 0);
+				printf("ZFS: %s: cluster_copy_upl_data error at"
+				    " upl_offset %d bytes %lld, io_requested now %d\n",
+				    __func__, upl_offset, bytes, io_requested);
 				errflag = B_TRUE;
-				should_commit[upl_page] = D_ABORT;
+				should_commit[upl_page] = D_ABORT_ERROR;
 			}
 		} else {
 			should_commit[upl_page] = D_ABORT_ERROR;
@@ -1125,19 +1126,23 @@ mappedread(vnode_t *vp, int nbytes, struct uio *uio)
 		if (error == 0 && should_commit[u] == D_COMMIT) {
 			kern_return_t kret_commit =
 			    ubc_upl_commit_range(upl, upl_current, PAGE_SIZE,
-				UPL_COMMIT_CLEAR_DIRTY | UPL_COMMIT_FREE_ON_EMPTY);
+				UPL_COMMIT_INACTIVATE
+				| UPL_COMMIT_CLEAR_DIRTY
+				| UPL_COMMIT_FREE_ON_EMPTY);
 			if (kret_commit != KERN_SUCCESS) {
 				printf("ZFS: %s: unable to commit upl_current %lld page %d\n",
 				    __func__, upl_current, u);
 				full_abort = B_TRUE;
 			}
-		} else if (error != 0 || should_commit[u] == D_ABORT ||
+		} else if (error != 0 || should_commit[u] == D_ABORT_REFERENCE ||
 		    should_commit[u] == D_ABORT_ERROR) {
+			int flags = UPL_ABORT_FREE_ON_EMPTY;
+			if (error != 0 || should_commit[u] == D_ABORT_REFERENCE)
+				flags |= UPL_ABORT_REFERENCE;
+			else
+				flags |= UPL_ABORT_ERROR;
 			kern_return_t kret_abort =
-			    ubc_upl_abort_range(upl, upl_current, PAGE_SIZE,
-				(error !=0 || should_commit[u] == D_ABORT_ERROR)
-				? (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY)
-				: (UPL_ABORT_FREE_ON_EMPTY));
+			    ubc_upl_abort_range(upl, upl_current, PAGE_SIZE, flags);
 			if (kret_abort != KERN_SUCCESS) {
 				printf("ZFS: %s: unable to abort upl_current %lld page %d\n",
 				    __func__, upl_current, u);
