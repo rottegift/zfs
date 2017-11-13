@@ -562,7 +562,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		    if (xfer_resid != 0) {
 			    printf("ZFS: %s: nonzero xfer_resid %d ~ nbytes %lld\n",
 				__func__, xfer_resid, nbytes);
-			    uio_setrw(uio_copy, UIO_READ);
+			    uio_setrw(uio_copy, UIO_WRITE);
 			    xfer_resid = nbytes;
 			    retval = cluster_copy_ubc_data(vp, uio_copy, &xfer_resid, 1);
 			    ASSERT3S(retval, ==, 0);
