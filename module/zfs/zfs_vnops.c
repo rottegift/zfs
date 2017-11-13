@@ -553,7 +553,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 
 	    struct uio *uio_copy = uio_duplicate(uio);
 
-	    ASSERT3S(uio, !=, NULL);
+	    ASSERT3S(uio_copy, !=, NULL);
 
 	    int retval = cluster_copy_ubc_data(vp, uio, &xfer_resid, 0);
 
@@ -562,11 +562,13 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 		    if (xfer_resid != 0) {
 			    printf("ZFS: %s: nonzero xfer_resid %d ~ nbytes %lld\n",
 				__func__, xfer_resid, nbytes);
+			    uio_setrw(uio_copy, UIO_READ);
+			    xfer_resid = nbytes;
 			    retval = cluster_copy_ubc_data(vp, uio_copy, &xfer_resid, 1);
 			    ASSERT3S(retval, ==, 0);
 			    if (retval == 0) {
 				    if (xfer_resid != 0) {
-					    printf("ZFS: %s: DIRTY copy nonzero xfer_resid %d "
+					    printf("ZFS: %s: DIRTY copy nonzero (new) xfer_resid %d "
 						" ~ nbytes %lld\n",
 						__func__, xfer_resid, nbytes);
 				    }
