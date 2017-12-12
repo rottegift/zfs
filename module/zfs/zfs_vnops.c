@@ -2031,6 +2031,32 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		return (poret);
 	}
 	/* the UPL has been retired by zfs_pageout */
+	/* Now let's get rid of the page */
+	upl_t dupl = NULL;
+	kern_return_t duplret = ubc_create_upl(vp, upl_f_off, PAGE_SIZE, &dupl, NULL,
+	    UPL_WILL_BE_DUMPED);
+	ASSERT3S(duplret, ==, KERN_SUCCESS);
+	if (duplret != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld file %s\n",
+		    __func__, __LINE__, duplret, upl_f_off, zp->z_name_cache);
+		return(duplret);
+	}
+	kern_return_t dabortret = ubc_upl_abort(dupl,
+	    UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
+	ASSERT3S(dabortret, ==, KERN_SUCCESS);
+	if (dabortret != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: failed to upl abort (DUMP) with error %d, foff %lld file %s",
+		    __func__, __LINE__, dabortret, upl_f_off, zp->z_name_cache);
+		return (dabortret);
+	}
+	/* Now bring in the page again */
+	int fillret = fill_hole(vp, upl_f_off, 0, 1, zp->z_name_cache, B_FALSE);
+	ASSERT3S(fillret, ==, 0);
+	if (fillret != 0) {
+		printf("ZFS: %s:%d: failed to fill hole with error %d, f0ff %lld, file %s",
+		    __func__, __LINE__, fillret, upl_f_off, zp->z_name_cache);
+		return (fillret);
+	}
 	/* Next, modify the page "leave pages busy
 	 * in the original object, if a page list
 	 * structure was specified."
@@ -2044,7 +2070,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	if (muplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: filed to create UPL error %d! foff %lld file %s\n",
 		    __func__, __LINE__, muplret, upl_f_off, zp->z_name_cache);
-		return(uplret);
+		return(muplret);
 	}
 	vm_offset_t page_start_vaddr = 0;
 	kern_return_t maperr =
