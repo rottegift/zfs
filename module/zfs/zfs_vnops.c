@@ -1995,6 +1995,30 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 	return (error);
 }
 
+
+static inline void
+zfs_write_recover_times(znode_t *zp, dmu_tx_t *tx)
+{
+	uint64_t mtime[2], ctime[2];
+	sa_bulk_attr_t bulk[3];
+	int count = 0, err = 0;
+	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+
+	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_MTIME(zfsvfs), NULL,
+	    &mtime, 16);
+	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_CTIME(zfsvfs), NULL,
+	    &ctime, 16);
+	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_FLAGS(zfsvfs), NULL,
+	    &zp->z_pflags, 8);
+	zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
+	    B_TRUE);
+
+	if ((err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx)) != 0) {
+		printf("ZFS: %s:%d error %d updating timestamps for file %s\n",
+		    __func__, __LINE__, err, zp->z_name_cache);
+	}
+}
+
 /*
  * Write the bytes to a file.
  *
@@ -2163,6 +2187,9 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 		const off_t loop_start_off = uio_offset(uio);
 		off_t sync_resid = start_resid;
+
+		boolean_t do_sync = zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS ||
+		    ((ioflag & (FDSYNC | FSYNC)) && zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED);
 
 		/* grab the map lock, protecting against other zfs UBC users */
 		boolean_t need_release = B_FALSE;
@@ -2433,11 +2460,11 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 								 *      in case there is no further
 								 *      activity on this file
 								 */
+								zfs_write_recover_times(zp, txupdate);
 								dmu_tx_commit(txupdate);
 								kern_return_t unmapret =
 								    ubc_upl_unmap(rupl);
 								ASSERT3S(unmapret, ==, KERN_SUCCESS);
-#ifndef COMMITNOTABORT
 								kern_return_t commitret =
 								    ubc_upl_commit_range(rupl,
 									0, PAGE_SIZE,
@@ -2446,15 +2473,17 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 									UPL_COMMIT_INACTIVATE |
 									UPL_COMMIT_FREE_ON_EMPTY);
 								ASSERT3S(commitret, ==, KERN_SUCCESS);
-#else
-								kern_return_t abortret =
-								    ubc_upl_abort(rupl,
-									UPL_ABORT_FREE_ON_EMPTY);
-								ASSERT3S(abortret, ==, KERN_SUCCESS);
-#endif
 								ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 								ASSERT3S(zp->z_size, >=,
 								    recov_off + bytes_to_write);
+								if (do_sync) {
+									printf("ZFS: %s:%d: zil_committing"
+									    " %s\n",
+									    __func__, __LINE__,
+									    zp->z_name_cache);
+									zil_commit(zfsvfs->z_log,
+									    zp->z_id);
+								}
 								continue;
 							} else {
 								printf("ZFS: %s:%d uio not progressed for"
@@ -2517,6 +2546,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 						    txupdate, TX_WRITE, zp,
 						    recov_off, bytes_to_write, 0,
 						    NULL, NULL);
+						zfs_write_recover_times(zp, txupdate);
 						dmu_tx_commit(txupdate);
 						kern_return_t unmapret =
 						    ubc_upl_unmap(rupl);
@@ -2527,7 +2557,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 							    zp->z_name_cache);
 
 						}
-#ifndef COMMITNOTABORT
 						kern_return_t commitret =
 						    ubc_upl_commit_range(rupl,
 							0, PAGE_SIZE,
@@ -2540,23 +2569,14 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 							    __func__, __LINE__, commitret,
 							    zp->z_name_cache);
 						}
-#else
-						kern_return_t abortret =
-						    ubc_upl_abort(rupl,
-							UPL_ABORT_ERROR |
-							UPL_ABORT_FREE_ON_EMPTY);
-						ASSERT3S(abortret, ==, KERN_SUCCESS);
-						if (abortret != KERN_SUCCESS)
-						{
-							printf("ZFS: %s:%d ERROR %d aborting UPL"
-							    " for file %s XXX continuing\n",
-							    __func__, __LINE__, abortret,
-							    zp->z_name_cache);
-						}
-#endif
 						ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 						ASSERT3S(zp->z_size, >=, recov_off + bytes_to_write);
 						dprintf("ZFS: %s:%d continuing\n", __func__, __LINE__);
+						if (do_sync) {
+							printf("ZFS: %s:%d: zil_committing %s\n",
+							    __func__, __LINE__, zp->z_name_cache);
+							zil_commit(zfsvfs->z_log, zp->z_id);
+						}
 						continue;
 					drop_and_return_to_retry:
 						/*
@@ -2703,11 +2723,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		 * Give up the range lock now, since our msync here may lead
 		 * to a dmu_write in pageoutv2 in this thread
 		 */
-
-		/* push out the modified pages, syncing if required */
-		boolean_t do_sync = zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS ||
-		    ((ioflag & (FDSYNC | FSYNC)) && zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED);
-
 #if 1
 		/*
 		 * The taskq task zfs_write_sync_range needs some information
