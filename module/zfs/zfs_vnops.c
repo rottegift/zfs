@@ -2072,21 +2072,6 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		    __func__, __LINE__, muplret, upl_f_off, zp->z_name_cache);
 		return(muplret);
 	}
-	vm_offset_t page_start_vaddr = 0;
-	kern_return_t maperr =
-	    ubc_upl_map(poupl, &page_start_vaddr);
-	if (maperr != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: failed to ubc_upl_map"
-		    " error %d file %s\n",
-		    __func__, __LINE__, maperr,
-		    zp->z_name_cache);
-		kern_return_t kret_abort =
-		    ubc_upl_abort(poupl,
-			UPL_ABORT_ERROR
-			| UPL_ABORT_FREE_ON_EMPTY);
-		ASSERT3S(kret_abort, ==, KERN_SUCCESS);
-		return(kret_abort);
-	}
 	int ccupl_ioresid = recov_resid_int;
 	int ccupl_retval = cluster_copy_upl_data(uio, mupl,
 	    recov_off_page_offset, &ccupl_ioresid);
