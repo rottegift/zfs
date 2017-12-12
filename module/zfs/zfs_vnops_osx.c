@@ -3328,11 +3328,12 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	 */
 	// z_is_mapped should be for mapped-for-write only?
 	// should we flush everything from the ubc here?
-	mutex_enter(&zp->z_lock);
+
 	if (zp->z_is_mapped == 0) {
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
+		zp->z_is_mapped = 1;
 	}
-	zp->z_is_mapped = 1;
+
         if (ISSET(ap->a_fflags, VM_PROT_WRITE)) {
 		ASSERT3S(zp->z_is_mapped_write, <, INT32_MAX);
                 zp->z_is_mapped_write++;
@@ -3340,7 +3341,6 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		if (zp->z_is_mapped_write <= 0)
 			zp->z_is_mapped_write = 1;
 	}
-	mutex_exit(&zp->z_lock);
 
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
 	ZFS_EXIT(zfsvfs);
@@ -3381,7 +3381,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		ZFS_EXIT(zfsvfs);
 		return (ENODEV);
 	}
-	mutex_enter(&zp->z_lock);
 	/*
 	 * If a file as been mmaped even once, it needs to keep "z_is_mapped"
 	 * high because it will potentially keep pages in the UPL cache we need
@@ -3403,7 +3402,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		zp->z_is_mapped_write--;
 	else if (zp->z_is_mapped_write == 0)
 		zp->z_is_mapped_write = -1;
-	mutex_exit(&zp->z_lock);
 
 	if (zp->z_is_mapped == -2 || (zp->z_is_mapped % 64)==0) {
 		printf("ZFS: %s:%d: z_is_mapped %d for file %s",
