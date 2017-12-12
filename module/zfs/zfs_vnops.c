@@ -2039,7 +2039,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	 */
 	upl_t mupl = NULL;
 	kern_return_t muplret = ubc_create_upl(vp, upl_f_off, PAGE_SIZE, &mupl, NULL,
-	    UPL_SET_LITE | UPL_WILL_MODIFY);
+	    UPL_WILL_MODIFY);
 	ASSERT3S(muplret, ==, KERN_SUCCESS);
 	if (muplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: filed to create UPL error %d! foff %lld file %s\n",
@@ -2116,9 +2116,8 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	}
 	ASSERT(upl_page_present(nrpl, 0));
 	ASSERT(upl_valid_page(nrpl, 0));
-	ASSERT0(upl_dirty_page(nrpl, 0));
+	ASSERT(upl_dirty_page(nrpl, 0));
 	if (!upl_dirty_page(nrpl, 0)) {
-		/* this seems to happen in 69e64a4b0f */
 		printf("ZFS: %s:%d: skipping pageout because page 0 not dirty at foff %lld file %s\n",
 		    __func__, __LINE__, upl_f_off, zp->z_name_cache);
 		kern_return_t abort_ret = ubc_upl_abort(npoupl, 0);
