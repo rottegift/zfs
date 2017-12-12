@@ -2216,7 +2216,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 					upl_page_info_t *rpl = NULL;
 					kern_return_t uplret = ubc_create_upl(vp,
 					    pop_q_off, PAGE_SIZE, &rupl, &rpl,
-					    UPL_UBC_PAGEOUT | UPL_FILE_IO | UPL_SET_LITE);
+					    UPL_COPYOUT_FROM | UPL_FILE_IO | UPL_SET_LITE);
 					ASSERT3S(uplret, ==, KERN_SUCCESS);
 					if (uplret != KERN_SUCCESS)
 						goto drop_and_return_to_retry;
@@ -2313,12 +2313,14 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 							kern_return_t commitret =
 							    ubc_upl_commit_range(rupl,
 								0, PAGE_SIZE,
-								UPL_COMMIT_SET_DIRTY |
+								UPL_COMMIT_CLEAR_DIRTY |
+								UPL_COMMIT_CLEAR_PRECIOUS |
 								UPL_COMMIT_FREE_ON_EMPTY);
 							ASSERT3S(commitret, ==, KERN_SUCCESS);
 							ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 							ASSERT3S(zp->z_size, >=,
 							    recov_off + bytes_to_write);
+#if 0 // deadlocks
 							if (do_sync) {
 								printf("ZFS: %s:%d: zil_committing"
 								    " %s\n",
@@ -2327,6 +2329,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 								zil_commit(zfsvfs->z_log,
 								    zp->z_id);
                                                                }
+#endif
 							continue;
 						} else {
 							printf("ZFS: %s:%d uio not progressed for"
@@ -2403,7 +2406,8 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 					kern_return_t commitret =
 					    ubc_upl_commit_range(rupl,
 						0, PAGE_SIZE,
-						UPL_COMMIT_SET_DIRTY |
+						UPL_COMMIT_CLEAR_DIRTY |
+						UPL_COMMIT_CLEAR_PRECIOUS |
 						UPL_COMMIT_FREE_ON_EMPTY);
 					if (commitret != KERN_SUCCESS) {
 						printf("ZFS: %s:%d ERROR %d committing UPL"
@@ -2413,11 +2417,13 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 					}
 					ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 					ASSERT3S(zp->z_size, >=, recov_off + bytes_to_write);
+#if 0 // deadlocks
 					if (do_sync) {
 						printf("ZFS: %s:%d: zil_committing %s\n",
 						    __func__, __LINE__, zp->z_name_cache);
 						zil_commit(zfsvfs->z_log, zp->z_id);
 					}
+#endif
 					dprintf("ZFS: %s:%d continuing\n", __func__, __LINE__);
 					continue;
 				drop_and_return_to_retry:
