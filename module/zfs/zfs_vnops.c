@@ -2061,23 +2061,17 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		ASSERT3S(kret_abort, ==, KERN_SUCCESS);
 		return(kret_abort);
 	}
-	addr64_t uio_start_vaddr =
-	    page_start_vaddr +
-	    recov_off_page_offset;
-	dprintf("ZFS: %s:%d calling uiomove64 file %s\n",
-	    __func__, __LINE__, zp->z_name_cache);
-	int uioret = uiomove64(uio_start_vaddr,
-	    recov_resid_int, uio);
-	dprintf("ZFS: %s:%d uiomove64 returned %d file %s\n",
-	    __func__, __LINE__, uioret, zp->z_name_cache);
-	if (uioret != 0) {
+	int ccupl_ioresid = recov_resid_int;
+	int ccupl_retval = cluster_copy_upl_data(uio, mupl,
+	    recov_off_page_offset, &ccupl_ioresid);
+	if (ccupl_retval != 0) {
 		printf("ZFS: %s:%d: error %d from"
-		    " uiomove64(%llx, %d, uio) for file %s"
-		    " ptr is mapped upl addr + %lld, "
+		    " cluster_copy_upl_data for file %s"
+		    " resid_in = %d, resid_out = %d"
 		    " now: uio_off %lld, uio_res %lld\n",
-		    __func__, __LINE__, uioret,
-		    uio_start_vaddr, recov_resid_int,
-		    zp->z_name_cache, recov_off_page_offset,
+		    __func__, __LINE__, ccupl_retval,
+		    zp->z_name_cache,
+		    recov_resid_int, ccupl_ioresid,
 		    uio_offset(uio), uio_resid(uio));
 		/* abort the page */
 		int kret_abort = ubc_upl_abort(mupl, UPL_ABORT_ERROR);
@@ -2086,7 +2080,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 			    __func__, __LINE__, kret_abort);
 			return (kret_abort);
 		}
-		return (uioret);
+		return (ccupl_retval);
 	}
 	/* commit the modified page */
 	kern_return_t commitret =
@@ -2100,6 +2094,10 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		    __func__, __LINE__, commitret,
 		    zp->z_name_cache);
 	}
+	printf("ZFS: %s:%d cluster_copy_upl and commit successful for file %s,"
+	    " cc_ioresid_in %d cc_ioresid_out %d\n",
+	    __func__, __LINE__, zp->z_name_cache,
+	    recov_resid_int, ccupl_ioresid);
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	ASSERT3S(resid_at_break, >, uio_resid(uio));
 	ASSERT3S(zp->z_size, >=, recov_off + (resid_at_break - uio_resid(uio)));
