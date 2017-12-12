@@ -111,6 +111,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_all_previously_freed;
 	kstat_named_t pageoutv1_pages;
 	kstat_named_t pageoutv1_want_lock;
+	kstat_named_t pagein_calls;
 	kstat_named_t pagein_pages;
 	kstat_named_t pagein_want_lock;
 } vnops_osx_stats_t;
@@ -127,11 +128,12 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
-	{ "pageoutv2_upl_iosync",      KSTAT_DATA_UINT64 },
+	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_skip_clean_pages",        KSTAT_DATA_UINT64 },
 	{ "pageoutv2_all_previously_freed",    KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv1_want_lock",               KSTAT_DATA_UINT64 },
+	{ "pagein_calls",                      KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 	{ "pagein_want_lock",                  KSTAT_DATA_UINT64 },
 };
@@ -2118,6 +2120,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	dprintf("+vnop_pagein: %p/%p off 0x%llx size 0x%lx filesz 0x%llx\n",
 			zp, vp, off, len, zp->z_size);
+
+	VNOPS_OSX_STAT_BUMP(pagein_calls);
 
 	if (upl == (upl_t)NULL)
 		panic("zfs_vnop_pagein: no upl!");
