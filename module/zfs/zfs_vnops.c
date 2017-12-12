@@ -2022,7 +2022,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	ASSERT(upl_valid_page(rpl, 0));
 	ASSERT0(upl_dirty_page(rpl, 0));
 	/* call zfs_pageout to get rid of it */
-	int poret = zfs_pageout(zfsvfs, zp, poupl, 0, upl_f_off, PAGESIZE, 0, B_FALSE);
+	int poret = zfs_pageout(zfsvfs, zp, poupl, 0, upl_f_off, PAGESIZE, 0, B_FALSE, B_TRUE);
 	if (poret != 0) {
 		printf("ZFS: %s:%d: error %d from"
 		    " zfs_pageout, page at %lld file %s\n",
@@ -2128,7 +2128,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		return (0);
 	}
 	/* call zfs_pageout to finalize the UPL */
-	int nporet = zfs_pageout(zfsvfs, zp, npoupl, 0, upl_f_off, PAGESIZE, 0, B_FALSE);
+	int nporet = zfs_pageout(zfsvfs, zp, npoupl, 0, upl_f_off, PAGESIZE, 0, B_FALSE, B_FALSE);
 	if (nporet != 0) {
 		printf("ZFS: %s:%d: error %d from"
 		    " zfs_pageout, page at %lld file %s\n",

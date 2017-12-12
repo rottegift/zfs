@@ -190,7 +190,8 @@ extern int    zfs_setsecattr(vnode_t *vp, vsecattr_t *vsecp, int flag,
                              cred_t *cr, caller_context_t *ct);
 
 extern int    zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
-                             offset_t off, size_t size, int flags, boolean_t take_rlock);
+			     offset_t off, size_t size, int flags, boolean_t take_rlock,
+			     boolean_t inactivate);
 
 /* zfs_vnops_osx.c calls */
 extern int    zfs_znode_getvnode( znode_t *zp, zfsvfs_t *zfsvfs);

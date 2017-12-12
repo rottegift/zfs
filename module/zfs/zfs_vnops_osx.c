@@ -2306,7 +2306,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 int
 zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
-    offset_t off, size_t size, int flags, boolean_t take_rlock)
+    offset_t off, size_t size, int flags, boolean_t take_rlock, boolean_t inactivate)
 {
 	dmu_tx_t *tx;
 	rl_t *rl;
@@ -2520,15 +2520,19 @@ out:
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
 	if (!(flags & UPL_NOCOMMIT)) {
-		if (err)
+		if (err) {
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
-		else
-			ubc_upl_commit_range(upl, upl_offset, size,
-								 (UPL_COMMIT_CLEAR_DIRTY
-								     | UPL_COMMIT_INACTIVATE
-								     | UPL_COMMIT_CLEAR_PRECIOUS
-								     | UPL_COMMIT_FREE_ON_EMPTY));
+		} else {
+			int cflags = UPL_COMMIT_CLEAR_DIRTY
+			    | UPL_COMMIT_CLEAR_PRECIOUS
+			    | UPL_COMMIT_FREE_ON_EMPTY;
+
+			if (inactivate)
+				cflags |= UPL_COMMIT_INACTIVATE;
+
+			ubc_upl_commit_range(upl, upl_offset, size, cflags);
+		}
 	}
 exit:
 	ZFS_EXIT(zfsvfs);
@@ -2597,7 +2601,7 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	 */
 
 	int retval =  zfs_pageout(zfsvfs, zp, upl, upl_offset, ap->a_f_offset,
-	    len, flags, B_TRUE);
+	    len, flags, B_TRUE, B_FALSE);
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
