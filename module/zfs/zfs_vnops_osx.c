@@ -2269,7 +2269,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		} else {
 			kern_return_t commitret = ubc_upl_commit_range(upl, upl_offset, ap->a_size,
 			    (UPL_COMMIT_CLEAR_DIRTY
-				|  UPL_COMMIT_CLEAR_PRECIOUS
+				| UPL_COMMIT_CLEAR_PRECIOUS
 				| UPL_COMMIT_FREE_ON_EMPTY));
 			if (commitret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: ubc_upl_commit_range returned %d"
