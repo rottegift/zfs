@@ -2117,7 +2117,18 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	ASSERT(upl_page_present(nrpl, 0));
 	ASSERT(upl_valid_page(nrpl, 0));
 	ASSERT0(upl_dirty_page(nrpl, 0));
-	/* call zfs_pageout to get rid of it */
+	if (!upl_dirty_page(nrpl, 0)) {
+		/* this seems to happen in 69e64a4b0f */
+		printf("ZFS: %s:%d: skipping pageout because page 0 not dirty at foff %lld file %s\n",
+		    __func__, __LINE__, upl_f_off, zp->z_name_cache);
+		kern_return_t abort_ret = ubc_upl_abort(npoupl, 0);
+		if (abort_ret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: error %d from upl_abort\n", __func__, __LINE__, abort_ret);
+			return (abort_ret);
+		}
+		return (0);
+	}
+	/* call zfs_pageout to finalize the UPL */
 	int nporet = zfs_pageout(zfsvfs, zp, npoupl, 0, upl_f_off, PAGESIZE, 0, B_FALSE);
 	if (nporet != 0) {
 		printf("ZFS: %s:%d: error %d from"
