@@ -2692,7 +2692,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		ubc_upl_abort(upl,  (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
 	else
 		ubc_upl_commit_range(upl, 0, a_size,
-		    UPL_COMMIT CLEAR_DIRTY
+		    UPL_COMMIT_CLEAR_DIRTY
 		    | UPL_COMMIT_CLEAR_PRECIOUS
 		    | UPL_COMMIT_FREE_ON_EMPTY);
 
