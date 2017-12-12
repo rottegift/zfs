@@ -1995,24 +1995,28 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 	return (error);
 }
 
-/*
- * Write the bytes to a file.
- *
- *	IN:	vp	- vnode of file to be written to.
- *		uio	- structure supplying write location, range info,
- *			  and data buffer.
- *		ioflag	- FAPPEND flag set if in append mode.
- *		cr	- credentials of caller.
- *		ct	- caller context (NFS/CIFS fem monitor only)
- *
- *	OUT:	uio	- updated offset and range.
- *
- *	RETURN:	0 if success
- *		error code if failure
- *
- * Timestamps:
- *	vp - ctime|mtime updated if byte count > 0
- */
+static inline void
+zfs_write_recover_times(znode_t *zp, dmu_tx_t *tx)
+{
+       uint64_t mtime[2], ctime[2];
+       sa_bulk_attr_t bulk[3];
+       int count = 0, err = 0;
+       zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+
+       SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_MTIME(zfsvfs), NULL,
+           &mtime, 16);
+       SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_CTIME(zfsvfs), NULL,
+           &ctime, 16);
+       SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_FLAGS(zfsvfs), NULL,
+           &zp->z_pflags, 8);
+       zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
+           B_TRUE);
+
+       if ((err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx)) != 0) {
+               printf("ZFS: %s:%d error %d updating timestamps for file %s\n",
+                   __func__, __LINE__, err, zp->z_name_cache);
+       }
+}
 
 static inline
 int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int ioflag,
@@ -2262,6 +2266,48 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 							    __func__, __LINE__,
 							    bytes_to_write,
 							    zp->z_name_cache);
+							dmu_tx_t *txupdate =
+							    dmu_tx_create(zfsvfs->z_os);
+							dmu_tx_hold_sa(txupdate, zp->z_sa_hdl,
+							    B_FALSE);
+							dmu_tx_hold_write(txupdate,
+							    zp->z_id, recov_off,
+							    bytes_to_write);
+							zfs_sa_upgrade_txholds(txupdate, zp);
+							int txasgerr = dmu_tx_assign(txupdate,
+							    TXG_WAIT);
+							if (txasgerr) {
+								printf("ZFS: %s:%d: error %d"
+								    " from dmu_tx_assign for"
+								    " file %s, aborting\n",
+								    __func__, __LINE__,
+								    txasgerr, zp->z_name_cache);
+								dmu_tx_abort(txupdate);
+								kern_return_t unmapret =
+								    ubc_upl_unmap(rupl);
+								ASSERT3S(unmapret, ==, KERN_SUCCESS);
+								kern_return_t abortret =
+								    ubc_upl_abort(rupl,
+									UPL_ABORT_ERROR |
+									UPL_ABORT_FREE_ON_EMPTY);
+								ASSERT3S(abortret, ==, KERN_SUCCESS);
+								error = txasgerr;
+								goto drop_and_return_to_retry;
+							}
+							dmu_write(zfsvfs->z_os, zp->z_id,
+							    recov_off, bytes_to_write,
+							    (caddr_t)uio_start_vaddr, txupdate);
+							zfs_log_write(zfsvfs->z_log,
+							    txupdate, TX_WRITE, zp,
+							    recov_off, bytes_to_write, 0,
+							    NULL, NULL);
+							/* XXX: maybe should update times,
+							 *      in case there is no further
+							 *      activity on this file
+							 */
+							zfs_write_recover_times(zp, txupdate);
+                                                               dmu_tx_commit(txupdate);
+
 							kern_return_t unmapret =
 							    ubc_upl_unmap(rupl);
 							ASSERT3S(unmapret, ==, KERN_SUCCESS);
@@ -2274,6 +2320,14 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 							ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 							ASSERT3S(zp->z_size, >=,
 							    recov_off + bytes_to_write);
+							if (do_sync) {
+								printf("ZFS: %s:%d: zil_committing"
+								    " %s\n",
+								    __func__, __LINE__,
+								    zp->z_name_cache);
+								zil_commit(zfsvfs->z_log,
+								    zp->z_id);
+                                                               }
 							continue;
 						} else {
 							printf("ZFS: %s:%d uio not progressed for"
@@ -2301,6 +2355,44 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 					/* write out the modification */
 					const uint64_t bytes_to_write =
 					    resid_at_break - uio_resid(uio);
+					dmu_tx_t *txupdate =
+					    dmu_tx_create(zfsvfs->z_os);
+					dmu_tx_hold_sa(txupdate, zp->z_sa_hdl,
+					    B_FALSE);
+					dmu_tx_hold_write(txupdate,
+					    zp->z_id, recov_off,
+					    bytes_to_write);
+					zfs_sa_upgrade_txholds(txupdate, zp);
+					int txasgerr = dmu_tx_assign(txupdate,
+					    TXG_WAIT);
+					if (txasgerr) {
+						printf("ZFS: %s:%d: error %d"
+						    " from dmu_tx_assign for"
+						    " file %s, aborting\n",
+						    __func__, __LINE__,
+						    txasgerr, zp->z_name_cache);
+						dmu_tx_abort(txupdate);
+						kern_return_t unmapret =
+						    ubc_upl_unmap(rupl);
+						ASSERT3S(unmapret, ==, KERN_SUCCESS);
+						kern_return_t abortret =
+						    ubc_upl_abort(rupl,
+							UPL_ABORT_ERROR |
+							UPL_ABORT_FREE_ON_EMPTY);
+						ASSERT3S(abortret, ==, KERN_SUCCESS);
+						error = txasgerr;
+						goto drop_and_return_to_retry;
+					}
+					dmu_write(zfsvfs->z_os, zp->z_id,
+					    recov_off, bytes_to_write,
+					    (caddr_t)uio_start_vaddr, txupdate);
+					zfs_log_write(zfsvfs->z_log,
+					    txupdate, TX_WRITE, zp,
+					    recov_off, bytes_to_write, 0,
+					    NULL, NULL);
+					zfs_write_recover_times(zp, txupdate);
+                                               dmu_tx_commit(txupdate);
+
 					kern_return_t unmapret =
 					    ubc_upl_unmap(rupl);
 					if (unmapret != KERN_SUCCESS) {
@@ -2323,6 +2415,11 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 					}
 					ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 					ASSERT3S(zp->z_size, >=, recov_off + bytes_to_write);
+					if (do_sync) {
+						printf("ZFS: %s:%d: zil_committing %s\n",
+						    __func__, __LINE__, zp->z_name_cache);
+						zil_commit(zfsvfs->z_log, zp->z_id);
+					}
 					dprintf("ZFS: %s:%d continuing\n", __func__, __LINE__);
 					continue;
 				drop_and_return_to_retry:
@@ -2565,6 +2662,24 @@ skip_sync:
 	return (error);
 }
 
+/*
+ * Write the bytes to a file.
+ *
+ *	IN:	vp	- vnode of file to be written to.
+ *		uio	- structure supplying write location, range info,
+ *			  and data buffer.
+ *		ioflag	- FAPPEND flag set if in append mode.
+ *		cr	- credentials of caller.
+ *		ct	- caller context (NFS/CIFS fem monitor only)
+ *
+ *	OUT:	uio	- updated offset and range.
+ *
+ *	RETURN:	0 if success
+ *		error code if failure
+ *
+ * Timestamps:
+ *	vp - ctime|mtime updated if byte count > 0
+ */
 
 /* ARGSUSED */
 int
