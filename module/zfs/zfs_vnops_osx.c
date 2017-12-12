@@ -2526,6 +2526,7 @@ out:
 		else
 			ubc_upl_commit_range(upl, upl_offset, size,
 								 (UPL_COMMIT_CLEAR_DIRTY
+								     | UPL_COMMIT_INACTIVATE
 								     | UPL_COMMIT_CLEAR_PRECIOUS
 								     | UPL_COMMIT_FREE_ON_EMPTY));
 	}
