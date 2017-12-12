@@ -2039,7 +2039,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	 */
 	upl_t mupl = NULL;
 	kern_return_t muplret = ubc_create_upl(vp, upl_f_off, PAGE_SIZE, &mupl, NULL,
-	    UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY);
+	    UPL_SET_LITE | UPL_WILL_MODIFY);
 	ASSERT3S(muplret, ==, KERN_SUCCESS);
 	if (muplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: filed to create UPL error %d! foff %lld file %s\n",
@@ -2101,10 +2101,34 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	ASSERT3S(resid_at_break, >, uio_resid(uio));
 	ASSERT3S(zp->z_size, >=, recov_off + (resid_at_break - uio_resid(uio)));
-	return (commitret);
+	/* finally write out the modified page again */
+	upl_t npoupl = NULL;
+	upl_page_info_t *nrpl = NULL;
+	kern_return_t nuplret = ubc_create_upl(vp,
+	    upl_f_off, PAGE_SIZE, &npoupl, &nrpl,
+	    UPL_UBC_MSYNC | UPL_FILE_IO | UPL_SET_LITE);
+	ASSERT3S(nuplret, ==, KERN_SUCCESS);
+	if (uplret != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: failed to create UPL error %d!"
+		    "  foff %lld file %s\n",
+		    __func__, __LINE__, nuplret, upl_f_off, zp->z_name_cache);
+		return (nuplret);
+	}
+	ASSERT(upl_page_present(nrpl, 0));
+	ASSERT(upl_valid_page(nrpl, 0));
+	ASSERT0(upl_dirty_page(nrpl, 0));
+	/* call zfs_pageout to get rid of it */
+	int nporet = zfs_pageout(zfsvfs, zp, npoupl, 0, upl_f_off, PAGESIZE, 0, B_FALSE);
+	if (nporet != 0) {
+		printf("ZFS: %s:%d: error %d from"
+		    " zfs_pageout, page at %lld file %s\n",
+		    __func__, __LINE__, nporet,
+		    upl_f_off, zp->z_name_cache);
+		return (nporet);
+	}
+	ASSERT3S(ccupl_retval, ==, 0);
+	return (0);
 }
-
-
 
 static inline
 int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int ioflag,
