@@ -2106,7 +2106,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	upl_page_info_t *nrpl = NULL;
 	kern_return_t nuplret = ubc_create_upl(vp,
 	    upl_f_off, PAGE_SIZE, &npoupl, &nrpl,
-	    UPL_UBC_MSYNC | UPL_FILE_IO | UPL_SET_LITE);
+	    UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY | UPL_FILE_IO | UPL_SET_LITE);
 	ASSERT3S(nuplret, ==, KERN_SUCCESS);
 	if (uplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: failed to create UPL error %d!"
