@@ -2616,7 +2616,7 @@ skip_sync:
 
 	/* we can become unsafe here */
 
-	if (is_safe) {
+	if (is_safe && do_sync) {
 		error = zfs_write_sync_range_helper(vp, woff, woff + sync_resid,
 		    sync_resid, do_sync, B_TRUE, B_FALSE);
 		if (error != 0) {
