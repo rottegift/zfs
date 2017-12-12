@@ -1880,7 +1880,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 		boolean_t sync = (ioflag & (FSYNC | FDSYNC)) ||
 		    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS;
 
-		if (sync || zp->z_is_mapped) {
+		if (B_TRUE || sync || zp->z_is_mapped) {
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			ASSERT3S(zp->z_size, ==, ubcsize);
 			ASSERT3S(ubcsize, >, 0);
@@ -2306,8 +2306,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 							 *      activity on this file
 							 */
 							zfs_write_recover_times(zp, txupdate);
-                                                               dmu_tx_commit(txupdate);
-
+							dmu_tx_commit(txupdate);
 							kern_return_t unmapret =
 							    ubc_upl_unmap(rupl);
 							ASSERT3S(unmapret, ==, KERN_SUCCESS);
@@ -2391,8 +2390,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 					    recov_off, bytes_to_write, 0,
 					    NULL, NULL);
 					zfs_write_recover_times(zp, txupdate);
-                                               dmu_tx_commit(txupdate);
-
+					dmu_tx_commit(txupdate);
 					kern_return_t unmapret =
 					    ubc_upl_unmap(rupl);
 					if (unmapret != KERN_SUCCESS) {
