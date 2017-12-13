@@ -3327,6 +3327,22 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	if (!zp->z_is_mapped)
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
 
+	off_t ubcsize = ubc_getsize(vp);
+        off_t resid_msync_off = ubcsize;
+        /* PUSHALL because we may have precious pages to commit */
+        int retval_msync = ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
+	if (retval_msync != 0) {
+                if (resid_msync_off != ubcsize)
+                        printf("ZFS: %s:%d: msync error %d syncing %lld - %lld,"
+                            " resid_off = %lld, file %s\n",
+                            __func__, __LINE__, retval_msync, 0LL, ubcsize,
+                            resid_msync_off, zp->z_name_cache);
+        } else {
+                dprintf("ZFS: (DEBUG) %s:%d: inval %lld - %lld (%lld), resid %lld , file %s\n",
+                    __func__, __LINE__, 0LL, ubcsize, ubcsize,
+                    resid_msync_off, zp->z_name_cache);
+        }
+
 	/*
 	 * We have been called from within ubc_map in bsd/kern/ubc_subr.c,
 	 * but the vnode is unlocked when we are in this function.
@@ -3346,7 +3362,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		uint8_t curval = zp->z_is_mapped_writable;
 		_Bool res =
 		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped_writable,
-			&curval, B_TRUE,
+			&curval, ISSET(ap->a_fflags, VM_PROT_WRITE),
 			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 		if (res == TRUE)
 			break;
