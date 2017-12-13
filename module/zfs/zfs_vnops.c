@@ -441,7 +441,7 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 			msync_flags = UBC_PUSHALL | UBC_SYNC;
 		if (sync)
 			msync_flags |= UBC_SYNC;
-		int retval = ubc_msync(vp, 0, ubcsize, &resid_off, msync_flags);
+		int retval = zfs_ubc_msync(vp, 0, ubcsize, &resid_off, msync_flags);
 	        ASSERT3S(retval, ==, 0);
 		if (retval != 0)
 			ASSERT3S(resid_off, ==, ubcsize);
@@ -544,7 +544,7 @@ int ubc_invalidate_range_impl(vnode_t *vp, off_t start, off_t end)
 
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-	retval_msync = ubc_msync(vp, start, end, &resid_msync_off, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
+	retval_msync = zfs_ubc_msync(vp, start, end, &resid_msync_off, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3S(tries, <=, 2);
 
@@ -1480,7 +1480,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 			EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flags = UBC_PUSHALL | UBC_SYNC;
-			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flags);
+			int retval = zfs_ubc_msync(vp, 0, ubcsize, &resid_off, flags);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3S(tries, <=, 2);
 			ASSERT3S(retval, ==, 0);
@@ -1792,7 +1792,7 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 		msync_flags |= UBC_SYNC;
 	}
 
-	error = ubc_msync(vp, woff, end_range, &msync_resid, msync_flags);
+	error = zfs_ubc_msync(vp, woff, end_range, &msync_resid, msync_flags);
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3U(tries, <=, 2);
@@ -1920,7 +1920,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 			if (sync)
 				msync_flags |= UBC_SYNC;
 			zfs_range_unlock(rlock);
-			int retval = ubc_msync(vp, aoff, aend, &resid_off, msync_flags);
+			int retval = zfs_ubc_msync(vp, aoff, aend, &resid_off, msync_flags);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0) {
@@ -3302,7 +3302,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 					flag |= UBC_SYNC;
 				boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 				uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-				ubc_msync_err = ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flag);
+				ubc_msync_err = zfs_ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flag);
 				z_map_drop_lock(zp, &need_release, &need_upgrade);
 				ASSERT3S(tries, <=, 2);
 				VNOPS_STAT_BUMP(zfs_write_msync);
@@ -5286,7 +5286,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flag = UBC_PUSHALL| UBC_SYNC;
-			int retval = ubc_msync(vp, 0, ubcsize,
+			int retval = zfs_ubc_msync(vp, 0, ubcsize,
 			    &resid_off, flag);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0)
@@ -5314,7 +5314,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flag = UBC_PUSHALL | UBC_SYNC;
-			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flag);
+			int retval = zfs_ubc_msync(vp, 0, ubcsize, &resid_off, flag);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0)
 				ASSERT3S(resid_off, ==, ubcsize);
@@ -5326,7 +5326,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flag = UBC_PUSHALL | UBC_SYNC;
-			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flag);
+			int retval = zfs_ubc_msync(vp, 0, ubcsize, &resid_off, flag);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3S(tries, <=, 2);
 			ASSERT3S(retval, ==, 0);

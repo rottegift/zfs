@@ -2738,9 +2738,66 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 }
 
 /*
+ * serialize calls to ubc_msync for a given znode
+ * (ultimate goal: total FIFO
+ */
+
+int
+zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
+{
+
+	znode_t *zp = VTOZ(vp);
+	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+
+	ZFS_ENTER(zfsvfs);
+	ZFS_VERIFY_ZP(zp);
+
+	const hrtime_t entry_time = gethrtime();
+
+	mutex_enter(&zp->z_ubc_msync_lock);
+
+	for ( ; ; ) {
+		if (zp->z_syncer_active)
+			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+		else
+			break;
+	}
+
+	ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
+	zp->z_syncer_active = B_TRUE;
+
+	mutex_exit(&zp->z_ubc_msync_lock);
+
+	int retval = ubc_msync(vp, start, end, resid, flags);
+
+	mutex_enter(&zp->z_ubc_msync_lock);
+
+	ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+	zp->z_syncer_active = B_FALSE;
+
+	cv_signal(&zp->z_ubc_msync_cv);
+
+	mutex_exit(&zp->z_ubc_msync_lock);
+
+	const hrtime_t exit_time = gethrtime();
+	const hrtime_t elapsed_time = exit_time - entry_time;
+	const int elapsed_seconds = NSEC2SEC(elapsed_time);
+	if (elapsed_time > 1) {
+		printf("ZFS: %s:%d: long ubc_msync, %d seconds, file %s\n",
+		    __func__, __LINE__, elapsed_seconds, zp->z_name_cache);
+	}
+
+	ZFS_EXIT(zfsvfs);
+
+	return (retval);
+}
+
+
+/*
  * In V2 of vnop_pageout, we are given a NULL upl, so that we can
  * grab the file locks first, then request the upl to lock down pages.
  */
+
 static int
 pageoutv2_helper(struct vnop_pageout_args *ap)
 #if 0
@@ -3359,7 +3416,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	off_t ubcsize = ubc_getsize(vp);
         off_t resid_msync_off = ubcsize;
         /* PUSHALL because we may have precious pages to commit */
-        int retval_msync = ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
+        int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
 	if (retval_msync != 0) {
                 if (resid_msync_off != ubcsize)
                         printf("ZFS: %s:%d: msync error %d syncing %lld - %lld,"
@@ -3482,7 +3539,7 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	off_t ubcsize = ubc_getsize(vp);
 	off_t resid_msync_off = ubcsize;
 	/* PUSHALL because we may have precious pages to commit */
-        int retval_msync = ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
+        int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
 #if 0
 	if (rw_lock_held(&zp->z_map_lock)) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
@@ -3694,7 +3751,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		int retval = 0;
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		retval = ubc_msync(vp, (off_t)0, ubcsize, &resid_off,
+		retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off,
 		    UBC_PUSHALL | UBC_SYNC);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);

@@ -244,7 +244,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* give up range_lock, since pageoutv2 may need it */
 		zfs_range_unlock(rl);
 		/* do the msync */
-		int msync_retval = ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
+		int msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
 		/* error checking, unlocking, and returning */
 		if (msync_retval != 0 &&
 		    !(msync_retval == EINVAL && resid_off == ubcsize)) {
