@@ -1832,9 +1832,6 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	off_t ubcsize = ubc_getsize(vp);
 	off_t msync_resid = 0;
 
-	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-
 	if (range_lock) {
 		/*
 		 * ubc_msync may call down to pageoutv2, which will
@@ -1856,9 +1853,6 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	}
 
 	error = zfs_ubc_msync(vp, woff, end_range, &msync_resid, msync_flags);
-
-	z_map_drop_lock(zp, &need_release, &need_upgrade);
-	ASSERT3U(tries, <=, 2);
 
 	if (error != 0) {
 		printf("ZFS: %s:%d: ubc_msync error %d msync_resid %lld"
