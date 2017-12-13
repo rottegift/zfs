@@ -3348,10 +3348,15 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 			extern void IODelay(unsigned microseconds);
 			IODelay(1);
 		}
-		printf("ZFS: %s:%d: spl_ubc_is_mapped_writable now %d zp->z_is_mapped_writable %d"
-		    "after %d iters file %s\n", __func__, __LINE__,
-		    spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable, i,
-		    zp->z_name_cache);
+		if (i > 0 || spl_ubc_is_mapped_writable(vp) != zp->z_is_mapped_writable) {
+			printf("ZFS: %s:%d: spl_ubc_is_mapped_writable now %d zp->z_is_mapped_writable %d"
+			    "after %d iters file %s\n", __func__, __LINE__,
+			    spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable, i,
+			    zp->z_name_cache);
+		}
+	} else {
+		printf("ZFS: %s:%d: spl_ubc_is_mapped not true for file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
 	}
 
 	if (spl_ubc_is_mapped(vp, NULL)) {
@@ -3367,17 +3372,22 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 			extern void IODelay(unsigned microseconds);
 			IODelay(1);
 		}
-		printf("ZFS: %s:%d: spl_ubc_is_mapped now %d zp->z_is_mapped %d after"
-		    " %d iters, file %s\n", __func__, __LINE__,
-		    spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped, i,
-		    zp->z_name_cache);
+		if (i > 0 || zp->z_is_mapped != spl_ubc_is_mapped(vp, NULL)) {
+			printf("ZFS: %s:%d: spl_ubc_is_mapped now %d zp->z_is_mapped %d after"
+			    " %d iters, file %s\n", __func__, __LINE__,
+			    spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped, i,
+			    zp->z_name_cache);
+		}
+	} else {
+		printf("ZFS: %s:%d: spl_ubc_is_mapped not true for file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
 	}
 
 	ASSERT(zp->z_is_mapped);
         IMPLY(ISSET(ap->a_fflags, VM_PROT_WRITE), zp->z_is_mapped_writable);
 
-	EQUIV(zp->z_is_mapped, spl_ubc_is_mapped(vp, NULL));
-	EQUIV(zp->z_is_mapped_writable, spl_ubc_is_mapped_writable(vp));
+	IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+	IMPLY(spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable);
 
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
 	ZFS_EXIT(zfsvfs);
@@ -3486,10 +3496,15 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 			extern void IODelay(unsigned microseconds);
 			IODelay(1);
 		}
-		printf("ZFS: %s:%d: spl_ubc_is_mapped_writable now %d zp->z_is_mapped_writable %d"
-		    "after %d iters file %s\n", __func__, __LINE__,
-		    spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable, i,
-		    zp->z_name_cache);
+		if (i > 0 || spl_ubc_is_mapped_writable(vp) != zp->z_is_mapped_writable) {
+			printf("ZFS: %s:%d: spl_ubc_is_mapped_writable now %d zp->z_is_mapped_writable %d"
+			    "after %d iters file %s\n", __func__, __LINE__,
+			    spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable, i,
+			    zp->z_name_cache);
+		}
+	} else {
+		printf("ZFS: %s:%d: spl_ubc_is_mapped_writable still true for file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
 	}
 
 	if (!spl_ubc_is_mapped(vp, NULL)) {
@@ -3505,14 +3520,19 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 			extern void IODelay(unsigned microseconds);
 			IODelay(1);
 		}
-		printf("ZFS: %s:%d: spl_ubc_is_mapped now %d zp->z_is_mapped %d after"
-		    " %d iters, file %s\n", __func__, __LINE__,
-		    spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped, i,
-		    zp->z_name_cache);
+		if (i > 0 || spl_ubc_is_mapped(vp, NULL) != zp->z_is_mapped) {
+			printf("ZFS: %s:%d: spl_ubc_is_mapped now %d zp->z_is_mapped %d after"
+			    " %d iters, file %s\n", __func__, __LINE__,
+			    spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped, i,
+			    zp->z_name_cache);
+		}
+	} else {
+		printf("ZFS: %s:%d: spl_ubc_is_mapped still true for file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
 	}
 
-	EQUIV(zp->z_is_mapped, spl_ubc_is_mapped(vp, NULL));
-	EQUIV(zp->z_is_mapped_writable, spl_ubc_is_mapped_writable(vp));
+	IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+	IMPLY(spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable);
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
