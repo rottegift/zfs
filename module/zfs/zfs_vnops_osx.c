@@ -3058,8 +3058,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    __func__, __LINE__, pg_index, ((isize)/PAGE_SIZE)-1,
 			    ap->a_size, ap->a_f_offset,
 			    zp->z_name_cache);
-		}
-		if (!upl_dirty_page(pl, pg_index)) {
+		} else if (!upl_dirty_page(pl, pg_index)) {
 			printf("ZFS: %s:%d: page %lld of %lld not dirty, upl size %ld"
 			    " starts at %lld file %s\n",
 			    __func__, __LINE__, pg_index, ((isize)/PAGE_SIZE)-1,
