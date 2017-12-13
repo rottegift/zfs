@@ -1897,7 +1897,7 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 				}
 			}
 			const hrtime_t end_time = gethrtime();
-			if (NSEC2MSEC(start_time) > 10) {
+			if (NSEC2MSEC(end_time - start_time) > 10) {
 				printf("ZFS: %s:%d: number of milliseconds looking for a lock %lld,"
 				    " iters %d\n", __func__, __LINE__,
 				    NSEC2MSEC(end_time - start_time), i);
