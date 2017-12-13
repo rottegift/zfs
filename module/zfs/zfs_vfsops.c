@@ -104,7 +104,6 @@
 #include <sys/systeminfo.h>
 #include <sys/zfs_mount.h>
 
-#include <sys/znode_z_map_lock.h>
 #include <sys/zfs_rlock.h>
 #endif /* __APPLE__ */
 
@@ -203,36 +202,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		ZFS_ENTER(zfsvfs);
 		ZFS_VERIFY_ZP(zp);
-		/* take a range lock */
-		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
-		/* take z_map_lock */
-		boolean_t need_release = B_FALSE, need_upgrade = B_TRUE;
-		/*
-		 * we try very briefly to grab the z_map_lock and give up
-		 * if we can't get it - longer if MNT_WAITFOR
-		 */
-		int max_try = 10;
-		if (waitfor)
-			max_try= 100;
-		for (int tries = 0; tries < max_try; tries++) {
-			if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
-				need_release = B_TRUE;
-				zp->z_map_lock_holder = __func__;
-				break;
-			}
-			kpreempt(KPREEMPT_SYNC);
-			extern void IODelay(unsigned microseconds);
-			if (waitfor)
-				IODelay(1);
-		}
-		if (!rw_write_held(&zp->z_map_lock)) {
-			printf("ZFS: %s:%d: (skipping sync) waitfor %d "
-			    " could not acquire z_map_lock for file %s\n",
-			    __func__, __LINE__, waitfor, zp->z_name_cache);
-			zfs_range_unlock(rl);
-			ZFS_EXIT(zfsvfs);
-			return (VNODE_CLAIMED);
-		}
 		off_t resid_off = 0;
 		off_t ubcsize = ubc_getsize(vp);
 		int flags = UBC_PUSHDIRTY;
@@ -241,8 +210,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			flags = UBC_PUSHALL | UBC_SYNC;
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;
-		/* give up range_lock, since pageoutv2 may need it */
-		zfs_range_unlock(rl);
 		/* do the msync */
 		int msync_retval = ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
 		/* error checking, unlocking, and returning */
@@ -260,7 +227,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    msync_retval, ubcsize, resid_off, flags, zp->z_name_cache);
 			err = EAGAIN;
 		}
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ZFS_EXIT(zfsvfs);
 	}
 	if (err != 0)

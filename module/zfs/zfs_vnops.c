@@ -99,7 +99,6 @@ const int MAX_UPL_SIZE_BYTES = 16*1024*1024;
 #include <sys/zfs_vfsops.h>
 #include <sys/vnode.h>
 #include <sys/vdev.h>
-#include <sys/znode_z_map_lock.h>
 #include <sys/dnode.h>
 
 #ifdef __APPLE__
@@ -137,23 +136,18 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_write_uio_dbuf_bytes;
 	kstat_named_t zfs_zero_length_write;
 	kstat_named_t update_pages;
-	kstat_named_t update_pages_want_lock;
-	kstat_named_t update_pages_lock_timeout;
 	kstat_named_t zfs_read_calls;
 	kstat_named_t zfs_read_clean_on_read;
-	kstat_named_t mappedread_lock_tries;
 	kstat_named_t zfs_read_mappedread_mapped_file_bytes;
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
 	kstat_named_t zfs_fsync_zil_commit;
 	kstat_named_t zfs_fsync_ubc_msync;
 	kstat_named_t zfs_fsync_abandoned;
-	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t zfs_fsync_file_gone;
 	kstat_named_t zfs_fsync_queue_jump;
 	kstat_named_t zfs_fsync_wait;
 	kstat_named_t zfs_fsync_disabled;
 	kstat_named_t zfs_fsync_disabled_mapped;
-	kstat_named_t zfs_fsync_z_map_lock_held_at_entry;
 	kstat_named_t zfs_fsync_busy_delays;
 	kstat_named_t zfs_fsync_busy_sleeps;
 	kstat_named_t zfs_fsync_busy_suspends;
@@ -182,23 +176,18 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_write_uio_dbuf_bytes",                    KSTAT_DATA_UINT64 },
 	{ "zfs_zero_length_write",                       KSTAT_DATA_UINT64 },
 	{ "update_pages",                                KSTAT_DATA_UINT64 },
-	{ "update_pages_want_lock",                      KSTAT_DATA_UINT64 },
-	{ "update_pages_lock_timeout",                   KSTAT_DATA_UINT64 },
 	{ "zfs_read_calls",                              KSTAT_DATA_UINT64 },
 	{ "zfs_read_clean_on_read",                      KSTAT_DATA_UINT64 },
-	{ "mappedread_lock_tries",                       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_mapped_file_bytes",       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit",                        KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_abandoned",                         KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_file_gone",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_queue_jump",                        KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_wait",                              KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled_mapped",                   KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_z_map_lock_held_at_entry",          KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_busy_delays",                       KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_busy_sleeps",                       KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_busy_suspends",                     KSTAT_DATA_UINT64 },
@@ -542,11 +531,7 @@ int ubc_invalidate_range_impl(vnode_t *vp, off_t start, off_t end)
 
 	off_t resid_msync_off = end;
 
-	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 	retval_msync = ubc_msync(vp, start, end, &resid_msync_off, UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
-	z_map_drop_lock(zp, &need_release, &need_upgrade);
-	ASSERT3S(tries, <=, 2);
 
 	if (retval_msync != 0) {
 		if (resid_msync_off != end)
@@ -618,57 +603,6 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	uio_offset(uio), nbytes, upl_start / PAGE_SIZE_64, upl_size / PAGE_SIZE_64,
 	zp->z_size, eof_page, filename);
 
-	 /* check if we are updating z_is_mapped for this file; if it is,
-	  * then it always will be.   If it isn't, we need to lock out
-	  * mmap()-callers.
-	  */
-	boolean_t z_lock_held = B_FALSE;
-	mutex_enter(&zp->z_lock);
-	z_lock_held = B_TRUE;
-	EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
-	int mapped = zp->z_is_mapped;
-	if (mapped > 0) {
-		mutex_exit(&zp->z_lock);
-		z_lock_held = B_FALSE;
-	}
-
-	/*
-	 * We lock against zfs_vnops_pagein() for this file, as it may
-	 * be trying to page in from the current file, which was
-	 * mmap()ed at some point in the past (and may still be
-	 * mmap()ed).
-	 *
-	 * We also lock against other writers to the same file,
-	 * and new callers of zfs_vnop_mmap() or zfs_vnop_mnomap(),
-	 * since those may update the file as well.
-	 *
-	 * While this penalizes writes to a file that has been mmap()ed,
-	 * we can guarantee that whole zfs_write() updates or whole pageins
-	 * complete, rather than interleaving them.
-	 *
-	 * Finally, we also lock against zfs_vnop_pageoutv2() and
-	 * zfs_vnop_pageout() to this file.
-	 */
-
-	boolean_t need_release = B_FALSE;
-	boolean_t need_upgrade = B_FALSE;
-	if (mapped > 0 && !rw_write_held(&zp->z_map_lock)) {
-		ASSERT(!MUTEX_HELD(&zp->z_lock));
-		ASSERT3U((uint64_t)z_lock_held, ==, (uint64_t)B_FALSE);
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		VNOPS_STAT_INCR(update_pages_want_lock, tries);
-	} else if (mapped > 0) {
-		ASSERT(!MUTEX_HELD(&zp->z_lock));
-		ASSERT3U((uint64_t)z_lock_held, ==, (uint64_t)B_FALSE);
-		printf("ZFS: %s: already holds z_map_lock\n", __func__);
-	} else {
-		ASSERT(MUTEX_HELD(&zp->z_lock));
-	}
-
-	/* we now hold EITHER z_lock or z_map_lock, but not both */
-	EQUIV(MUTEX_HELD(&zp->z_lock), mapped == 0);
-	EQUIV(!rw_write_held(&zp->z_map_lock), MUTEX_HELD(&zp->z_lock));
-
 	/*
 	 * Loop through the pages, looking for holes to fill.
 	 */
@@ -699,14 +633,6 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	}
 
 drop_and_exit:
-
-	/* release locks as necessary */
-	z_map_drop_lock(zp, &need_release, &need_upgrade);
-
-	if (z_lock_held == B_TRUE)
-		mutex_exit(&zp->z_lock);
-
-	ASSERT(!MUTEX_HELD(&zp->z_lock));
 
 	ASSERT3S(error, ==, 0);
 }
@@ -1243,13 +1169,6 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 
 	ASSERT3S(arg_bytes, <=, MAX_UPL_SIZE_BYTES);
 
-	/*
-	 * we are called under z_map_lock to make sure that
-	 * other pager activity or writes don't interfere with our
-	 * manipulation of the vnode pager object
-	 */
-	ASSERT(rw_write_held(&zp->z_map_lock));
-
 	objset_t *os = zp->z_zfsvfs->z_os;
         uint64_t object = zp->z_id;
         const char *filename = zp->z_name_cache;
@@ -1474,15 +1393,11 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 			off_t ubcsize = ubc_getsize(vp);
 			ASSERT3S(zp->z_size, ==, ubcsize);
 			off_t resid_off = 0;
-			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-                        uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			int flags = UBC_PUSHDIRTY | UBC_SYNC;
 			EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flags = UBC_PUSHALL | UBC_SYNC;
 			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flags);
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
-			ASSERT3S(tries, <=, 2);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0)
 				ASSERT3S(resid_off, ==, ubcsize);
@@ -1517,13 +1432,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		nbytes = MIN(n, zfs_read_chunk_size -
                      P2PHASE(uio_offset(uio), zfs_read_chunk_size));
 
-		boolean_t need_release = B_FALSE;
-		boolean_t need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		if (tries > 0)
-			VNOPS_STAT_INCR(mappedread_lock_tries, tries);
 		error = mappedread_new(vp, nbytes, uio);
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(error, ==, 0);
 		if (error == 0 && nbytes > 0) {
 			VNOPS_STAT_INCR(zfs_read_mappedread_unmapped_file_bytes, nbytes);
@@ -1769,9 +1678,6 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	off_t ubcsize = ubc_getsize(vp);
 	off_t msync_resid = 0;
 
-	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-
 	if (range_lock) {
 		/*
 		 * ubc_msync may call down to pageoutv2, which will
@@ -1793,9 +1699,6 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	}
 
 	error = ubc_msync(vp, woff, end_range, &msync_resid, msync_flags);
-
-	z_map_drop_lock(zp, &need_release, &need_upgrade);
-	ASSERT3U(tries, <=, 2);
 
 	if (error != 0) {
 		printf("ZFS: %s:%d: ubc_msync error %d msync_resid %lld"
@@ -1861,7 +1764,6 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	if (zp->z_is_mapped ||
 	    (zfsvfs->z_log &&
 		(zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED || (ioflag & (FSYNC | FDSYNC))))) {
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		if (ioflag & FAPPEND) {
 			rlock = zfs_range_lock(zp, 0, alen, RL_APPEND);
 			woff = rlock->r_off;
@@ -1907,7 +1809,6 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 
 		EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 		if (sync || zp->z_is_mapped) {
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			ASSERT3S(zp->z_size, ==, ubcsize);
 			ASSERT3S(ubcsize, >, 0);
 			off_t resid_off = 0;
@@ -1921,7 +1822,6 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				msync_flags |= UBC_SYNC;
 			zfs_range_unlock(rlock);
 			int retval = ubc_msync(vp, aoff, aend, &resid_off, msync_flags);
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0) {
 				ASSERT3S(resid_off, ==, aend);
@@ -1936,7 +1836,6 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				}
 				VNOPS_STAT_BUMP(zfs_write_clean_on_write);
 			}
-			ASSERT3S(tries, <=, 2);
 		} else {
 			zfs_range_unlock(rlock);
 		}
@@ -2112,12 +2011,6 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 
 	boolean_t do_sync = zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS ||
 	    ((ioflag & (FDSYNC | FSYNC)) && zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED);
-
-	/* grab the map lock, protecting against other zfs UBC users */
-	boolean_t need_release = B_FALSE;
-	boolean_t need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-	VNOPS_STAT_INCR(update_pages_want_lock, tries);
 
 	/* break the work into reasonable sized chunks */
 	const off_t chunk_size = (off_t)SPA_MAXBLOCKSIZE;
@@ -2346,8 +2239,6 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 					 */
 					printf("ZFS: %s:%d error %d file %s\n",
 					    __func__, __LINE__, error, zp->z_name_cache);
-					z_map_drop_lock(zp,
-					    &need_release, &need_upgrade);
 					zfs_range_unlock(rl);
 					ZFS_EXIT(zfsvfs);
 					ASSERT3S(error, ==, 0);
@@ -2379,7 +2270,6 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 			    __func__, __LINE__, error, woff, start_resid,
 			    uio_offset(uio), uio_resid(uio), c,
 			    zp->z_name_cache);
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			zfs_range_unlock(rl);
 			VNOPS_STAT_BUMP(zfs_write_cluster_copy_error);
 			ZFS_EXIT(zfsvfs);
@@ -2463,9 +2353,6 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 
 	} // for
 
-	z_map_drop_lock(zp, &need_release, &need_upgrade);
-
-	//ASSERT(!rw_write_held(&zp->z_map_lock));
 	ASSERT3S(error, ==, 0);
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 
@@ -2683,7 +2570,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	/*
 	 * The range lock principally protects us against
-	 * pageoutv2, which takes an RL and then the z_map_lock.
+	 * pageoutv2.
 	 */
 
 	/* if we are appending, bump woff to the end of file */
@@ -3135,11 +3022,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			 * want to do this before update_pages.
 			 */
 
-			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-                        uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			int setsize_retval = ubc_setsize(vp, zp->z_size);
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
-			ASSERT3S(tries, <=, 2);
 
 			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 
@@ -3280,11 +3163,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	 *       However, we have not yet done a ubc_msync, so let's do that now.
 	 */
         if (tx_bytes != 0) {
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
                 int setsize_retval = ubc_setsize(vp, zp->z_size);
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-		ASSERT3S(tries, <=, 2);
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 
 		if (vnode_isreg(vp)) {
@@ -3300,11 +3179,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 					flag = UBC_PUSHALL | UBC_SYNC;
 				if (do_ubc_sync == B_TRUE)
 					flag |= UBC_SYNC;
-				boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-				uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 				ubc_msync_err = ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flag);
-				z_map_drop_lock(zp, &need_release, &need_upgrade);
-				ASSERT3S(tries, <=, 2);
 				VNOPS_STAT_BUMP(zfs_write_msync);
 				if (ubc_msync_err != 0 &&
 				    !(ubc_msync_err == EINVAL && resid_off == ubcsize)) {
@@ -4263,15 +4138,11 @@ top:
 		/* modify this under the lock to avoid interfering
 		 * with mappedread_new etc
 		 */
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		int setsize_retval;
 		if (ubc_getsize(vp) != 0)
 			setsize_retval = vnode_pager_setsize(vp, 0);
 		else
 			setsize_retval = 1;
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-		ASSERT3S(tries, <=, 2);
 		ASSERT3S(setsize_retval, !=, 0); // setsize returns true on success
 		VN_RELE(vp);
 		/*
@@ -5086,13 +4957,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 *                but would be more Solaris-like
 	 */
 
-	/* 0. make sure I'm not holding locks */
-	ASSERT(!MUTEX_HELD(&zp->z_lock));
-	boolean_t z_map_lock_held_at_entry = B_FALSE;
-	if (rw_write_held(&zp->z_map_lock)) {
-		VNOPS_STAT_BUMP(zfs_fsync_z_map_lock_held_at_entry);
-		z_map_lock_held_at_entry = B_TRUE;
-	}
 	/* 0. bounds check on number of waiters */
 	ASSERT3S(zp->z_fsync_cnt, <, 1024); // XXX: ARBITRARY
 	ASSERT3S(zp->z_fsync_cnt, >=, 0); // SIGN STUFF
@@ -5269,11 +5133,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		if (zp->z_is_mapped)
 			VNOPS_STAT_BUMP(zfs_fsync_disabled_mapped);
 		sync_disabled = B_TRUE;
-	} else if (z_map_lock_held_at_entry == B_FALSE) {
-		mutex_enter(&zp->z_lock);
-		mapped = zp->z_is_mapped;
-		mutex_exit(&zp->z_lock);
-	} else {
+	} else  {
 		/* we have recursed here within a single thread */
 		/* tidy up pages */
 		VNOPS_STAT_BUMP(zfs_fsync_recursive_tidy);
@@ -5281,21 +5141,15 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		off_t ubcsize = ubc_getsize(vp);
 		ASSERT3U(zp->z_size, ==, ubcsize);
 		off_t resid_off = 0;
-		if (rw_write_held(&zp->z_map_lock)) {
-			int flag = UBC_PUSHDIRTY | UBC_SYNC;
-			EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
-			if (zp->z_is_mapped)
-				flag = UBC_PUSHALL| UBC_SYNC;
-			int retval = ubc_msync(vp, 0, ubcsize,
-			    &resid_off, flag);
-			ASSERT3S(retval, ==, 0);
-			if (retval != 0)
-				ASSERT3S(resid_off, ==, ubcsize);
-		} else {
-			printf("ZFS: %s:%d: skipping unlocked ubc_msync"
-			    " (recursed here within single thread) file %s\n",
-			    __func__, __LINE__, zp->z_name_cache);
-		}
+		int flag = UBC_PUSHDIRTY | UBC_SYNC;
+		EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+		if (zp->z_is_mapped)
+			flag = UBC_PUSHALL| UBC_SYNC;
+		int retval = ubc_msync(vp, 0, ubcsize,
+		    &resid_off, flag);
+		ASSERT3S(retval, ==, 0);
+		if (retval != 0)
+			ASSERT3S(resid_off, ==, ubcsize);
 		goto validateout;
 	}
 
@@ -5309,41 +5163,17 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		ASSERT3S(zp->z_size, ==, ubcsize);
 		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 		off_t resid_off = 0;
-		if (rw_write_held(&zp->z_map_lock)) {
-			int flag = UBC_PUSHDIRTY | UBC_SYNC;
-			EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
-			if (zp->z_is_mapped)
-				flag = UBC_PUSHALL | UBC_SYNC;
-			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flag);
-			ASSERT3S(retval, ==, 0);
-			if (retval != 0)
-				ASSERT3S(resid_off, ==, ubcsize);
-		} else {
-			boolean_t need_release = B_FALSE;
-			boolean_t need_upgrade = B_FALSE;
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-			int flag = UBC_PUSHDIRTY | UBC_SYNC;
-			EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
-			if (zp->z_is_mapped)
-				flag = UBC_PUSHALL | UBC_SYNC;
-			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flag);
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
-			ASSERT3S(tries, <=, 2);
-			ASSERT3S(retval, ==, 0);
-			if (retval != 0)
-				ASSERT3S(resid_off, ==, ubcsize);
-		}
+		int flag = UBC_PUSHDIRTY | UBC_SYNC;
+		EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+		if (zp->z_is_mapped)
+			flag = UBC_PUSHALL | UBC_SYNC;
+		int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flag);
+		ASSERT3S(retval, ==, 0);
+		if (retval != 0)
+			ASSERT3S(resid_off, ==, ubcsize);
 	}
 
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
-
-	boolean_t need_release = B_FALSE;
-	boolean_t need_upgrade = B_FALSE;
-
-	if (mapped > 0) {
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, "zfs_fsync (init)");
-		VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
-	}
 
 	if (sync_disabled == B_TRUE)
 		goto releaseout;
@@ -5354,8 +5184,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		&& zfs_nocacheflush == 0) {
 		ZFS_ENTER(zfsvfs);
 		ZFS_VERIFY_ZP(zp);
-		if (mapped > 0)
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
@@ -5365,9 +5193,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
 
 releaseout:
-
-	if (need_release != B_FALSE)
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	//tsd_set(zfs_fsyncer_key, NULL);
 

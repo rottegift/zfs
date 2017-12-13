@@ -55,13 +55,7 @@
 #include <sys/fs/zfs.h>
 #include <sys/kidmap.h>
 #include <sys/zfs_vnops.h>
-#include <sys/znode_z_map_lock.h>
 #endif /* _KERNEL */
-
-#ifndef _KERNEL
-#define z_map_rw_lock(...)
-#define z_map_drop_lock(...)
-#endif
 
 #include <sys/dmu.h>
 #include <sys/dmu_objset.h>
@@ -170,7 +164,6 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	list_link_init(&zp->z_link_node);
 
 	mutex_init(&zp->z_lock, NULL, MUTEX_DEFAULT, NULL);
-	rw_init(&zp->z_map_lock, NULL, RW_DEFAULT, NULL);
 	rw_init(&zp->z_parent_lock, NULL, RW_DEFAULT, NULL);
 	rw_init(&zp->z_name_lock, NULL, RW_DEFAULT, NULL);
 	mutex_init(&zp->z_acl_lock, NULL, MUTEX_DEFAULT, NULL);
@@ -186,7 +179,6 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	zp->z_moved = 0;
 	zp->z_fastpath = B_FALSE;
 
-	zp->z_map_lock_holder = NULL;
 	zp->z_fsync_cnt = 0;
 	zp->z_next_ticket = 0ULL;
 	zp->z_now_serving = 1ULL; /* yes, 1 (one) as the early boundary */
@@ -204,8 +196,6 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 	ASSERT(!list_link_active(&zp->z_link_node));
 	ASSERT(!MUTEX_HELD(&zp->z_lock));
 	mutex_destroy(&zp->z_lock);
-	ASSERT(!rw_lock_held(&zp->z_map_lock));
-	rw_destroy(&zp->z_map_lock);
 	ASSERT(!rw_lock_held(&zp->z_parent_lock));
 	rw_destroy(&zp->z_parent_lock);
 	ASSERT(!rw_lock_held(&zp->z_name_lock));
@@ -223,7 +213,6 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 	ASSERT(zp->z_xattr_cached == NULL);
 
 	ASSERT3S(zp->z_sync_cnt, ==, 0);
-	ASSERT3P(zp->z_map_lock_holder, ==, NULL);
 	ASSERT3U(zp->z_fsync_cnt, ==, 0);
 }
 
@@ -1602,8 +1591,6 @@ zfs_rezget(znode_t *zp)
 		rl_t *rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 		int setsize_retval = 0;
 		boolean_t did_setsize = B_FALSE;
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		off_t ubcsize = ubc_getsize(vp);
 		off_t zsize = zp->z_size;
 		vn_pages_remove(vp, 0, 0); // does nothing in O3X
@@ -1611,8 +1598,6 @@ zfs_rezget(znode_t *zp)
 			setsize_retval = vnode_pager_setsize(vp, zp->z_size);
 			did_setsize = B_TRUE;
 		}
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-		ASSERT3S(tries, <=, 2);
 
 		if (did_setsize == B_TRUE) {
 			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
@@ -1620,11 +1605,7 @@ zfs_rezget(znode_t *zp)
 			    __func__, size, zsize, ubcsize);
 			if (zsize > size) {
 				ASSERT3S(zsize, ==, zp->z_size);
-				boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-				uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 				int refresh_retval = ubc_refresh_range(vp, size, zsize);
-				z_map_drop_lock(zp, &need_release, &need_upgrade);
-				ASSERT3S(tries, <=, 2);
 				if (refresh_retval != 0) {
 					printf("ZFS: %s:%d: refresh range [%lld, %lld] failed for file %s\n",
 					    __func__, __LINE__, size, zsize, zp->z_name_cache);
@@ -1928,15 +1909,6 @@ zfs_extend(znode_t *zp, uint64_t end)
 	dmu_tx_commit(tx);
 
 	/*
-	 * lock around vnode_pager_setsize, which just calls
-	 * ubc_setsize.  So far we are not testing for being mapped or
-	 * having resident pages but we do want to lock to avoid
-	 * interfering with an in-progress mappedread, pagein, pageoutv2,
-	 * or update_pages.
-	 */
-	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-	/*
 	 * ubc_getsize() carefully trims the last page when nsize < osize,
 	 * but here we have osize < nsize (we return above otherwise).
 	 * rather than construct a upl and call cluster_zero ourselves,
@@ -1954,8 +1926,6 @@ zfs_extend(znode_t *zp, uint64_t end)
 		printf("ZFS: %s:%d: error setting ubc size to %lld from %lld (delta %lld) for file %s\n",
 		    __func__, __LINE__, end, oldsize, end - oldsize, zp->z_name_cache);
 	}
-	z_map_drop_lock(zp, &need_release, &need_upgrade);
-	ASSERT3S(tries, <=, 2);
 
 	zfs_range_unlock(rl);
 
@@ -2155,26 +2125,10 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * about to invalidate.
 	 */
 
-	/*
-	 * OSX :  vnode_pager_setsize is a wrapper around ubc_setsize
-	 *        Also, we need to take the RW_WRITER lock here otherwise
-	 *        we will interfere with in-progress I/O.
-	 *        (notably, fsx failures without -L (no truncations) flag,
-	 *        if a range of pages is ubc_resident and is cut by the
-	 *        truncation).
-	 *
-	 *        Taking the z_map_lock also serializes the other vnops
-	 *        (notably pagein/pageoutv2/update_pages/mappedread_new).
-	 */
-
-	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-
-	if (vnode_isreg(vp) || vn_has_cached_data(vp) || ubc_pages_resident(vp)) {
+	if (vnode_isreg(vp) || zp->z_is_mapped ||
+	    vn_has_cached_data(vp) || ubc_pages_resident(vp)) {
 		// note: 10a286 says "This work is accomplished
-		//       "by ubc_setsize()"  but does not call
-		// ubc_setsize, or anything in this rw_locked block,
-		// whereas we call it here:
+		//       "by ubc_setsize()"  but does not call it here
 		/* first we grow the ubc size to the old size,
 		 * then we shrink it down; the shrinking will
 		 * guarantee ubc_setsize sees nsize < osize,
@@ -2186,10 +2140,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		int setsize_retval = vnode_pager_setsize(vp, end);
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
 	}
-
-	z_map_drop_lock(zp, &need_release, &need_upgrade);
-
-	ASSERT3S(tries, <=, 2);
 
 	zfs_range_unlock(rl);
 
