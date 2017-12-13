@@ -2782,7 +2782,7 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	const hrtime_t exit_time = gethrtime();
 	const hrtime_t elapsed_time = exit_time - entry_time;
 	const int elapsed_seconds = NSEC2SEC(elapsed_time);
-	if (elapsed_time > 1) {
+	if (elapsed_seconds > 1) {
 		printf("ZFS: %s:%d: long ubc_msync, %d seconds, file %s\n",
 		    __func__, __LINE__, elapsed_seconds, zp->z_name_cache);
 	}
