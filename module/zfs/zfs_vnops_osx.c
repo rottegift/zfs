@@ -2756,12 +2756,8 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	mutex_enter(&zp->z_ubc_msync_lock);
 
-	for ( ; ; ) {
-		if (zp->z_syncer_active)
-			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-		else
-			break;
-	}
+	while (zp->z_syncer_active)
+		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 
 	ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
 	zp->z_syncer_active = B_TRUE;

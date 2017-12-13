@@ -691,7 +691,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	boolean_t unset_syncer = B_FALSE;
 	if (zp->z_is_mapped) {
 		mutex_enter(&zp->z_ubc_msync_lock);
-		if (zp->z_syncer_active) {
+		while (zp->z_syncer_active) {
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 		}
 		ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
@@ -881,7 +881,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 				boolean_t unset_syncer = B_FALSE;
 				if (zp->z_is_mapped) {
 					mutex_enter(&zp->z_ubc_msync_lock);
-					if (zp->z_syncer_active)
+					while (zp->z_syncer_active)
 						cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 					ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
 					zp->z_syncer_active = B_TRUE;
@@ -1408,7 +1408,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 		boolean_t unset_syncer = B_FALSE;
 		if (zp->z_is_mapped) {
 			mutex_enter(&zp->z_ubc_msync_lock);
-			if (zp->z_syncer_active)
+			while (zp->z_syncer_active)
 				cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 			ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
 			zp->z_syncer_active = B_TRUE;
@@ -2120,7 +2120,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	boolean_t unset_syncer = B_FALSE;
 	if (zp->z_is_mapped) {
 		mutex_enter(&zp->z_ubc_msync_lock);
-		if (zp->z_syncer_active)
+		while (zp->z_syncer_active)
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 		ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
 		zp->z_syncer_active = B_TRUE;
@@ -2301,7 +2301,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		boolean_t unset_syncer = B_FALSE;
 		if (zp->z_is_mapped) {
 			mutex_enter(&zp->z_ubc_msync_lock);
-			if (zp->z_syncer_active)
+			while (zp->z_syncer_active)
 				cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 			ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
 			zp->z_syncer_active = B_TRUE;
