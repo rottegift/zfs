@@ -3040,7 +3040,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	upl = NULL;
 
-	/* XXX: rl unlock */
+	zfs_range_unlock(rl);
 	if (a_flags & UPL_IOSYNC) {
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
@@ -3053,7 +3053,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
   pageout_done:
 
-	/* XXX: rl unlock */
+	zfs_range_unlock(rl);
 
   exit_abort:
 	dprintf("ZFS: pageoutv2 aborted %d\n", error);
