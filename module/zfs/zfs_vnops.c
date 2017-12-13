@@ -436,6 +436,7 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 		int sync = zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS ||
 		    (flag & (FSYNC | FDSYNC)) != 0;
 		int msync_flags = UBC_PUSHDIRTY;
+		IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 		if (zp->z_is_mapped)
 			msync_flags = UBC_PUSHALL | UBC_SYNC;
 		if (sync)
@@ -624,6 +625,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	boolean_t z_lock_held = B_FALSE;
 	mutex_enter(&zp->z_lock);
 	z_lock_held = B_TRUE;
+	IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 	int mapped = zp->z_is_mapped;
 	if (mapped > 0) {
 		mutex_exit(&zp->z_lock);
@@ -748,6 +750,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	int err = 0;
 
 	boolean_t map_mod = B_FALSE;
+	IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 	if (zp->z_is_mapped || will_mod)
 		map_mod = B_TRUE;
 
@@ -769,9 +772,9 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	for (int pg = 0; pg < upl_pages; pg++) {
 		if (upl_valid_page(pl, pg)) {
 			printf("ZFS: %s:%d pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
-			    " upl_flags %d, will_mod %d, map_mod %d, is_mapped %d, is_mapped_write %d\n",
+			    " upl_flags %d, will_mod %d, map_mod %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, pg, upl_size, upl_start, filename,
-			    upl_flags, will_mod, map_mod, zp->z_is_mapped, zp->z_is_mapped_write);
+			    upl_flags, will_mod, map_mod, zp->z_is_mapped, zp->z_is_mapped_writable);
 			if (!will_mod) {
 				(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
 				return (EAGAIN);
@@ -779,9 +782,9 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		}
 		if (upl_dirty_page(pl, pg)) {
 			printf("ZFS: %s%d: pg %d of (upl_size %lld upl_start %lld) file %s is DIRTY"
-			    " upl_flags %d, will_mod %d, map_mod %d, is_mapped %d, is_mapped_write %d\n",
+			    " upl_flags %d, will_mod %d, map_mod %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, pg, upl_size, upl_start, filename,
-			    upl_flags, will_mod, map_mod, zp->z_is_mapped, zp->z_is_mapped_write);
+			    upl_flags, will_mod, map_mod, zp->z_is_mapped, zp->z_is_mapped_writable);
 			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
 			return (EAGAIN);
 		}
@@ -962,6 +965,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			uplcflags = UPL_FILE_IO | UPL_SET_LITE;
 
 		int map_mod = B_FALSE;
+		IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 		if (will_mod && zp->z_is_mapped > 0)
 			map_mod = B_TRUE;
 
@@ -1006,7 +1010,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 				    " mapped %d mapped_write %d\n", __func__, __LINE__, will_mod,
 				    page_index, cur_upl_file_offset, cur_upl_size,
 				    zp->z_name_cache, uplcflags, will_mod,
-				    zp->z_is_mapped, zp->z_is_mapped_write);
+				    zp->z_is_mapped, zp->z_is_mapped_writable);
 				page_index++;
 				continue;
 			}
@@ -1029,7 +1033,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 						    " mapped %d mapped_write %d\n", __func__, __LINE__,
 						    page_index_hole_end, cur_upl_file_offset,
 						    cur_upl_size, zp->z_name_cache, uplcflags, will_mod,
-						    zp->z_is_mapped, zp->z_is_mapped_write);
+						    zp->z_is_mapped, zp->z_is_mapped_writable);
 				}
 			}
 
@@ -1473,6 +1477,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
                         uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			int flags = UBC_PUSHDIRTY | UBC_SYNC;
+			IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flags = UBC_PUSHALL | UBC_SYNC;
 			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flags);
@@ -1777,6 +1782,7 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	int msync_flags = 0;
 
 	/* wouldn't it be nice to use ubc_is_mapped[_write] here? */
+	IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 	if (!zp->z_is_mapped) {
 		msync_flags |= UBC_PUSHDIRTY;
 	} else {
@@ -1851,6 +1857,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	 * our range, then unless sync is disabled, push them (syncing
 	 * if we are sync always).
 	 */
+	IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 	if (zp->z_is_mapped ||
 	    (zfsvfs->z_log &&
 		(zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED || (ioflag & (FSYNC | FDSYNC))))) {
@@ -1898,6 +1905,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 		boolean_t sync = (ioflag & (FSYNC | FDSYNC)) ||
 		    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS;
 
+		IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 		if (sync || zp->z_is_mapped) {
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			ASSERT3S(zp->z_size, ==, ubcsize);
@@ -1906,6 +1914,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 			const off_t aend = MIN(aoff + alen, ubcsize);
 			ASSERT3S(aend, >, aoff);
 			int msync_flags = UBC_PUSHDIRTY;
+			IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				msync_flags = UBC_PUSHALL | UBC_SYNC;
 			if (sync)
@@ -2220,7 +2229,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 				    woff, this_off, uio_offset(uio), uio_resid(uio),
 				    this_chunk, xfer_resid,
 				    zp->z_size, ubc_getsize(vp), ioflag, zp->z_is_mapped,
-				    zp->z_is_mapped_write,
+				    zp->z_is_mapped_writable,
 				    start_off, start_resid);
 				if (xfer_resid == this_chunk) {
 					/*
@@ -3286,6 +3295,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			if (clean_before != 0) {
 				ASSERT3U(ubcsize, >, 0);
 				int flag = UBC_PUSHDIRTY;
+				IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 				if (zp->z_is_mapped)
 					flag = UBC_PUSHALL | UBC_SYNC;
 				if (do_ubc_sync == B_TRUE)
@@ -5273,6 +5283,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		off_t resid_off = 0;
 		if (rw_write_held(&zp->z_map_lock)) {
 			int flag = UBC_PUSHDIRTY | UBC_SYNC;
+			IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flag = UBC_PUSHALL| UBC_SYNC;
 			int retval = ubc_msync(vp, 0, ubcsize,
@@ -5300,6 +5311,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		off_t resid_off = 0;
 		if (rw_write_held(&zp->z_map_lock)) {
 			int flag = UBC_PUSHDIRTY | UBC_SYNC;
+			IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flag = UBC_PUSHALL | UBC_SYNC;
 			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flag);
@@ -5311,6 +5323,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			boolean_t need_upgrade = B_FALSE;
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			int flag = UBC_PUSHDIRTY | UBC_SYNC;
+			IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 			if (zp->z_is_mapped)
 				flag = UBC_PUSHALL | UBC_SYNC;
 			int retval = ubc_msync(vp, 0, ubcsize, &resid_off, flag);

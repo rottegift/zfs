@@ -228,7 +228,7 @@ typedef struct znode {
 
 	boolean_t	z_is_zvol;	/* are we used by the zvol */
 	_Atomic uint8_t	        z_is_mapped;	/* are we mmap'ed */
-	_Atomic int32_t         z_is_mapped_write;
+	_Atomic uint8_t         z_is_mapped_writable;
 	boolean_t	z_is_ctldir;	/* are we .zfs entry */
 
 #ifdef __APPLE__

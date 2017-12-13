@@ -723,8 +723,6 @@ zfs_znode_alloc(zfsvfs_t *zfsvfs, dmu_buf_t *db, int blksz,
 	zp->z_drain = B_FALSE;
 
 	zp->z_is_zvol = 0;
-	zp->z_is_mapped = 0;
-	zp->z_is_mapped_write = 0;
 	zp->z_is_ctldir = 0;
 	zp->z_vid = 0;
 	zp->z_uid = 0;
@@ -735,6 +733,9 @@ zfs_znode_alloc(zfsvfs_t *zfsvfs, dmu_buf_t *db, int blksz,
 	zp->z_finder_hardlink = FALSE;
 
 	vp = ZTOV(zp); /* Does nothing in OSX */
+
+	zp->z_is_mapped = spl_ubc_is_mapped(vp, NULL);
+	zp->z_is_mapped_writable = spl_ubc_is_mapped_writable(vp);
 
 	zfs_znode_sa_init(zfsvfs, zp, db, obj_type, hdl);
 

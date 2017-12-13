@@ -2588,7 +2588,8 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	boolean_t need_upgrade = B_FALSE;
 
 	if (!rw_write_held(&zp->z_map_lock)) {
-		ASSERT3S(zp->z_is_mapped, >, 0);
+		IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+		ASSERT(zp->z_is_mapped);
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		VNOPS_OSX_STAT_INCR(pageoutv1_want_lock, tries);
 	} else {
@@ -3316,31 +3317,67 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 
 	ZFS_ENTER(zfsvfs);
 
+	ASSERT(vnode_isreg(vp));
+
 	if (!vnode_isreg(vp)) {
 		ZFS_EXIT(zfsvfs);
 		return (ENODEV);
 	}
-	/*
-	 * XXX: we set z_is_mapped only once but read it often, so a
-	 *      mutex is overkill; instead, it should be a proper
-	 *      _Atomic structure member, or at least be set atomically
-	 *      with one of the Illumos atomic functions.
-	 */
-	// z_is_mapped should be for mapped-for-write only?
-	// should we flush everything from the ubc here?
 
-	if (zp->z_is_mapped == 0) {
+	if (!zp->z_is_mapped)
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
-		zp->z_is_mapped = 1;
+
+	/*
+	 * We have been called from within ubc_map in bsd/kern/ubc_subr.c,
+	 * but the vnode is unlocked when we are in this function.
+	 * We can get a reliable indicator of the UI_ISMAPPED/UI_MAPPEDWRITE
+	 * flags via spl_ubc_is_mapped[_writable], so we use those to
+	 * set the flags in our znode.
+	 */
+
+	if (spl_ubc_is_mapped_writable(vp)) {
+		int i = 0;
+		for (i = 0; i < 1000; i++) {
+			uint8_t curval = zp->z_is_mapped_writable;
+			_Bool res =
+			    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped_writable,
+				&curval, spl_ubc_is_mapped_writable(vp),
+				__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+			if (res == TRUE)
+				break;
+			extern void IODelay(unsigned microseconds);
+			IODelay(1);
+		}
+		printf("ZFS: %s:%d: spl_ubc_is_mapped_writable now %d zp->z_is_mapped_writable %d"
+		    "after %d iters file %s\n", __func__, __LINE__,
+		    spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable, i,
+		    zp->z_name_cache);
 	}
 
-        if (ISSET(ap->a_fflags, VM_PROT_WRITE)) {
-		ASSERT3S(zp->z_is_mapped_write, <, INT32_MAX);
-                zp->z_is_mapped_write++;
-		/* don't let it RTZ */
-		if (zp->z_is_mapped_write <= 0)
-			zp->z_is_mapped_write = 1;
+	if (spl_ubc_is_mapped(vp, NULL)) {
+		int i = 0;
+		for (i = 0; i < 1000; i++) {
+			uint8_t curval = zp->z_is_mapped;
+			_Bool res =
+			    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped,
+				&curval, spl_ubc_is_mapped(vp, NULL),
+				__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+			if (res == TRUE)
+				break;
+			extern void IODelay(unsigned microseconds);
+			IODelay(1);
+		}
+		printf("ZFS: %s:%d: spl_ubc_is_mapped now %d zp->z_is_mapped %d after"
+		    " %d iters, file %s\n", __func__, __LINE__,
+		    spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped, i,
+		    zp->z_name_cache);
 	}
+
+	ASSERT(zp->z_is_mapped);
+        IMPLY(ISSET(ap->a_fflags, VM_PROT_WRITE), zp->z_is_mapped_writable);
+
+	EQUIV(zp->z_is_mapped, spl_ubc_is_mapped(vp, NULL));
+	EQUIV(zp->z_is_mapped_writable, spl_ubc_is_mapped_writable(vp));
 
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
 	ZFS_EXIT(zfsvfs);
@@ -3377,36 +3414,14 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 
 	ZFS_ENTER(zfsvfs);
 
+	ASSERT(vnode_isreg(vp));
+
 	if (!vnode_isreg(vp)) {
 		ZFS_EXIT(zfsvfs);
 		return (ENODEV);
 	}
-	/*
-	 * If a file as been mmaped even once, it needs to keep "z_is_mapped"
-	 * high because it will potentially keep pages in the UPL cache we need
-	 * to update on writes. We can either drop the UPL pages here, or simply
-	 * keep updating both places on zfs_write().
-	 */
-	/* zp->z_is_mapped = 0; */
-	ASSERT3U((uint64_t)zp->z_is_mapped, >, 0ULL);
-	/*
-	 * unfortunately ubc_is_mapped and ubc_is_mapped_writable are not
-	 * exported to us.
-	 */
-	int32_t write_before = zp->z_is_mapped_write;
-	/*
-	 * if we had set z_is_mapped_write previously, decrement it, but
-	 * don't let it RTZ
-	 */
-	if (write_before != 0)
-		zp->z_is_mapped_write--;
-	else if (zp->z_is_mapped_write == 0)
-		zp->z_is_mapped_write = -1;
 
-	if (zp->z_is_mapped == -2 || (zp->z_is_mapped % 64)==0) {
-		printf("ZFS: %s:%d: z_is_mapped %d for file %s",
-		    __func__, __LINE__, zp->z_is_mapped, zp->z_name_cache);
-	}
+	ASSERT3U((uint64_t)zp->z_is_mapped, >, 0ULL);
 
 #if 0
 	ASSERT(!rw_write_held(&zp->z_map_lock));
@@ -3441,6 +3456,63 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
                     __func__, __LINE__, 0LL, ubcsize, ubcsize,
                     resid_msync_off, zp->z_name_cache);
         }
+
+	/*
+	 * Unlike other ports, we can use spl_ubc_is_mapped[_writable]
+	 * to give a reliable indication of whether a regular file is
+	 * mapped and mapped for write.  This bookkeeping is done in
+	 * bsd/kern/ubc.c and concerns the UI_ISMAPPED/UI_MAPPEDWRITE
+	 * flags, which are updated before VNOP_MMAP/VNOP_MNOMAP are
+	 * called.
+	 *
+	 * A c11 atomic compare-and-swap protects us from a race with
+	 * a ubc_map (calling VNOP_MMAP); moreover, while it is not
+	 * critical that we know the mapped state of the file, it is
+	 * slightly better to error on the side of having a file that
+	 * is not mapped treated as if it is than to have a file that
+	 * is mapped being treated as if it is not.
+	 */
+
+	if (!spl_ubc_is_mapped_writable(vp)) {
+		int i = 0;
+		for (i = 0; i < 1000; i++) {
+			uint8_t curval = zp->z_is_mapped_writable;
+			_Bool res =
+			    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped_writable,
+				&curval, spl_ubc_is_mapped_writable(vp),
+				__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+			if (res == TRUE)
+				break;
+			extern void IODelay(unsigned microseconds);
+			IODelay(1);
+		}
+		printf("ZFS: %s:%d: spl_ubc_is_mapped_writable now %d zp->z_is_mapped_writable %d"
+		    "after %d iters file %s\n", __func__, __LINE__,
+		    spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable, i,
+		    zp->z_name_cache);
+	}
+
+	if (!spl_ubc_is_mapped(vp, NULL)) {
+		int i = 0;
+		for (i = 0; i < 1000; i++) {
+			uint8_t curval = zp->z_is_mapped;
+			_Bool res =
+			    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped,
+				&curval, spl_ubc_is_mapped(vp, NULL),
+				__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+			if (res == TRUE)
+				break;
+			extern void IODelay(unsigned microseconds);
+			IODelay(1);
+		}
+		printf("ZFS: %s:%d: spl_ubc_is_mapped now %d zp->z_is_mapped %d after"
+		    " %d iters, file %s\n", __func__, __LINE__,
+		    spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped, i,
+		    zp->z_name_cache);
+	}
+
+	EQUIV(zp->z_is_mapped, spl_ubc_is_mapped(vp, NULL));
+	EQUIV(zp->z_is_mapped_writable, spl_ubc_is_mapped_writable(vp));
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
