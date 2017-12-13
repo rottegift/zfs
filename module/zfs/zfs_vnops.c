@@ -2005,61 +2005,9 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
     const off_t upl_f_off)
 {
 
-	/* map in the intransigent page */
-	upl_t poupl = NULL;
-	upl_page_info_t *rpl = NULL;
-	kern_return_t uplret = ubc_create_upl(vp,
-	    upl_f_off, PAGE_SIZE, &poupl, &rpl,
-	    UPL_UBC_MSYNC | UPL_FILE_IO | UPL_SET_LITE);
-	ASSERT3S(uplret, ==, KERN_SUCCESS);
-	if (uplret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: failed to create UPL error %d!"
-		    "  foff %lld file %s\n",
-		    __func__, __LINE__, uplret, upl_f_off, zp->z_name_cache);
-		return (uplret);
-	}
-	ASSERT(upl_page_present(rpl, 0));
-	ASSERT(upl_valid_page(rpl, 0));
-	ASSERT0(upl_dirty_page(rpl, 0));
-	/* call zfs_pageout to get rid of it */
-	int poret = zfs_pageout(zfsvfs, zp, poupl, 0, upl_f_off, PAGESIZE, 0, B_FALSE, B_TRUE);
-	if (poret != 0) {
-		printf("ZFS: %s:%d: error %d from"
-		    " zfs_pageout, page at %lld file %s\n",
-		    __func__, __LINE__, poret,
-		    upl_f_off, zp->z_name_cache);
-		return (poret);
-	}
-	/* the UPL has been retired by zfs_pageout */
-	/* Now let's get rid of the page */
-	upl_t dupl = NULL;
-	kern_return_t duplret = ubc_create_upl(vp, upl_f_off, PAGE_SIZE, &dupl, NULL,
-	    UPL_WILL_BE_DUMPED);
-	ASSERT3S(duplret, ==, KERN_SUCCESS);
-	if (duplret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld file %s\n",
-		    __func__, __LINE__, duplret, upl_f_off, zp->z_name_cache);
-		return(duplret);
-	}
-	kern_return_t dabortret = ubc_upl_abort(dupl,
-	    UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
-	ASSERT3S(dabortret, ==, KERN_SUCCESS);
-	if (dabortret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: failed to upl abort (DUMP) with error %d, foff %lld file %s",
-		    __func__, __LINE__, dabortret, upl_f_off, zp->z_name_cache);
-		return (dabortret);
-	}
-	/* Now bring in the page again */
-	int fillret = fill_hole(vp, upl_f_off, 0, 1, zp->z_name_cache, B_FALSE);
-	ASSERT3S(fillret, ==, 0);
-	if (fillret != 0) {
-		printf("ZFS: %s:%d: failed to fill hole with error %d, f0ff %lld, file %s",
-		    __func__, __LINE__, fillret, upl_f_off, zp->z_name_cache);
-		return (fillret);
-	}
-	/* Next, modify the page "leave pages busy
+	/* Modify the page: "leave pages busy
 	 * in the original object, if a page list
-	 * structure was specified."
+	 * structure was specified." (vm_pageout.c)
 	 *
 	 * So let's not supply a page list!
 	 */
@@ -2097,13 +2045,13 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	kern_return_t commitret =
 	    ubc_upl_commit_range(mupl,
 		0, PAGE_SIZE,
-		UPL_COMMIT_SET_DIRTY |
+/*		UPL_COMMIT_SET_DIRTY |*/
 		UPL_COMMIT_FREE_ON_EMPTY);
 	if (commitret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d ERROR %d committing UPL"
 		    " for file %s XXX continuing\n",
 		    __func__, __LINE__, commitret,
-		    zp->z_name_cache);
+ 		    zp->z_name_cache);
 	}
 	printf("ZFS: %s:%d cluster_copy_upl and commit successful for file %s,"
 	    " cc_ioresid_in %d cc_ioresid_out %d\n",
@@ -2112,41 +2060,6 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	ASSERT3S(resid_at_break, >, uio_resid(uio));
 	ASSERT3S(zp->z_size, >=, recov_off + (resid_at_break - uio_resid(uio)));
-	/* finally write out the modified page again */
-	upl_t npoupl = NULL;
-	upl_page_info_t *nrpl = NULL;
-	kern_return_t nuplret = ubc_create_upl(vp,
-	    upl_f_off, PAGE_SIZE, &npoupl, &nrpl,
-	    UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY | UPL_FILE_IO | UPL_SET_LITE);
-	ASSERT3S(nuplret, ==, KERN_SUCCESS);
-	if (uplret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: failed to create UPL error %d!"
-		    "  foff %lld file %s\n",
-		    __func__, __LINE__, nuplret, upl_f_off, zp->z_name_cache);
-		return (nuplret);
-	}
-	ASSERT(upl_page_present(nrpl, 0));
-	ASSERT(upl_valid_page(nrpl, 0));
-	ASSERT(upl_dirty_page(nrpl, 0));
-	if (!upl_dirty_page(nrpl, 0)) {
-		printf("ZFS: %s:%d: skipping pageout because page 0 not dirty at foff %lld file %s\n",
-		    __func__, __LINE__, upl_f_off, zp->z_name_cache);
-		kern_return_t abort_ret = ubc_upl_abort(npoupl, 0);
-		if (abort_ret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: error %d from upl_abort\n", __func__, __LINE__, abort_ret);
-			return (abort_ret);
-		}
-		return (0);
-	}
-	/* call zfs_pageout to finalize the UPL */
-	int nporet = zfs_pageout(zfsvfs, zp, npoupl, 0, upl_f_off, PAGESIZE, 0, B_FALSE, B_FALSE);
-	if (nporet != 0) {
-		printf("ZFS: %s:%d: error %d from"
-		    " zfs_pageout, page at %lld file %s\n",
-		    __func__, __LINE__, nporet,
-		    upl_f_off, zp->z_name_cache);
-		return (nporet);
-	}
 	ASSERT3S(ccupl_retval, ==, 0);
 	return (0);
 }
