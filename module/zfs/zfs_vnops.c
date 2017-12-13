@@ -1768,8 +1768,19 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 		 */
 		zfs_range_unlock(rl);
 	}
-	error = ubc_msync(vp, woff, end_range, &msync_resid,
-	    (do_sync) ? UBC_PUSHDIRTY | UBC_SYNC : UBC_PUSHDIRTY);
+	int msync_flags = 0;
+
+	/* wouldn't it be nice to use ubc_is_mapped[_write] here? */
+	if (!zp->z_is_mapped) {
+		msync_flags |= UBC_PUSHDIRTY;
+	} else {
+		msync_flags |= UBC_PUSHALL;
+	}
+	if (do_sync) {
+		msync_flags |= UBC_SYNC;
+	}
+
+	error = ubc_msync(vp, woff, end_range, &msync_resid, msync_flags);
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3U(tries, <=, 2);
@@ -1777,10 +1788,10 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	if (error != 0) {
 		printf("ZFS: %s:%d: ubc_msync error %d msync_resid %lld"
 		    " woff %lld start_resid %ld end_range %lld"
-		    " ubcsize %lld file %s\n",
+		    " ubcsize %lld msync_flasg 0x%x file %s\n",
 		    __func__, __LINE__, error, msync_resid,
 		    woff, start_resid, end_range,
-		    ubcsize, zp->z_name_cache);
+		    ubcsize, msync_flags, zp->z_name_cache);
 	}
 
 	ZFS_EXIT(zfsvfs);

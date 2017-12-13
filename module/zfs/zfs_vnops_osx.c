@@ -3408,14 +3408,17 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		    __func__, __LINE__, zp->z_is_mapped, zp->z_name_cache);
 	}
 
+#if 0
 	ASSERT(!rw_write_held(&zp->z_map_lock));
         boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
         uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 	ASSERT(rw_write_held(&zp->z_map_lock));
+#endif
 	off_t ubcsize = ubc_getsize(vp);
 	off_t resid_msync_off = ubcsize;
 	/* PUSHALL because we may have precious pages to commit */
         int retval_msync = ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
+#if 0
 	if (rw_lock_held(&zp->z_map_lock)) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 	} else {
@@ -3425,6 +3428,7 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		    (fn == NULL) ? "(NULL fn)" : fn);
 	}
         ASSERT3S(tries, <=, 2);
+#endif
 
 	if (retval_msync != 0) {
                 if (resid_msync_off != ubcsize)

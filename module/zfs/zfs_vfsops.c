@@ -233,38 +233,30 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			ZFS_EXIT(zfsvfs);
 			return (VNODE_CLAIMED);
 		}
-		off_t resid_off = 0, resid_off_all = 0;
+		off_t resid_off = 0;
 		off_t ubcsize = ubc_getsize(vp);
 		int flags = UBC_PUSHDIRTY;
+		if (zp->z_is_mapped)
+			flags = UBC_PUSHALL | UBC_SYNC;
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;
 		/* give up range_lock, since pageoutv2 may need it */
 		zfs_range_unlock(rl);
 		/* do the msync */
 		int msync_retval = ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
-		int msync_retval_all = 0;
-		if (waitfor) {
-			msync_retval_all = ubc_msync(vp, (off_t)0, ubcsize, &resid_off_all, UBC_PUSHALL);
-		}
 		/* error checking, unlocking, and returning */
-		if (msync_retval_all != 0) {
-			ASSERT3S(resid_off_all, ==, ubcsize);
-			if (!(msync_retval_all == EINVAL && resid_off_all == ubcsize)) {
-				ASSERT3S(msync_retval_all, ==, 0);
-			}
-		}
 		if (msync_retval != 0 &&
 		    !(msync_retval == EINVAL && resid_off == ubcsize)) {
 			/* we can get an EINVAL spuriously */
 			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d resid_off %lld"
-			    " vs ubcsize %lld for file %s\n", __func__, __LINE__, waitfor,
-			    msync_retval, resid_off, ubcsize, zp->z_name_cache);
+			    " vs ubcsize %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
+			    msync_retval, resid_off, ubcsize, flags, zp->z_name_cache);
 			if (waitfor)
 				err = EAGAIN;
 		} else if (msync_retval && waitfor) {
 			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d but ubcsize %lld !="
-			    "resid_off %lld for file %s\n", __func__, __LINE__, waitfor,
-			    msync_retval, ubcsize, resid_off, zp->z_name_cache);
+			    "resid_off %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
+			    msync_retval, ubcsize, resid_off, flags, zp->z_name_cache);
 			err = EAGAIN;
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
