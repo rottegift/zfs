@@ -1873,6 +1873,7 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			 * mappedread, pagein, pageoutv2, or other caller
 			 * of ubc_setsize/vnode_pager_setsize
 			 */
+#if 0
 			znode_t *zp = VTOZ(ap->a_vp);
 			rl_t *rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
@@ -1883,6 +1884,11 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			VATTR_SET_SUPPORTED(vap, va_data_size);
 			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 			zfs_range_unlock(rl);
+#else
+			int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
+			VATTR_SET_SUPPORTED(vap, va_data_size);
+			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+#endif
 		}
 		if (VATTR_IS_ACTIVE(vap, va_mode))
 			VATTR_SET_SUPPORTED(vap, va_mode);
