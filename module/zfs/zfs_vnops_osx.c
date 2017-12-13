@@ -3343,10 +3343,10 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 
 	int i = 0;
 	for (i = 0; i < 1000; i++) {
-		uint8_t curval = B_TRUE;
+		uint8_t curval = zp->z_is_mapped_writable;
 		_Bool res =
 		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped_writable,
-			&curval, spl_ubc_is_mapped_writable(vp),
+			&curval, B_TRUE,
 			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 		if (res == TRUE)
 			break;
@@ -3361,10 +3361,10 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	}
 
 	for (i = 0; i < 1000; i++) {
-		uint8_t curval = B_TRUE;
+		uint8_t curval = zp->z_is_mapped;
 		_Bool res =
 		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped,
-			&curval, spl_ubc_is_mapped(vp, NULL),
+			&curval, B_TRUE,
 			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 		if (res == TRUE)
 			break;
@@ -3487,10 +3487,10 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	ASSERT(spl_ubc_is_mapped(vp, NULL));
 	int i = 0;
 	for (i = 0; i < 1000; i++) {
-		uint8_t curval = B_FALSE;
+		uint8_t curval = zp->z_is_mapped_writable;
 		_Bool res =
 		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped_writable,
-			&curval, spl_ubc_is_mapped_writable(vp),
+			&curval, B_FALSE,
 			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 		if (res == TRUE)
 			break;
@@ -3505,10 +3505,10 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	}
 
 	for (i = 0; i < 1000; i++) {
-		uint8_t curval = B_FALSE;
+		uint8_t curval = zp->z_is_mapped;
 		_Bool res =
 		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped,
-			&curval, spl_ubc_is_mapped(vp, NULL),
+			&curval, B_FALSE,
 			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 		if (res == TRUE)
 			break;
