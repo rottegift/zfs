@@ -687,7 +687,29 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 
 	int xfer_resid = nbytes;
 
+	EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+	boolean_t unset_syncer = B_FALSE;
+	if (zp->z_is_mapped) {
+		mutex_enter(&zp->z_ubc_msync_lock);
+		if (zp->z_syncer_active) {
+			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+		}
+		ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
+		zp->z_syncer_active = B_TRUE;
+		mutex_exit(&zp->z_ubc_msync_lock);
+		unset_syncer = B_TRUE;
+	}
+
 	error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 0);
+
+	if (unset_syncer) {
+		ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+		mutex_enter(&zp->z_ubc_msync_lock);
+		zp->z_syncer_active = B_FALSE;
+		cv_signal(&zp->z_ubc_msync_cv);
+		mutex_exit(&zp->z_ubc_msync_lock);
+	}
+
 	if (error == 0) {
 		if (xfer_resid != 0) {
 			printf("ZFS: %s:%d nonzero xfer_resid %d ~ nbytes %lld, uioffs in %lld now %lld, file %s\n",
@@ -855,7 +877,28 @@ fill_hole(vnode_t *vp, const off_t foffset,
 				    start_zerofill_file_byte, start_zerofill_file_byte + num_zerofill_bytes,
 				    num_zerofill_bytes, filename);
 
+				EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+				boolean_t unset_syncer = B_FALSE;
+				if (zp->z_is_mapped) {
+					mutex_enter(&zp->z_ubc_msync_lock);
+					if (zp->z_syncer_active)
+						cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+					ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
+					zp->z_syncer_active = B_TRUE;
+					mutex_exit(&zp->z_ubc_msync_lock);
+					unset_syncer = B_TRUE;
+				}
+
 				cluster_zero(upl, start_zerofill_file_byte, num_zerofill_bytes, NULL);
+
+				if (unset_syncer) {
+					ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+					mutex_enter(&zp->z_ubc_msync_lock);
+					zp->z_syncer_active = B_FALSE;
+					cv_signal(&zp->z_ubc_msync_cv);
+					mutex_exit(&zp->z_ubc_msync_lock);
+				}
+
 			} else {
 				printf("ZFS: %s:%d WARNING cluster_zero(upl, offs %lld, siz %lld, NULL)"
 				    " SKIPPED,"
@@ -1361,7 +1404,27 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 
 	int cache_resid = arg_bytes;
 	if (err == 0) {
+		EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+		boolean_t unset_syncer = B_FALSE;
+		if (zp->z_is_mapped) {
+			mutex_enter(&zp->z_ubc_msync_lock);
+			if (zp->z_syncer_active)
+				cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+			ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
+			zp->z_syncer_active = B_TRUE;
+			mutex_exit(&zp->z_ubc_msync_lock);
+			unset_syncer = B_TRUE;
+		}
+
 		err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+
+		if (unset_syncer) {
+			ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+			mutex_enter(&zp->z_ubc_msync_lock);
+			zp->z_syncer_active = B_FALSE;
+			cv_signal(&zp->z_ubc_msync_cv);
+			mutex_exit(&zp->z_ubc_msync_lock);
+		}
 		if (err != 0) {
 			printf("ZFS: %s: cluster_copy_ubc_data returned error %d,"
 			    " cache_resid now %d, arg_bytes was %d orig offset %lld filname %s\n",
@@ -2052,8 +2115,30 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		return(muplret);
 	}
 	int ccupl_ioresid = recov_resid_int;
+
+	EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+	boolean_t unset_syncer = B_FALSE;
+	if (zp->z_is_mapped) {
+		mutex_enter(&zp->z_ubc_msync_lock);
+		if (zp->z_syncer_active)
+			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+		ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
+		zp->z_syncer_active = B_TRUE;
+		mutex_exit(&zp->z_ubc_msync_lock);
+		unset_syncer = B_TRUE;
+	}
+
 	int ccupl_retval = cluster_copy_upl_data(uio, mupl,
 	    recov_off_page_offset, &ccupl_ioresid);
+
+	if (unset_syncer) {
+		ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+		mutex_enter(&zp->z_ubc_msync_lock);
+		zp->z_syncer_active = B_FALSE;
+		cv_signal(&zp->z_ubc_msync_cv);
+		mutex_exit(&zp->z_ubc_msync_lock);
+	}
+
 	if (ccupl_retval != 0) {
 		printf("ZFS: %s:%d: error %d from"
 		    " cluster_copy_upl_data for file %s"
@@ -2210,9 +2295,29 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		}
 
 		ASSERT3S(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
-
 		int xfer_resid = (int) this_chunk;
+
+		EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+		boolean_t unset_syncer = B_FALSE;
+		if (zp->z_is_mapped) {
+			mutex_enter(&zp->z_ubc_msync_lock);
+			if (zp->z_syncer_active)
+				cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+			ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
+			zp->z_syncer_active = B_TRUE;
+			mutex_exit(&zp->z_ubc_msync_lock);
+			unset_syncer = B_TRUE;
+		}
+
 		error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+
+		if (unset_syncer) {
+			ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+			mutex_enter(&zp->z_ubc_msync_lock);
+			zp->z_syncer_active = B_FALSE;
+			cv_signal(&zp->z_ubc_msync_cv);
+			mutex_exit(&zp->z_ubc_msync_lock);
+		}
 		if (error == 0) {
 			VNOPS_STAT_BUMP(zfs_write_cluster_copy_ok);
 			if (xfer_resid != 0) {

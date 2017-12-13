@@ -208,9 +208,13 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 	ASSERT(!MUTEX_HELD(&zp->z_lock));
 	mutex_destroy(&zp->z_lock);
 	ASSERT(!MUTEX_HELD(&zp->z_ubc_msync_lock));
+	cv_broadcast(&zp->z_ubc_msync_cv);
+	mutex_enter(&zp->z_ubc_msync_lock);
 	cv_destroy(&zp->z_ubc_msync_cv);
 	ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
 	zp->z_syncer_active = B_FALSE;
+	mutex_exit(&zp->z_ubc_msync_lock);
+	mutex_destroy(&zp->z_ubc_msync_lock);
 	ASSERT(!rw_lock_held(&zp->z_map_lock));
 	rw_destroy(&zp->z_map_lock);
 	ASSERT(!rw_lock_held(&zp->z_parent_lock));
