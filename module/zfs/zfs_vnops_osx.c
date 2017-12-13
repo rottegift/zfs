@@ -3565,22 +3565,17 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 			printf("ZFS: %s:%d: (syncing out) unclean file %s size %lld\n",
 			    __func__, __LINE__, zp->z_name_cache, ubcsize);
 		}
-		off_t resid_off = 0, resid_off_all = 0;
-		int retval = 0, retval_all = 0;
+		off_t resid_off = 0;
+		int retval = 0;
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		retval = ubc_msync(vp, (off_t)0, ubcsize, &resid_off,
-		    UBC_PUSHDIRTY | UBC_SYNC);
-		retval_all = ubc_msync(vp, (off_t)0, ubcsize, &resid_off_all,
-		    UBC_PUSHALL);
+		    UBC_PUSHALL | UBC_SYNC);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
 		ASSERT3S(retval, ==, 0);
 		if (retval != 0)
 			ASSERT3S(resid_off, ==, ubcsize);
-		ASSERT3S(retval_all, ==, 0);
-		if (retval_all != 0)
-			ASSERT3S(resid_off_all, ==, ubcsize);
 		ASSERT0(ubc_pages_resident(vp));
 	}
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
