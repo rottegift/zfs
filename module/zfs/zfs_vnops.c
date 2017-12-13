@@ -2061,7 +2061,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	kern_return_t commitret =
 	    ubc_upl_commit_range(mupl,
 		0, PAGE_SIZE,
-/*		UPL_COMMIT_SET_DIRTY |*/
+		UPL_COMMIT_SET_DIRTY |
 		UPL_COMMIT_FREE_ON_EMPTY);
 	if (commitret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d ERROR %d committing UPL"
