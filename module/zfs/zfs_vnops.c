@@ -435,8 +435,12 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 		off_t resid_off = 0;
 		int sync = zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS ||
 		    (flag & (FSYNC | FDSYNC)) != 0;
-		int retval = ubc_msync(vp, 0, ubcsize, &resid_off,
-		    sync ? UBC_PUSHDIRTY | UBC_SYNC : UBC_PUSHDIRTY);
+		int msync_flags = UBC_PUSHDIRTY;
+		if (zp->z_is_mapped)
+			msync_flags = UBC_PUSHALL;
+		if (sync)
+			msync_flags |= UBC_SYNC;
+		int retval = ubc_msync(vp, 0, ubcsize, &resid_off, msync_flags);
 	        ASSERT3S(retval, ==, 0);
 		if (retval != 0)
 			ASSERT3S(resid_off, ==, ubcsize);
