@@ -1845,8 +1845,9 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	 * our range, then unless sync is disabled, push them (syncing
 	 * if we are sync always).
 	 */
-	if (zfsvfs->z_log &&
-	    (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED || (ioflag & (FSYNC | FDSYNC)))) {
+	if (zp->z_is_mapped ||
+	    (zfsvfs->z_log &&
+		(zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED || (ioflag & (FSYNC | FDSYNC))))) {
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		if (ioflag & FAPPEND) {
 			rlock = zfs_range_lock(zp, 0, alen, RL_APPEND);
@@ -1891,23 +1892,27 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 		boolean_t sync = (ioflag & (FSYNC | FDSYNC)) ||
 		    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS;
 
-		if (B_TRUE || sync || zp->z_is_mapped) {
+		if (sync || zp->z_is_mapped) {
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			ASSERT3S(zp->z_size, ==, ubcsize);
 			ASSERT3S(ubcsize, >, 0);
 			off_t resid_off = 0;
 			const off_t aend = MIN(aoff + alen, ubcsize);
 			ASSERT3S(aend, >, aoff);
+			int msync_flags = UBC_PUSHDIRTY;
+			if (zp->z_is_mapped)
+				msync_flags = UBC_PUSHALL;
+			if (sync)
+				msync_flags |= UBC_SYNC;
 			zfs_range_unlock(rlock);
-			int retval = ubc_msync(vp, aoff, aend, &resid_off,
-			    sync ? UBC_PUSHDIRTY | UBC_SYNC : UBC_PUSHDIRTY);
+			int retval = ubc_msync(vp, aoff, aend, &resid_off, msync_flags);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0) {
 				ASSERT3S(resid_off, ==, aend);
 				error = retval;
-				printf("ZFS: %s:%d: returning error %d for [%lld, %lld] file %s\n",
-				    __func__, __LINE__, error, aoff, aend, zp->z_name_cache);
+				printf("ZFS: %s:%d: returning error %d for [%lld, %lld] flags %d file %s\n",
+				    __func__, __LINE__, error, aoff, aend, msync_flags, zp->z_name_cache);
 			} else {
 				ASSERT3P(zp->z_sa_hdl, !=, NULL);
 				if (sync == B_TRUE) {
