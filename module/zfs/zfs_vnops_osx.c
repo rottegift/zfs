@@ -1873,17 +1873,40 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			 * mappedread, pagein, pageoutv2, or other caller
 			 * of ubc_setsize/vnode_pager_setsize
 			 */
-#if 0
+#if 1
 			znode_t *zp = VTOZ(ap->a_vp);
-			rl_t *rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+			rl_t *rl;
+			int i = 0;
+			const hrtime_t start_time = gethrtime();
 			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+
+			for (i = 0; i < INT32_MAX; i++) {
+				rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+				if (i > 10000) {
+					printf("ZFS: %s:%d: DEADLOCK AVOIDANCE i=%d\n",
+					    __func__, __LINE__, i);
+				}
+				if (!rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+					zfs_range_unlock(rl);
+					extern void IOSleep(unsigned milliseconds);
+					IOSleep(1);
+				} else {
+					need_release = B_TRUE;
+					zp->z_map_lock_holder = zp->z_name_cache;
+					break;
+				}
+			}
+			const hrtime_t end_time = gethrtime();
+			if (NSEC2MSEC(start_time) > 10) {
+				printf("ZFS: %s:%d: number of milliseconds looking for a lock %lld,"
+				    " iters %d\n", __func__, __LINE__,
+				    NSEC2MSEC(end_time - start_time), i);
+			}
 			int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
-			ASSERT3U(tries, <=, 2);
 			VATTR_SET_SUPPORTED(vap, va_data_size);
-			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 			zfs_range_unlock(rl);
+			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 #else
 			int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
 			VATTR_SET_SUPPORTED(vap, va_data_size);
