@@ -1808,7 +1808,7 @@ zfs_write_cluster_copy_upl(vnode_t *vp, uio_t *uio, int *xfer_resid, __unused in
 
 	ASSERT3S((upl_size % PAGE_SIZE_64), ==, 0);
 	ASSERT3S(upl_size, >, 0);
-	ASSERT3S(upl_size, <=, MAX_UPL_SIZE_BYTES/PAGE_SIZE_64);
+	ASSERT3S(upl_size, <=, MAX_UPL_SIZE_BYTES);
 
 	/*
 	 * make the UPL:
