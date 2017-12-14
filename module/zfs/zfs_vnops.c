@@ -2250,7 +2250,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		    zp->z_name_cache,
 		    recov_resid_int, ccupl_ioresid,
 		    uio_offset(uio), uio_resid(uio));
- 		/* abort the page */
+		/* abort the page */
 		int kret_abort = ubc_upl_abort(mupl, UPL_ABORT_ERROR);
 		if (kret_abort != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: error %d from ubc_upl_abort\n",
