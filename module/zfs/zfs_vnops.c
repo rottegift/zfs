@@ -1787,6 +1787,114 @@ out:
 }
 
 
+static int
+zfs_write_cluster_copy_upl(vnode_t *vp, uio_t *uio, int *xfer_resid, __unused int mark_dirty, znode_t *zp)
+{
+	/* we are called here under appropraite locks */
+	ASSERT3P(xfer_resid, !=, NULL);
+
+	/* get the ranges right */
+	const off_t uio_f_off = uio_offset(uio);
+	const off_t upl_f_off = trunc_page_64(uio_f_off);
+	const off_t offset_in_upl = uio_f_off - upl_f_off;
+	ASSERT3S(offset_in_upl, <, PAGE_SIZE_64);
+	ASSERT3S(offset_in_upl, >=, 0);
+
+	const off_t uio_resid_at_entry = uio_resid(uio);
+	const off_t uio_f_end = uio_f_off + uio_resid_at_entry;
+	const off_t upl_f_end = round_page_64(uio_f_end);
+	const off_t upl_size = upl_f_end - upl_f_off;
+
+
+	ASSERT3S((upl_size % PAGE_SIZE_64), ==, 0);
+	ASSERT3S(upl_size, >, 0);
+	ASSERT3S(upl_size, <=, MAX_UPL_SIZE_BYTES/PAGE_SIZE_64);
+
+	/*
+	 * make the UPL:
+	 * We use Copy_in_to semantics, so with no page list,
+	 * pages will not be left busy in the original object
+	 */
+	int uplflags = UPL_WILL_MODIFY | UPL_SET_LITE;
+	upl_t upl = NULL;
+
+	int uplretval = ubc_create_upl(vp, upl_f_off, upl_size, &upl, NULL, uplflags);
+
+	ASSERT3S(uplretval, ==, KERN_SUCCESS);
+	if (uplretval != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld size %lld file %s\n",
+		    __func__, __LINE__, uplretval, upl_f_off, upl_size, zp->z_name_cache);
+		return (uplretval);
+	}
+
+	/* cluster_copy_upl_data */
+	int ccupl_resid = *xfer_resid;
+	ASSERT3S(ccupl_resid, <=, uio_resid_at_entry);
+
+	EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
+        boolean_t unset_syncer = B_FALSE;
+        if (zp->z_is_mapped) {
+                mutex_enter(&zp->z_ubc_msync_lock);
+                while (zp->z_syncer_active)
+                        cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+                ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
+                zp->z_syncer_active = B_TRUE;
+                mutex_exit(&zp->z_ubc_msync_lock);
+                unset_syncer = B_TRUE;
+        }
+
+	int ccupl_retval = cluster_copy_upl_data(uio, upl, offset_in_upl, &ccupl_resid);
+
+	if (unset_syncer) {
+		ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+		mutex_enter(&zp->z_ubc_msync_lock);
+		zp->z_syncer_active = B_FALSE;
+		cv_signal(&zp->z_ubc_msync_cv);
+		mutex_exit(&zp->z_ubc_msync_lock);
+	}
+
+	if (ccupl_retval != 0) {
+		printf("ZFS: %s:%d: error %d from cluster_copy_upl_data,"
+		    " xfer_resid (in) %d, ccupl_resid (out) %d,"
+		    " uio_resid (now) %lld, uio_offset (now) %lld, "
+		    " uio_resid_at_entry %lld, file %s\n",
+		    __func__, __LINE__, ccupl_retval,
+		    *xfer_resid, ccupl_resid,
+		    uio_resid(uio), uio_offset(uio),
+		    uio_resid_at_entry, zp->z_name_cache);
+		*xfer_resid = ccupl_resid;
+		/* abort the page */
+		int kret_abort = ubc_upl_abort(upl, UPL_ABORT_ERROR);
+		if (kret_abort != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: error %d from ubc_upl_abort\n",
+			    __func__, __LINE__, kret_abort);
+			return (kret_abort);
+		}
+		return (ccupl_retval);
+	}
+
+	/* commit */
+	kern_return_t commitret = ubc_upl_commit(upl);
+
+	if (commitret != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: ERROR %d from ubc_upl_commit()"
+		    " uio_resid_at_entry %lld uio_resid now %lld"
+		    " xfer_resid %d, ccupl_resid %d"
+		    " for file %s\n",
+		    __func__, __LINE__, commitret,
+		    uio_resid_at_entry, uio_resid(uio), *xfer_resid, ccupl_resid,
+		    zp->z_name_cache);
+		*xfer_resid = ccupl_resid;
+		return (commitret);
+	}
+
+	*xfer_resid = ccupl_resid;
+
+	return (0);
+
+	/* return*/
+}
+
 typedef struct sync_range {
 	vnode_t  *vp;
 	off_t     start;
@@ -2104,9 +2212,9 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	    UPL_WILL_MODIFY);
 	ASSERT3S(muplret, ==, KERN_SUCCESS);
 	if (muplret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: filed to create UPL error %d! foff %lld file %s\n",
+		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld file %s\n",
 		    __func__, __LINE__, muplret, upl_f_off, zp->z_name_cache);
-		return(muplret);
+		return (muplret);
 	}
 	int ccupl_ioresid = recov_resid_int;
 
@@ -2142,7 +2250,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		    zp->z_name_cache,
 		    recov_resid_int, ccupl_ioresid,
 		    uio_offset(uio), uio_resid(uio));
-		/* abort the page */
+ 		/* abort the page */
 		int kret_abort = ubc_upl_abort(mupl, UPL_ABORT_ERROR);
 		if (kret_abort != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: error %d from ubc_upl_abort\n",
@@ -2303,7 +2411,12 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 			unset_syncer = B_TRUE;
 		}
 
-		error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+		EQUIV(zp->z_is_mapped, spl_ubc_is_mapped(vp, NULL));
+		if (zp->z_is_mapped || spl_ubc_is_mapped(vp, NULL)) {
+			error = zfs_write_cluster_copy_upl(vp, uio, &xfer_resid, 1, zp);
+		} else {
+			error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+		}
 
 		if (unset_syncer) {
 			ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
