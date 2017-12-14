@@ -1790,7 +1790,7 @@ out:
 static int
 zfs_write_cluster_copy_upl(vnode_t *vp, uio_t *uio, int *xfer_resid, __unused int mark_dirty, znode_t *zp)
 {
-	/* we are called here under appropraite locks */
+	/* we are called here under appropriate locks */
 	ASSERT3P(xfer_resid, !=, NULL);
 
 	/* get the ranges right */
@@ -1831,27 +1831,8 @@ zfs_write_cluster_copy_upl(vnode_t *vp, uio_t *uio, int *xfer_resid, __unused in
 	int ccupl_resid = *xfer_resid;
 	ASSERT3S(ccupl_resid, <=, uio_resid_at_entry);
 
-	EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
-        boolean_t unset_syncer = B_FALSE;
-        if (zp->z_is_mapped) {
-                mutex_enter(&zp->z_ubc_msync_lock);
-                while (zp->z_syncer_active)
-                        cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-                ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
-                zp->z_syncer_active = B_TRUE;
-                mutex_exit(&zp->z_ubc_msync_lock);
-                unset_syncer = B_TRUE;
-        }
-
+	/* our caller has already done requisite locking */
 	int ccupl_retval = cluster_copy_upl_data(uio, upl, offset_in_upl, &ccupl_resid);
-
-	if (unset_syncer) {
-		ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
-		mutex_enter(&zp->z_ubc_msync_lock);
-		zp->z_syncer_active = B_FALSE;
-		cv_signal(&zp->z_ubc_msync_cv);
-		mutex_exit(&zp->z_ubc_msync_lock);
-	}
 
 	if (ccupl_retval != 0) {
 		printf("ZFS: %s:%d: error %d from cluster_copy_upl_data,"
