@@ -3854,12 +3854,64 @@ zfs_vnop_allocate(struct vnop_allocate_args *ap)
 	};
 #endif
 {
-	dprintf("%s %llu %d %llu %llu\n", __func__, ap->a_length, ap->a_flags,
-	    (ap->a_bytesallocated ? *ap->a_bytesallocated : 0), ap->a_offset);
+	struct vnode *vp = ap->a_vp;
+	znode_t *zp = VTOZ(vp);
+	zfsvfs_t *zfsvfs;
+	int err = 0;
 
-//	*ap->a_bytesallocated = 0;
+	ASSERT3P(zp, !=, NULL);
+	if (!zp) return ENODEV;
 
-	return (0);
+	zfsvfs = zp->z_zfsvfs;
+
+	ZFS_ENTER(zfsvfs);
+
+	ASSERT(vnode_isreg(vp));
+	if (!vnode_isreg(vp)) {
+		ZFS_EXIT(zfsvfs);
+		return (ENODEV);
+	}
+
+	const off_t filesize = zp->z_size;
+	off_t wantedsize = ap->a_length;
+
+	if (ap->a_flags & ALLOCATEFROMPEOF)
+		wantedsize += filesize;
+	if (ap->a_flags & ALLOCATEFROMVOL)
+		/* blockhint = ap->a_offset / blocksize */  // yeah, no idea
+		printf("ZFS: %s:%d help, allocatefromvolume set? flags 0x%x file %s\n", __func__, __LINE__,
+		    ap->a_flags, zp->z_name_cache);
+	if (ap->a_flags & ~(ALLOCATEFROMVOL | ALLOCATEFROMPEOF))
+		printf("ZFS: %s:%d: help, flags are 0x%x (masked 0x%x) file %s\n", __func__, __LINE__,
+		    ap->a_flags, (ap->a_flags & ~(ALLOCATEFROMVOL | ALLOCATEFROMPEOF)),  zp->z_name_cache);
+
+	printf("ZFS: %s:%d: a_length %llu flags 0x%x a_bytesallocated (null? %d) %lld a_offset %lld"
+	    " filesize %lld wantedsize %lld file %s\n", __func__, __LINE__,
+	    ap->a_length, ap->a_flags, (ap->a_bytesallocated ? 0 : 1),
+	    (ap->a_bytesallocated ? *ap->a_bytesallocated : 0), ap->a_offset,
+	    filesize, wantedsize, zp->z_name_cache);
+
+	// If we are extending
+	if (wantedsize > filesize) {
+		err = zfs_freesp(zp, wantedsize, 0, FWRITE, B_TRUE);
+		// If we are truncating, Apple claims this code is never called.
+	} else if (wantedsize < filesize) {
+		printf("ZFS: %s:%d file shrinking branch taken? (wanted %lld z_size %lld) file %s\n",
+		    __func__, __LINE__, wantedsize, filesize, zp->z_name_cache);
+	} else {
+		ASSERT3S(wantedsize, ==, filesize);
+		printf("ZFS: %s:%d: wantedsize == filesize (%lld) for file %s\n", __func__, __LINE__,
+		    wantedsize, zp->z_name_cache);
+	}
+
+	if (!err) {
+		*(ap->a_bytesallocated) = wantedsize - filesize;
+	}
+
+	ZFS_EXIT(zfsvfs);
+	if (err != 0)
+		printf("ZFS: -%s:%d err %d\n", __func__, __LINE__, err);
+	return (err);
 }
 
 int
