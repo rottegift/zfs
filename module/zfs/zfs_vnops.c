@@ -728,7 +728,7 @@ drop_and_exit:
 static int
 fill_hole(vnode_t *vp, const off_t foffset,
     int page_hole_start, int page_hole_end, const char *filename,
-    boolean_t will_mod)
+    boolean_t o_will_mod)
 {
 	ASSERT3S(page_hole_end - page_hole_start, >, 0);
 	ASSERT3S(page_hole_end, >, 0);
@@ -748,16 +748,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	int err = 0;
 
-	boolean_t map_mod = B_FALSE;
-	if (spl_ubc_is_mapped(vp, NULL) || will_mod)
-		map_mod = B_TRUE;
-
-	int upl_flags = UPL_FILE_IO | UPL_SET_LITE | UPL_WILL_MODIFY | UPL_RET_ONLY_ABSENT;
-	if (!map_mod)
-		upl_flags |= UPL_RET_ONLY_ABSENT;
-
-	if (will_mod)
-		upl_flags |= UPL_WILL_MODIFY;
+	int upl_flags = UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT;
 
 	err = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl, upl_flags);
 
@@ -770,20 +761,18 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	for (int pg = 0; pg < upl_pages; pg++) {
 		if (upl_valid_page(pl, pg)) {
 			printf("ZFS: %s:%d pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
-			    " upl_flags %d, will_mod %d, map_mod %d, is_mapped %d, is_mapped_writable %d\n",
+			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, pg, upl_size, upl_start, filename,
-			    upl_flags, will_mod, map_mod, spl_ubc_is_mapped(vp, NULL),
+			    upl_flags, spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp));
-			if (!will_mod) {
-				(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
-				return (EAGAIN);
-			}
+			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
+			return (EAGAIN);
 		}
 		if (upl_dirty_page(pl, pg)) {
 			printf("ZFS: %s%d: pg %d of (upl_size %lld upl_start %lld) file %s is DIRTY"
-			    " upl_flags %d, will_mod %d, map_mod %d, is_mapped %d, is_mapped_writable %d\n",
+			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, pg, upl_size, upl_start, filename,
-			    upl_flags, will_mod, map_mod, spl_ubc_is_mapped(vp, NULL),
+			    upl_flags, spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp));
 			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
 			return (EAGAIN);
@@ -890,13 +879,10 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		}
 	}
 
-	const int commit_flags = UPL_COMMIT_CLEAR_DIRTY
-	    | UPL_COMMIT_FREE_ON_EMPTY;
-
 	ASSERT3U(upl_size, <=, INT_MAX);
 	ASSERT3U(upl_size, >, 0);
 
-	kern_return_t commit_ret = ubc_upl_commit_range(upl, 0, (int)upl_size, commit_flags);
+	kern_return_t commit_ret = ubc_upl_commit(upl);
 
 	if (commit_ret != KERN_SUCCESS) {
 		printf("ZFS: %s: error %d committing range [0, %d] (vs %lld) for file %s\n",
@@ -921,7 +907,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
  */
 
 static int
-fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_size, boolean_t will_mod)
+fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_size, boolean_t o_will_mod)
 {
 
 	/* the range should be page aligned */
@@ -982,15 +968,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags;
-		if (will_mod)
-			uplcflags = UPL_FILE_IO | UPL_SET_LITE;
-		else
-			uplcflags = UPL_FILE_IO | UPL_SET_LITE;
-
-		int map_mod = B_FALSE;
-		if (will_mod && spl_ubc_is_mapped(vp, NULL) > 0)
-			map_mod = B_TRUE;
+		int uplcflags = UPL_FILE_IO | UPL_SET_LITE;
 
 		err = ubc_create_upl(vp, cur_upl_file_offset, cur_upl_size, &upl, &pl, uplcflags);
 
@@ -1020,7 +998,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		while (page_index < upl_num_pages && err == 0) {
 			VERIFY3P(upl, !=, NULL);
 			VERIFY3P(pl, !=, NULL);
-			if (upl_valid_page(pl, page_index) && !map_mod) {
+			if (upl_valid_page(pl, page_index)) {
 				page_index++;
 				/* don't count pages not present during first pass */
 				if (i == 0) present_pages_skipped++;
@@ -1028,11 +1006,11 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			} else if (upl_dirty_page(pl, page_index)) {
 				/* don't count dirty pages during first pass either */
 				if (i == 0) present_pages_skipped++;
-				printf("ZFS: %s:%d: skipping DIRTY,!VALID (map_mod %d) page %d in range"
-				    " [off %lld len %ld] of file %s uplcflags %d will_mod %d"
-				    " mapped %d mapped_write %d\n", __func__, __LINE__, will_mod,
+				printf("ZFS: %s:%d: skipping DIRTY,!VALID page %d in range"
+				    " [off %lld len %ld] of file %s uplcflags %d"
+				    " mapped %d mapped_write %d\n", __func__, __LINE__,
 				    page_index, cur_upl_file_offset, cur_upl_size,
-				    zp->z_name_cache, uplcflags, will_mod,
+				    zp->z_name_cache, uplcflags,
 				    spl_ubc_is_mapped(vp, NULL),
 				    spl_ubc_is_mapped_writable(vp));
 				page_index++;
@@ -1043,23 +1021,9 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			for (page_index_hole_end = page_index + 1;
 			     page_index_hole_end < upl_num_pages;
 			     page_index_hole_end++) {
-				if (!map_mod) {
-					if (upl_valid_page(pl, page_index_hole_end) ||
-					    upl_dirty_page(pl, page_index_hole_end))
-						break;
-				} else {
-					if (upl_dirty_page(pl, page_index_hole_end))
-						break;
-					/* we may overwrite a precious page */
-					if (upl_valid_page(pl, page_index_hole_end))
-						printf("ZFS: %s:%d: precious page? pg_index %d in upl range"
-						    " [off %lld len %ld] of file %s uplcflags %d will_mod %d"
-						    " mapped %d mapped_write %d\n", __func__, __LINE__,
-						    page_index_hole_end, cur_upl_file_offset,
-						    cur_upl_size, zp->z_name_cache, uplcflags, will_mod,
-						    spl_ubc_is_mapped(vp, NULL),
-						    spl_ubc_is_mapped_writable(vp));
-				}
+				if (upl_valid_page(pl, page_index_hole_end) ||
+				    upl_dirty_page(pl, page_index_hole_end))
+					break;
 			}
 
 			/*
@@ -1075,7 +1039,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			 * will in any event bring them back in
 			 */
 
-			err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_REFERENCE);
+			err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 			if (err != 0) {
 				printf("ZFS: %s: upl_abort failed (err: %d, pass: %d, file: %s)\n",
 				    __func__, err, i, filename);
@@ -1093,7 +1057,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			 */
 
 			err = fill_hole(vp, cur_upl_file_offset, page_index_hole_start, page_index_hole_end,
-			    filename, will_mod);
+			    filename, o_will_mod);
 
 			if (err == EAGAIN) {
 				printf("ZFS: %s:%d: EAGAIN curoff %lld pist %d pien %d pass %d file %s\n",
@@ -1122,7 +1086,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		if (page_index >= upl_num_pages) {
 			/* no holes left */
 			if (upl != NULL) {
-				err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_REFERENCE);
+				err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 				if (err != 0) {
 					printf("ZFS: %s: no holes left, but upl_abort failed"
 					    " with error %d, file %s\n",
@@ -1360,6 +1324,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 	 * the page, putting it into the LRU queue.
 	 */
 
+#if 0
 	upl_t upl = NULL;
 	upl_page_info_t *pl = NULL;
 
@@ -1376,11 +1341,12 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 		ASSERT3P(pl, !=, NULL);
 
 		if (err == 0) {
-			err = ubc_upl_abort(upl, UPL_ABORT_REFERENCE | UPL_ABORT_FREE_ON_EMPTY);
+			err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 		}
 		upl = NULL;
 		pl = NULL;
 	}
+#endif
 
 	/* now we copy from the vnode pager object to the uio */
 
