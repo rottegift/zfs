@@ -209,8 +209,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		off_t resid_off = 0;
 		off_t ubcsize = ubc_getsize(vp);
 		int flags = UBC_PUSHDIRTY;
-		EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
-		if (zp->z_is_mapped)
+		if (spl_ubc_is_mapped(vp, NULL))
 			flags = UBC_PUSHALL | UBC_SYNC;
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;

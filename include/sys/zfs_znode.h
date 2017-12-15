@@ -225,13 +225,10 @@ typedef struct znode {
 	list_node_t	z_link_node;	/* all znodes in fs link */
 	sa_handle_t	*z_sa_hdl;	/* handle to sa data */
 	boolean_t	z_is_sa;	/* are we native sa? */
-
 	boolean_t	z_is_zvol;	/* are we used by the zvol */
-	_Atomic uint8_t	        z_is_mapped;	/* are we mmap'ed */
-	_Atomic uint8_t         z_is_mapped_writable;
 	boolean_t	z_is_ctldir;	/* are we .zfs entry */
-
 #ifdef __APPLE__
+	_Atomic uint8_t	z_mod_while_mapped;	/* while mapped, did we have a page dirtied? */
 	krwlock_t       z_map_lock;             /* page map lock */
 	const char      *z_map_lock_holder;     /* function that holds the rw_lock */
 

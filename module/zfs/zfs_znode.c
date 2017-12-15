@@ -745,8 +745,7 @@ zfs_znode_alloc(zfsvfs_t *zfsvfs, dmu_buf_t *db, int blksz,
 
 	vp = ZTOV(zp); /* Does nothing in OSX */
 
-	zp->z_is_mapped = spl_ubc_is_mapped(vp, NULL);
-	zp->z_is_mapped_writable = spl_ubc_is_mapped_writable(vp);
+	zp->z_mod_while_mapped = 0;
 
 	zfs_znode_sa_init(zfsvfs, zp, db, obj_type, hdl);
 
@@ -2053,7 +2052,7 @@ zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
 	 * Zero partial page cache entries.  This must be done under a
 	 * range lock in order to keep the ARC and page cache in sync.
 	 */
-	if (zp->z_is_mapped) {
+	if (zp->z_is_mapped) { // _LINUX
 		loff_t first_page, last_page, page_len;
 		loff_t first_page_offset, last_page_offset;
 

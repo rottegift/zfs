@@ -2617,8 +2617,7 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	boolean_t need_upgrade = B_FALSE;
 
 	if (!rw_write_held(&zp->z_map_lock)) {
-		EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
-		ASSERT(zp->z_is_mapped);
+		ASSERT(spl_ubc_is_mapped(vp, NULL));
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		VNOPS_OSX_STAT_INCR(pageoutv1_want_lock, tries);
 	} else {
@@ -3405,7 +3404,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		return (ENODEV);
 	}
 
-	if (!zp->z_is_mapped)
+	if (!spl_ubc_is_mapped(vp, NULL))
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
 
 	off_t ubcsize = ubc_getsize(vp);
@@ -3423,63 +3422,6 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
                     __func__, __LINE__, 0LL, ubcsize, ubcsize,
                     resid_msync_off, zp->z_name_cache);
         }
-
-	/*
-	 * We have been called from within ubc_map in bsd/kern/ubc_subr.c,
-	 * but the vnode is unlocked when we are in this function.
-	 *
-	 * Note: in this context we cannot be sure that ubc_is_mapped{_writable]()
-	 * give the correct responses, because the UI_ISMAPPED file is called *after*
-	 * we return.
-	 *
-	 * Outside this function we can get a reliable indicator of the
-	 * UI_ISMAPPED/UI_MAPPEDWRITE flags via
-	 * spl_ubc_is_mapped[_writable], so we use those to validate the
-	 * flags in our znode.
-	 */
-
-	int i = 0;
-	for (i = 0; i < 1000; i++) {
-		uint8_t curval = zp->z_is_mapped_writable;
-		_Bool res =
-		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped_writable,
-			&curval, ISSET(ap->a_fflags, VM_PROT_WRITE),
-			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-		if (res == TRUE)
-			break;
-		extern void IODelay(unsigned microseconds);
-		IODelay(1);
-	}
-	if (i > 0) {
-		printf("ZFS: %s:%d: spl_ubc_is_mapped_writable now %d zp->z_is_mapped_writable %d"
-		    "after %d iters file %s\n", __func__, __LINE__,
-		    spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable, i,
-		    zp->z_name_cache);
-	}
-
-	for (i = 0; i < 1000; i++) {
-		uint8_t curval = zp->z_is_mapped;
-		_Bool res =
-		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped,
-			&curval, B_TRUE,
-			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-		if (res == TRUE)
-			break;
-		extern void IODelay(unsigned microseconds);
-		IODelay(1);
-	}
-	if (i > 0) {
-		printf("ZFS: %s:%d: spl_ubc_is_mapped now %d zp->z_is_mapped %d after"
-		    " %d iters, file %s\n", __func__, __LINE__,
-		    spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped, i,
-		    zp->z_name_cache);
-	}
-
-	ASSERT(zp->z_is_mapped);
-        IMPLY(ISSET(ap->a_fflags, VM_PROT_WRITE), zp->z_is_mapped_writable);
-
-	IMPLY(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
-	IMPLY(spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable);
 
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
 	ZFS_EXIT(zfsvfs);
@@ -3523,30 +3465,15 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		return (ENODEV);
 	}
 
-	ASSERT3U((uint64_t)zp->z_is_mapped, >, 0ULL);
+	ASSERT(spl_ubc_is_mapped(vp, NULL));
 
-#if 0
-	ASSERT(!rw_write_held(&zp->z_map_lock));
-        boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-        uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-	ASSERT(rw_write_held(&zp->z_map_lock));
-#endif
 	off_t ubcsize = ubc_getsize(vp);
 	off_t resid_msync_off = ubcsize;
 	/* PUSHALL because we may have precious pages to commit */
-        int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
-#if 0
-	if (rw_lock_held(&zp->z_map_lock)) {
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-	} else {
-		const char *fn = zp->z_map_lock_holder;
-		printf("ZFS: %s:%d: someone below us released our lock! file %s curholder %s\n",
-		    __func__, __LINE__,	zp->z_name_cache,
-		    (fn == NULL) ? "(NULL fn)" : fn);
-	}
-        ASSERT3S(tries, <=, 2);
-#endif
-
+	int msyncflags = UBC_PUSHALL | UBC_SYNC;
+	if (zp->z_mod_while_mapped != 0)
+		msyncflags |= UBC_INVALIDATE;
+        int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, msyncflags);
 	if (retval_msync != 0) {
                 if (resid_msync_off != ubcsize)
                         printf("ZFS: %s:%d: msync error %d syncing %lld - %lld,"
@@ -3559,69 +3486,13 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
                     resid_msync_off, zp->z_name_cache);
         }
 
-	/*
-	 * Unlike other ports, we can use spl_ubc_is_mapped[_writable]
-	 * to give a reliable indication of whether a regular file is
-	 * mapped and mapped for write.  This bookkeeping is done in
-	 * bsd/kern/ubc.c and concerns the UI_ISMAPPED/UI_MAPPEDWRITE
-	 * flags, which are updated before VNOP_MMAP/VNOP_MNOMAP are
-	 * called.
-	 *
-	 * Unfortunately, in this function, called from ubc_unmap() in
-	 * bsd/kern/ubc_subr.c, the mapped functions will return true,
-	 * as the UI_ISMAPPED/UI_MAPPEDWRITE flags are set after we
-	 * return.  However, outside this function, we can compare the
-	 * znode flags with the results of the mapped() functions.
-	 *
-	 * A c11 atomic compare-and-swap protects us from a race with
-	 * a ubc_map (calling VNOP_MMAP); moreover, while it is not
-	 * critical that we know the mapped state of the file, it is
-	 * slightly better to error on the side of having a file that
-	 * is not mapped treated as if it is than to have a file that
-	 * is mapped being treated as if it is not.
-	 */
-
-	ASSERT(spl_ubc_is_mapped(vp, NULL));
-	int i = 0;
-	for (i = 0; i < 1000; i++) {
-		uint8_t curval = zp->z_is_mapped_writable;
-		_Bool res =
-		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped_writable,
-			&curval, B_FALSE,
-			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-		if (res == TRUE)
-			break;
-		extern void IODelay(unsigned microseconds);
-		IODelay(1);
-	}
-	if (i > 0) {
-		printf("ZFS: %s:%d: spl_ubc_is_mapped_writable now %d zp->z_is_mapped_writable %d"
-		    "after %d iters file %s\n", __func__, __LINE__,
-		    spl_ubc_is_mapped_writable(vp), zp->z_is_mapped_writable, i,
-		    zp->z_name_cache);
-	}
-
-	for (i = 0; i < 1000; i++) {
-		uint8_t curval = zp->z_is_mapped;
-		_Bool res =
-		    __c11_atomic_compare_exchange_strong(&zp->z_is_mapped,
-			&curval, B_FALSE,
-			__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-		if (res == TRUE)
-			break;
-		extern void IODelay(unsigned microseconds);
-		IODelay(1);
-	}
-	if (i > 0) {
-		printf("ZFS: %s:%d: spl_ubc_is_mapped now %d zp->z_is_mapped %d after"
-		    " %d iters, file %s\n", __func__, __LINE__,
-		    spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped, i,
-		    zp->z_name_cache);
-	}
-
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
 	ZFS_EXIT(zfsvfs);
+	if (zp->z_mod_while_mapped != 0) {
+		printf("ZFS: %s:%d: mnomap: z_mod_while_mapped set file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
+	}
 	dprintf("-vnop_mnomap\n");
 	return (0);
 }
@@ -3729,13 +3600,19 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	dprintf("+vnop_reclaim zp %p/%p type %d\n", zp, vp, vnode_vtype(vp));
 	if (!zp) goto out;
 
-	VNOPS_OSX_STAT_BUMP(reclaim_mapped);
 	off_t ubcsize = ubc_getsize(vp);
 	ASSERT3S(ubcsize, >=, 0);
+	if (zp->z_mod_while_mapped != 0) {
+		printf("ZFS: %s:%d: z_mod_while_mapped set, ubc size %lld, file %s\n",
+		    __func__, __LINE__, ubcsize, zp->z_name_cache);
+	}
+	VNOPS_OSX_STAT_BUMP(reclaim_mapped);
 	if (ubcsize == 0)
 		ASSERT0(ubc_pages_resident(vp));
 	if (ubcsize > 0) {
 		ASSERT(ubc_pages_resident(vp));
+		ASSERT0(spl_ubc_is_mapped_writable(vp));
+		ASSERT0(spl_ubc_is_mapped(vp, NULL));
 		ASSERT3S(zp->z_size, ==, ubcsize);
 		if (is_file_clean(vp, ubcsize)) {
 			    // nonzero is unclean
@@ -3746,8 +3623,10 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		int retval = 0;
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off,
-		    UBC_PUSHALL | UBC_SYNC);
+		int msync_flags = UBC_PUSHALL | UBC_SYNC;
+		if (zp->z_mod_while_mapped != 0)
+			msync_flags |= UBC_INVALIDATE;
+		retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, msync_flags);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
 		ASSERT3S(retval, ==, 0);
@@ -5940,9 +5819,6 @@ zfs_advisory_read_ext(vnode_t *vp, off_t filesize, off_t f_offset, int resid, in
         int              skip_range;
         uint32_t         max_io_size;
 
-
-//        if ( !UBCINFOEXISTS(vp))
-//                return(EINVAL);
 
 	/* should really be a bit like mappedread */
 	/* or use cluster_copy_upl_data or cluster_copy_ubc_data */
