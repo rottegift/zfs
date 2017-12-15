@@ -198,7 +198,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 	int waitfor = (*waitfor_arg & MNT_WAIT) == MNT_WAIT;
 	int err = 0;
 
-	if (vnode_isreg(vp) && ubc_pages_resident(vp) && (0 != is_file_clean(vp, ubc_getsize(vp)))) {
+	if (vnode_isreg(vp) && (waitfor ||
+		(ubc_pages_resident(vp) && (0 != is_file_clean(vp, ubc_getsize(vp)))))) {
 		znode_t *zp = VTOZ(vp);
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		ZFS_ENTER(zfsvfs);
@@ -233,6 +234,12 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			err = EAGAIN;
 		}
 		ZFS_EXIT(zfsvfs);
+		if (zp->z_syncer_active != NULL) {
+			ASSERT3P(zp->z_syncer_active, !=, curthread);
+			printf("ZFS: %s:%d: z_syncer_active isn't NULL, returning VNODE_CLAIMED"
+			    " for file %s\n", __func__, __LINE__, zp->z_name_cache);
+			return (VNODE_CLAIMED);
+		}
 	}
 	if (err != 0)
 		return (VNODE_CLAIMED);
