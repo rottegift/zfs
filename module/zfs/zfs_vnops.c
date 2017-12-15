@@ -819,7 +819,15 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	 *
 	 * note: cluster_zero will panic if we call it wrong.
 	 */
-
+#ifndef REALLY_DO_CLUSTER_ZERO_HERE
+	ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
+	if (zp->z_size < round_page_64(upl_start + upl_size)) {
+		printf("ZFS: %s:%d: file size %lld is inside upl [%lld..%lld],"
+		    " NOT ZEROING tail of block, file %s\n", __func__, __LINE__,
+		    zp->z_size, upl_start, upl_start + upl_size,
+		    zp->z_name_cache);
+	}
+#else
 	const off_t eof_byte = zp->z_size;
 	if (eof_byte < round_page_64(upl_start + upl_size)) {
 		const off_t eof_page = trunc_page_64(eof_byte) / PAGE_SIZE_64;
@@ -878,7 +886,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 			}
 		}
 	}
-
+#endif
 	ASSERT3U(upl_size, <=, INT_MAX);
 	ASSERT3U(upl_size, >, 0);
 
