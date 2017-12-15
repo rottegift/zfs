@@ -234,7 +234,7 @@ typedef struct znode {
 
 	kmutex_t        z_ubc_msync_lock;       /* lock out other msyncers */
 	kcondvar_t      z_ubc_msync_cv;         /* a condvar to sleep on */
-	boolean_t       z_syncer_active;        /* is a thread in ubc_msync now? */
+	kthread_t       *z_syncer_active;       /* is a thread in ubc_msync now? is *this* thread? */
 
 	_Atomic int32_t         z_fsync_cnt;    /* how many fsyncers are working on this file */
 	_Atomic int32_t         z_fsync_abandoned; /* how much extra we add on successful fsync */

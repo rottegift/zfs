@@ -671,12 +671,13 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 
 	boolean_t unset_syncer = B_FALSE;
 	if (spl_ubc_is_mapped(vp, NULL)) {
+		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
-		while (zp->z_syncer_active) {
+		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 		}
-		ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
-		zp->z_syncer_active = B_TRUE;
+		ASSERT3S(zp->z_syncer_active, ==, NULL);
+		zp->z_syncer_active = curthread;
 		mutex_exit(&zp->z_ubc_msync_lock);
 		unset_syncer = B_TRUE;
 	}
@@ -684,9 +685,9 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 0);
 
 	if (unset_syncer) {
-		ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+		ASSERT3S(zp->z_syncer_active, ==, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
-		zp->z_syncer_active = B_FALSE;
+		zp->z_syncer_active = NULL;
 		cv_signal(&zp->z_ubc_msync_cv);
 		mutex_exit(&zp->z_ubc_msync_lock);
 	}
@@ -860,10 +861,11 @@ fill_hole(vnode_t *vp, const off_t foffset,
 				boolean_t unset_syncer = B_FALSE;
 				if (spl_ubc_is_mapped(vp, NULL)) {
 					mutex_enter(&zp->z_ubc_msync_lock);
-					while (zp->z_syncer_active)
+					ASSERT3P(zp->z_syncer_active, !=, curthread);
+					while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
 						cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-					ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
-					zp->z_syncer_active = B_TRUE;
+					ASSERT3S(zp->z_syncer_active, ==, NULL);
+					zp->z_syncer_active = curthread;
 					mutex_exit(&zp->z_ubc_msync_lock);
 					unset_syncer = B_TRUE;
 				}
@@ -871,9 +873,9 @@ fill_hole(vnode_t *vp, const off_t foffset,
 				cluster_zero(upl, start_zerofill_file_byte, num_zerofill_bytes, NULL);
 
 				if (unset_syncer) {
-					ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+					ASSERT3S(zp->z_syncer_active, ==, curthread);
 					mutex_enter(&zp->z_ubc_msync_lock);
-					zp->z_syncer_active = B_FALSE;
+					zp->z_syncer_active = NULL;
 					cv_signal(&zp->z_ubc_msync_cv);
 					mutex_exit(&zp->z_ubc_msync_lock);
 				}
@@ -1386,11 +1388,12 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 	if (err == 0) {
 		boolean_t unset_syncer = B_FALSE;
 		if (spl_ubc_is_mapped(vp, NULL)) {
+			ASSERT3P(zp->z_syncer_active, !=, curthread);
 			mutex_enter(&zp->z_ubc_msync_lock);
-			while (zp->z_syncer_active)
+			while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
 				cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-			ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
-			zp->z_syncer_active = B_TRUE;
+			ASSERT3S(zp->z_syncer_active, ==, NULL);
+			zp->z_syncer_active = curthread;
 			mutex_exit(&zp->z_ubc_msync_lock);
 			unset_syncer = B_TRUE;
 		}
@@ -1398,9 +1401,9 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 		err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
 
 		if (unset_syncer) {
-			ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+			ASSERT3P(zp->z_syncer_active, ==, curthread);
 			mutex_enter(&zp->z_ubc_msync_lock);
-			zp->z_syncer_active = B_FALSE;
+			zp->z_syncer_active = NULL;
 			cv_signal(&zp->z_ubc_msync_cv);
 			mutex_exit(&zp->z_ubc_msync_lock);
 		}
@@ -2177,10 +2180,10 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	boolean_t unset_syncer = B_FALSE;
 	if (spl_ubc_is_mapped(vp, NULL)) {
 		mutex_enter(&zp->z_ubc_msync_lock);
-		while (zp->z_syncer_active)
+		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-		ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
-		zp->z_syncer_active = B_TRUE;
+		ASSERT3S(zp->z_syncer_active, ==, NULL);
+		zp->z_syncer_active = curthread;
 		mutex_exit(&zp->z_ubc_msync_lock);
 		unset_syncer = B_TRUE;
 	}
@@ -2189,9 +2192,9 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	    recov_off_page_offset, &ccupl_ioresid);
 
 	if (unset_syncer) {
-		ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+		ASSERT3S(zp->z_syncer_active, ==, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
-		zp->z_syncer_active = B_FALSE;
+		zp->z_syncer_active = NULL;
 		cv_signal(&zp->z_ubc_msync_cv);
 		mutex_exit(&zp->z_ubc_msync_lock);
 	}
@@ -2356,11 +2359,12 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 
 		boolean_t unset_syncer = B_FALSE;
 		if (spl_ubc_is_mapped(vp, NULL)) {
+			ASSERT3P(zp->z_syncer_active, !=, curthread);
 			mutex_enter(&zp->z_ubc_msync_lock);
-			while (zp->z_syncer_active)
+			while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
 				cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-			ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
-			zp->z_syncer_active = B_TRUE;
+			ASSERT3S(zp->z_syncer_active, ==, NULL);
+			zp->z_syncer_active = curthread;
 			mutex_exit(&zp->z_ubc_msync_lock);
 			unset_syncer = B_TRUE;
 		}
@@ -2374,9 +2378,9 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		}
 
 		if (unset_syncer) {
-			ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
+			ASSERT3S(zp->z_syncer_active, ==, curthread);
 			mutex_enter(&zp->z_ubc_msync_lock);
-			zp->z_syncer_active = B_FALSE;
+			zp->z_syncer_active = NULL;
 			cv_signal(&zp->z_ubc_msync_cv);
 			mutex_exit(&zp->z_ubc_msync_lock);
 		}

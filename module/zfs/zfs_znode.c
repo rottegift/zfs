@@ -172,7 +172,7 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	mutex_init(&zp->z_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&zp->z_ubc_msync_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&zp->z_ubc_msync_cv, NULL, CV_DEFAULT, NULL);
-	zp->z_syncer_active = B_FALSE;
+	zp->z_syncer_active = NULL;
 	rw_init(&zp->z_map_lock, NULL, RW_DEFAULT, NULL);
 	rw_init(&zp->z_parent_lock, NULL, RW_DEFAULT, NULL);
 	rw_init(&zp->z_name_lock, NULL, RW_DEFAULT, NULL);
@@ -211,8 +211,9 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 	cv_broadcast(&zp->z_ubc_msync_cv);
 	mutex_enter(&zp->z_ubc_msync_lock);
 	cv_destroy(&zp->z_ubc_msync_cv);
-	ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
-	zp->z_syncer_active = B_FALSE;
+	ASSERT3S(zp->z_syncer_active, ==, NULL);
+	ASSERT3S(zp->z_syncer_active, !=, curthread);
+	zp->z_syncer_active = NULL;
 	mutex_exit(&zp->z_ubc_msync_lock);
 	mutex_destroy(&zp->z_ubc_msync_lock);
 	ASSERT(!rw_lock_held(&zp->z_map_lock));

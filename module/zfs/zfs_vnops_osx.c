@@ -2753,13 +2753,21 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	const hrtime_t entry_time = gethrtime();
 
+	/*
+	 * watch out for reentrancy!
+	 */
+
+	ASSERT3P(zp->z_syncer_active, !=, curthread);
+
 	mutex_enter(&zp->z_ubc_msync_lock);
 
-	while (zp->z_syncer_active)
+	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+	}
 
-	ASSERT3S(zp->z_syncer_active, ==, B_FALSE);
-	zp->z_syncer_active = B_TRUE;
+	ASSERT3P(zp->z_syncer_active, ==, NULL);
+	zp->z_syncer_active = curthread;
 
 	mutex_exit(&zp->z_ubc_msync_lock);
 
@@ -2767,8 +2775,8 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	mutex_enter(&zp->z_ubc_msync_lock);
 
-	ASSERT3S(zp->z_syncer_active, ==, B_TRUE);
-	zp->z_syncer_active = B_FALSE;
+	ASSERT3S(zp->z_syncer_active, ==, curthread);
+	zp->z_syncer_active = NULL;
 
 	cv_signal(&zp->z_ubc_msync_cv);
 
