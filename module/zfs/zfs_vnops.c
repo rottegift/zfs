@@ -2007,7 +2007,6 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	if (zp->z_is_mapped ||
 	    (zfsvfs->z_log &&
 		(zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED || (ioflag & (FSYNC | FDSYNC))))) {
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		if (ioflag & FAPPEND) {
 			rlock = zfs_range_lock(zp, 0, alen, RL_APPEND);
 			woff = rlock->r_off;
@@ -2053,7 +2052,6 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 
 		EQUIV(spl_ubc_is_mapped(vp, NULL), zp->z_is_mapped);
 		if (sync || zp->z_is_mapped) {
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			ASSERT3S(zp->z_size, ==, ubcsize);
 			ASSERT3S(ubcsize, >, 0);
 			off_t resid_off = 0;
@@ -2067,7 +2065,6 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				msync_flags |= UBC_SYNC;
 			zfs_range_unlock(rlock);
 			int retval = zfs_ubc_msync(vp, aoff, aend, &resid_off, msync_flags);
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0) {
 				ASSERT3S(resid_off, ==, aend);
@@ -2082,7 +2079,6 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				}
 				VNOPS_STAT_BUMP(zfs_write_clean_on_write);
 			}
-			ASSERT3S(tries, <=, 2);
 		} else {
 			zfs_range_unlock(rlock);
 		}
