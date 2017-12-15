@@ -799,7 +799,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		return (err);
 	}
 
-	if (spl_ubc_is_mapped(vp, NULL) || zp->z_mod_while_mapped != 1)
+	if (spl_ubc_is_mapped(vp, NULL))
 		zp->z_mod_while_mapped = 1;
 
 	err = dmu_read_dbuf(sa_get_db(zp->z_sa_hdl),
