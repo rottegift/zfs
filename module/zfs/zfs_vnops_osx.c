@@ -1068,7 +1068,7 @@ zfs_vnop_write(struct vnop_write_args *ap)
 #endif
 {
 	int ioflag = zfs_ioflags(ap->a_ioflag);
-	int error;
+	int error = 0;
 
 	DECLARE_CRED_AND_CONTEXT(ap);
 
