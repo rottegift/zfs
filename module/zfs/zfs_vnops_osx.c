@@ -2208,6 +2208,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	boolean_t need_rl_unlock;
 	boolean_t need_z_lock;
 	rl_t *rl;
+
 	if (rw_write_held(&zp->z_map_lock)) {
 		need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
@@ -2222,7 +2223,42 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
 	if (need_z_lock) {
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		hrtime_t print_time = gethrtime() + SEC2NSEC(1);
+		int secs = 0;
+		extern void IOSleep(unsigned milliseconds); // yields thread
+		extern void IODelay(unsigned microseconds); // x86_64 rep nop
+		ASSERT3S(need_rl_unlock, ==, B_TRUE);
+		uint64_t tries = 0;
+		while(!rw_write_held(&zp->z_map_lock)){
+			tries++;
+			if (secs == 0)
+				secs = 1;
+			if (rw_tryenter(&zp->z_map_lock, RW_WRITER))
+				break;
+			// couldn't get it, maybe drop the range lock
+			if (rl->r_write_wanted || rl->r_read_wanted) {
+				printf("ZFS: %s:%d range lock contended, dropping it for [%lld, %ld] for file %s\n",
+				    __func__, __LINE__, ap->a_f_offset, ap->a_size, zp->z_name_cache);
+				zfs_range_unlock(rl);
+				IOSleep(1); // we hold no locks, so let work be done
+				rl = zfs_range_lock(zp, off, len, RL_WRITER);
+			}
+			hrtime_t cur_time = gethrtime();
+			if (cur_time > print_time) {
+				secs++;
+				printf("ZFS: %s:%d: looping for z_map_lock for %d sec"
+				    " (held by %s) file %s\n", __func__, __LINE__, secs,
+				    (zp->z_map_lock_holder != NULL)
+				    ? zp->z_map_lock_holder
+				    : "(NULL)",
+				    zp->z_name_cache);
+				print_time = cur_time + SEC2NSEC(1);
+			}
+			IODelay(1);
+		}
+		ASSERT(rw_write_held(&zp->z_map_lock));
+		need_release = B_TRUE;
+		zp->z_map_lock_holder = __func__;
 		VNOPS_OSX_STAT_INCR(pagein_want_lock, tries);
 	}
 
