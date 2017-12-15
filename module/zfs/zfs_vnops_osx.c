@@ -1873,7 +1873,7 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			 * mappedread, pagein, pageoutv2, or other caller
 			 * of ubc_setsize/vnode_pager_setsize
 			 */
-#if 1
+
 			znode_t *zp = VTOZ(ap->a_vp);
 			rl_t *rl;
 			int i = 0;
@@ -1902,16 +1902,14 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 				    " iters %d\n", __func__, __LINE__,
 				    NSEC2MSEC(end_time - start_time), i);
 			}
+			if (spl_ubc_is_mapped(ZTOV(zp), NULL)) {
+				ASSERT3S(vap->va_size, >=, ubc_getsize(ZTOV(zp)));
+			}
 			int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			VATTR_SET_SUPPORTED(vap, va_data_size);
 			zfs_range_unlock(rl);
 			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
-#else
-			int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
-			VATTR_SET_SUPPORTED(vap, va_data_size);
-			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
-#endif
 		}
 		if (VATTR_IS_ACTIVE(vap, va_mode))
 			VATTR_SET_SUPPORTED(vap, va_mode);
@@ -2166,6 +2164,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	file_sz = zp->z_size;
 	ASSERT3S(file_sz, ==, ubc_getsize(vp));
+	const off_t ubcsize_at_entry = ubc_getsize(vp);
 
 	ASSERT(vn_has_cached_data(vp));
 	if (!vn_has_cached_data(vp)) {
@@ -2358,6 +2357,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
 	if (need_rl_unlock) { zfs_range_unlock(rl); }
+	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 	ZFS_EXIT(zfsvfs);
 	if (error) {
 		printf("%s:%d returning error %d for (%lld, %ld) in file %s\n", __func__, __LINE__,
@@ -2892,6 +2892,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * upl_abort. So use the non-error version.
 	 */
 	ZFS_ENTER_NOERROR(zfsvfs);
+	const off_t ubcsize_at_entry = ubc_getsize(vp);
 	if (zfsvfs->z_unmounted) {
 		printf("ZFS: vnop_pageoutv2: abort on z_unmounted\n");
 		error = EIO;
@@ -3315,6 +3316,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
 	}
 
+	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 	ZFS_EXIT(zfsvfs);
 	if (error)
 		dprintf("ZFS: pageoutv2 failed %d\n", error);
@@ -3332,6 +3334,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	dprintf("ZFS: pageoutv2 aborted %d\n", error);
 	//VERIFY(ubc_create_upl(vp, off, len, &upl, &pl, flags) == 0);
 	//ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+
+	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 
 	if (zfsvfs)
 		ZFS_EXIT(zfsvfs);

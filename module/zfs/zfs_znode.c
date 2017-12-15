@@ -2192,9 +2192,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		 * which causes it to cluster_zero out junk
 		 * as necessary
 		 */
+		ASSERT0(spl_ubc_is_mapped(vp, NULL));
+		ASSERT3S(end, >=, oldsize);
+		ASSERT3S(end, >=, zp->z_size);
+		ASSERT3S(oldsize, >=, ubc_getsize(vp));
+		ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 		int orig_setsize_retval = ubc_setsize(vp, oldsize);
 		ASSERT3S(orig_setsize_retval, !=, 0); // ubc_setsize returns true for success
-		int setsize_retval = vnode_pager_setsize(vp, end);
+		int setsize_retval = ubc_setsize(vp, end);
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
 	}
 

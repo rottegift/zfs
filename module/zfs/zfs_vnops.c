@@ -813,13 +813,6 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		return (err);
 	}
 
-	/*
-	 * dmu_read_buf might not fill the whole of vaddr,
-	 * in particular when EOF is somewhere in vaddr itself.
-	 *
-	 * note: cluster_zero will panic if we call it wrong.
-	 */
-#ifndef REALLY_DO_CLUSTER_ZERO_HERE
 	ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 	if (zp->z_size < round_page_64(upl_start + upl_size)) {
 		dprintf("ZFS: %s:%d: file size %lld is inside upl [%lld..%lld],"
@@ -827,66 +820,6 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		    zp->z_size, upl_start, upl_start + upl_size,
 		    zp->z_name_cache);
 	}
-#else
-	const off_t eof_byte = zp->z_size;
-	if (eof_byte < round_page_64(upl_start + upl_size)) {
-		const off_t eof_page = trunc_page_64(eof_byte) / PAGE_SIZE_64;
-		const off_t upl_first_page = trunc_page_64(upl_start) / PAGE_SIZE_64; // absolute-in-file
-		const off_t upl_page_range = page_hole_end - page_hole_start; // relative-to-upl
-		const off_t upl_last_page = upl_first_page + upl_page_range; // absolute-in-file
-
-		ASSERT3U(upl_last_page, >=, eof_page);
-		if (upl_last_page == eof_page && upl_first_page <= eof_page &&
-		    (eof_byte & PAGE_MASK_64) != 0) {
-			dprintf("ZFS: %s:%d page range [%lld - %lld] contains eof page %lld (eof byte %lld)\n",
-			    __func__, __LINE__,
-			    upl_first_page, upl_last_page, eof_page, eof_byte);
-
-			const off_t start_zerofill_file_byte = eof_byte;
-			const off_t num_zerofill_bytes = PAGE_SIZE_64 - (eof_byte & PAGE_MASK_64);
-
-			ASSERT3S(start_zerofill_file_byte + num_zerofill_bytes, ==, upl_start+upl_size);
-
-			if (start_zerofill_file_byte + num_zerofill_bytes == upl_start+upl_size) {
-				printf("ZFS: %s:%d zeroing in eof page %lld (byte %lld) file offset %lld"
-				    " from byte %lld-%lld (size %lld) file %s\n",
-				    __func__, __LINE__, eof_page, eof_page * PAGE_SIZE_64,
-				    upl_start,
-				    start_zerofill_file_byte, start_zerofill_file_byte + num_zerofill_bytes,
-				    num_zerofill_bytes, filename);
-
-				boolean_t unset_syncer = B_FALSE;
-				if (spl_ubc_is_mapped(vp, NULL)) {
-					mutex_enter(&zp->z_ubc_msync_lock);
-					ASSERT3P(zp->z_syncer_active, !=, curthread);
-					while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
-						cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-					ASSERT3S(zp->z_syncer_active, ==, NULL);
-					zp->z_syncer_active = curthread;
-					mutex_exit(&zp->z_ubc_msync_lock);
-					unset_syncer = B_TRUE;
-				}
-
-				cluster_zero(upl, start_zerofill_file_byte, num_zerofill_bytes, NULL);
-
-				if (unset_syncer) {
-					ASSERT3S(zp->z_syncer_active, ==, curthread);
-					mutex_enter(&zp->z_ubc_msync_lock);
-					zp->z_syncer_active = NULL;
-					cv_signal(&zp->z_ubc_msync_cv);
-					mutex_exit(&zp->z_ubc_msync_lock);
-				}
-
-			} else {
-				printf("ZFS: %s:%d WARNING cluster_zero(upl, offs %lld, siz %lld, NULL)"
-				    " SKIPPED,"
-				    " eof %lld upl_start %lld upl_size %lld file %s\n",
-				    __func__, __LINE__, start_zerofill_file_byte, num_zerofill_bytes,
-				    eof_byte, upl_start, upl_size, filename);
-			}
-		}
-	}
-#endif
 	ASSERT3U(upl_size, <=, INT_MAX);
 	ASSERT3U(upl_size, >, 0);
 
@@ -2226,6 +2159,8 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 	ASSERT3S(start_resid, <=, INT_MAX);
 	ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 
+	const off_t ubcsize_at_entry = ubc_getsize(vp);
+
 	const off_t loop_start_off = uio_offset(uio);
 	off_t sync_resid = start_resid;
 
@@ -2256,12 +2191,10 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		ASSERT3S(this_chunk, >, 0);
 
 		/* increase ubc size if we are growing the file */
-#ifdef REALLY_DO_SETSIZE_TRIMMING_HERE
-		const off_t ubcsize_at_start_of_pass = ubc_getsize(vp);
-#endif
 		end_size = MAX(ubc_getsize(vp), this_off + this_chunk);
 		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 		if (end_size > ubc_getsize(vp)) {
+			ASSERT3S(end_size, >=, ubcsize_at_entry);
 			int setsize_retval = ubc_setsize(vp, end_size);
 			if (setsize_retval == 0) {
 				// ubc_setsize returns TRUE on success
@@ -2286,43 +2219,16 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 				    end_size, zp->z_size, prev_size);
 			}
 		}
-#ifdef REALLY_DO_SETSIZE_TRIMMING_HERE
-		/*
-		 * Let ubc_setsize zero-fill the trailling part of the file
-		 * if necessary, and also maybe cause a page-in-and-flush
-		 * of the page containing ubcsize_at_start_of_pass.
-		 */
-		if (end_size > ubcsize_at_start_of_pass) {
-			ASSERT3S(ubc_getsize(vp), ==, end_size);
-			int setsize_shrink_retval = ubc_setsize(vp, ubcsize_at_start_of_pass);
-			if (setsize_shrink_retval == 0) {
-				// ubc_setsize returns TRUE on success
-				printf("ZFS: %s:%d: ubc_setsize(vp, %lld)"
-				    " shrinking from %lld"
-				    " failed for file %s\n",
-				    __func__, __LINE__, end_size,
-				    ubcsize_at_start_of_pass,
-				    zp->z_name_cache);
-			}
-			int setsize_restore_retval = ubc_setsize(vp, end_size);
-			if (setsize_restore_retval == 0) {
-				// ubc_setsize returns TRUE on success
-				printf("ZFS: %s:%d: ubc_setsize(vp, %lld)"
-				    " shrinking from %lld"
-				    " failed for file %s\n",
-				    __func__, __LINE__, end_size,
-				    ubcsize_at_start_of_pass,
-				    zp->z_name_cache);
-			}
-		}
-#endif
+
 		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 		ASSERT3S(ubc_getsize(vp), ==, end_size);
 
 		ASSERT3S(uio_offset(uio), ==, this_off);
 		ASSERT3S(ubc_getsize(vp), >, uio_offset(uio));
 		ASSERT3S(ubc_getsize(vp), >=, uio_offset(uio) + this_chunk);
-		uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
+		ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
+
+		const uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
 
 		/* fill any holes */
 		int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, B_FALSE);
@@ -2581,6 +2487,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 					    __func__, __LINE__, size_update_ctr,
 					    end_size, zp->z_size);
 				}
+				ASSERT3S(zp->z_size, >=, ubcsize_at_entry);
 				int setsize_retval = ubc_setsize(vp, zp->z_size);
 				ASSERT3S(setsize_retval, !=, 0);
 			}
@@ -2696,6 +2603,8 @@ skip_sync:
 		    woff, woff+sync_resid, zp->z_name_cache);
 	}
 #endif
+	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
+
 	ZFS_EXIT(zfsvfs);
 	/*
 	 * strictly speaking, in the do_sync == TRUE case we
@@ -2779,6 +2688,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	ZFS_VERIFY_ZP(zp);
 
 	*file_name = zp->z_name_cache;
+	const off_t ubcsize_at_entry = ubc_getsize(vp);
 
 	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_MTIME(zfsvfs), NULL, &mtime, 16);
 	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_CTIME(zfsvfs), NULL, &ctime, 16);
@@ -3286,6 +3196,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
                         uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+			ASSERT3S(zp->z_size, >=, ubc_getsize(vp));
+			ASSERT3S(zp->z_size, >=, ubcsize_at_entry);
 			int setsize_retval = ubc_setsize(vp, zp->z_size);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3S(tries, <=, 2);
@@ -3431,6 +3343,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
         if (tx_bytes != 0) {
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		ASSERT3S(zp->z_size, >=, ubc_getsize(vp));
+		ASSERT3S(zp->z_size, >=, ubcsize_at_entry);
                 int setsize_retval = ubc_setsize(vp, zp->z_size);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
@@ -4415,7 +4329,7 @@ top:
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		int setsize_retval;
 		if (ubc_getsize(vp) != 0)
-			setsize_retval = vnode_pager_setsize(vp, 0);
+			setsize_retval = ubc_setsize(vp, 0);
 		else
 			setsize_retval = 1;
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
@@ -6041,15 +5955,7 @@ top:
                 if (err) {
 			goto out3;
 		}
-#if 0
-                /* Mac OS X: pageout requires that the UBC file size to be current. */
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-                int setsize_retval = ubc_setsize(vp, vap->va_data_size);
-		z_map_drop_lock(zp, &need_release, &need_upgrade, __func__);
-		ASSERT3S(tries, <=, 2);
-		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
-#endif
+
                 VATTR_SET_SUPPORTED(vap, va_data_size);
         }
 
