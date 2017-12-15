@@ -3453,8 +3453,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 
 	off_t ubcsize = ubc_getsize(vp);
         off_t resid_msync_off = ubcsize;
-        /* PUSHALL because we may have precious pages to commit */
-        int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
+        int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHDIRTY | UBC_SYNC);
 	if (retval_msync != 0) {
                 if (resid_msync_off != ubcsize)
                         printf("ZFS: %s:%d: msync error %d syncing %lld - %lld,"
@@ -3513,10 +3512,8 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 
 	off_t ubcsize = ubc_getsize(vp);
 	off_t resid_msync_off = ubcsize;
-	/* PUSHALL because we may have precious pages to commit */
-	int msyncflags = UBC_PUSHALL | UBC_SYNC;
-	if (zp->z_mod_while_mapped != 0)
-		msyncflags |= UBC_INVALIDATE;
+	/* PUSHDIRTY because we may have precious pages to commit */
+	int msyncflags = UBC_PUSHDIRTY | UBC_SYNC;
         int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, msyncflags);
 	if (retval_msync != 0) {
                 if (resid_msync_off != ubcsize)
@@ -3667,9 +3664,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		int retval = 0;
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		int msync_flags = UBC_PUSHALL | UBC_SYNC;
-		if (zp->z_mod_while_mapped != 0)
-			msync_flags |= UBC_INVALIDATE;
+		int msync_flags = UBC_PUSHDIRTY | UBC_SYNC;
 		retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, msync_flags);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
