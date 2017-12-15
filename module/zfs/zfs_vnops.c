@@ -822,7 +822,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 #ifndef REALLY_DO_CLUSTER_ZERO_HERE
 	ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 	if (zp->z_size < round_page_64(upl_start + upl_size)) {
-		printf("ZFS: %s:%d: file size %lld is inside upl [%lld..%lld],"
+		dprintf("ZFS: %s:%d: file size %lld is inside upl [%lld..%lld],"
 		    " NOT ZEROING tail of block, file %s\n", __func__, __LINE__,
 		    zp->z_size, upl_start, upl_start + upl_size,
 		    zp->z_name_cache);
@@ -2256,7 +2256,9 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		ASSERT3S(this_chunk, >, 0);
 
 		/* increase ubc size if we are growing the file */
+#ifdef REALLY_DO_SETSIZE_TRIMMING_HERE
 		const off_t ubcsize_at_start_of_pass = ubc_getsize(vp);
+#endif
 		end_size = MAX(ubc_getsize(vp), this_off + this_chunk);
 		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 		if (end_size > ubc_getsize(vp)) {
@@ -2284,6 +2286,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 				    end_size, zp->z_size, prev_size);
 			}
 		}
+#ifdef REALLY_DO_SETSIZE_TRIMMING_HERE
 		/*
 		 * Let ubc_setsize zero-fill the trailling part of the file
 		 * if necessary, and also maybe cause a page-in-and-flush
@@ -2312,7 +2315,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 				    zp->z_name_cache);
 			}
 		}
-
+#endif
 		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 		ASSERT3S(ubc_getsize(vp), ==, end_size);
 
