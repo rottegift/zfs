@@ -3881,9 +3881,10 @@ zfs_vnop_allocate(struct vnop_allocate_args *ap)
 		/* blockhint = ap->a_offset / blocksize */  // yeah, no idea
 		printf("ZFS: %s:%d help, allocatefromvolume set? flags 0x%x file %s\n", __func__, __LINE__,
 		    ap->a_flags, zp->z_name_cache);
-	if (ap->a_flags & ~(ALLOCATEFROMVOL | ALLOCATEFROMPEOF))
+	if (ap->a_flags & ~(ALLOCATEFROMVOL | ALLOCATEFROMPEOF | PREALLOCATE))
 		printf("ZFS: %s:%d: help, flags are 0x%x (masked 0x%x) file %s\n", __func__, __LINE__,
-		    ap->a_flags, (ap->a_flags & ~(ALLOCATEFROMVOL | ALLOCATEFROMPEOF)),  zp->z_name_cache);
+		    ap->a_flags, (ap->a_flags & ~(ALLOCATEFROMVOL | ALLOCATEFROMPEOF | PREALLOCATE)),
+		    zp->z_name_cache);
 
 	printf("ZFS: %s:%d: a_length %llu flags 0x%x a_bytesallocated (null? %d) %lld a_offset %lld"
 	    " filesize %lld wantedsize %lld file %s\n", __func__, __LINE__,
