@@ -2812,6 +2812,11 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 			    start, end, (resid != NULL) ? *resid : -1LL, is_file_clean(vp, ubc_getsize(vp)),
 			    flags);
 			flags &= ~(ZFS_UBC_FORCE_MSYNC);
+		} else {
+			if (resid != NULL)
+				*resid = start;
+			ZFS_EXIT(zfsvfs);
+			return (0);
 		}
 	}
 
