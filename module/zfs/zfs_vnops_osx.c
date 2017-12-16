@@ -2792,6 +2792,24 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	ASSERT3P(zp->z_syncer_active, !=, curthread);
 
+	/* do not synchronize mapped files */
+	if (spl_ubc_is_mapped(vp, NULL)) {
+		if (flags & ZFS_UBC_FORCE_MSYNC) {
+			printf("ZFS: %s:%d: ZFS_UBC_FORCE_MSYNC file %s [%lld..%lld] resid %lld\n",
+			    __func__, __LINE__, zp->z_name_cache,
+			    start, end, (resid != NULL) ? *resid : -1LL);
+			flags &= ~(ZFS_UBC_FORCE_MSYNC);
+		} else {
+			printf("ZFS: %s:%d: skipping mapped file %s [%lld..%lld] resid %lld\n",
+			    __func__, __LINE__, zp->z_name_cache,
+			    start, end,  (resid != NULL) ? *resid : -1LL);
+			if (resid != NULL)
+				*resid = start;
+			ZFS_EXIT(zfsvfs);
+			return (0);
+		}
+	}
+
 	mutex_enter(&zp->z_ubc_msync_lock);
 
 	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
@@ -3665,7 +3683,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		int retval = 0;
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		int msync_flags = UBC_PUSHDIRTY | UBC_SYNC;
+		int msync_flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
 		retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, msync_flags);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
