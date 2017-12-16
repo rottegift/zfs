@@ -5438,6 +5438,7 @@ zfs_vnop_advlock(struct vnop_advlock_args *ap)
 	}
 #endif
 
+#if 0
 	struct vnode *vp = ap->a_vp;
 	znode_t *zp = VTOZ(ap->a_vp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
@@ -5455,6 +5456,7 @@ zfs_vnop_advlock(struct vnop_advlock_args *ap)
 	}
 
 	ZFS_EXIT(zfsvfs);
+#endif
 
 	return(spl_lf_advlock(ap));
 }
