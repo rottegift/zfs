@@ -236,12 +236,6 @@ typedef struct znode {
 	kcondvar_t      z_ubc_msync_cv;         /* a condvar to sleep on */
 	kthread_t       *z_syncer_active;       /* is a thread in ubc_msync now? is *this* thread? */
 
-#ifdef COMPLICATED_FSYNC
-	_Atomic int32_t         z_fsync_cnt;    /* how many fsyncers are working on this file */
-	_Atomic int32_t         z_fsync_abandoned; /* how much extra we add on successful fsync */
-	_Atomic uint64_t        z_now_serving;  /* who are we serving now? */
-	_Atomic uint64_t        z_next_ticket;  /* the number waiting in the ticket machine */
-#endif
 	_Atomic hrtime_t        z_mr_sync;      /* most recent sync */
 
 	list_node_t	z_link_reclaim_node;	/* all reclaim znodes in fs link */

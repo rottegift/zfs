@@ -190,11 +190,6 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	zp->z_fastpath = B_FALSE;
 
 	zp->z_map_lock_holder = NULL;
-#ifdef COMPLICATED_FSYNC
-	zp->z_fsync_cnt = 0;
-	zp->z_next_ticket = 0ULL;
-	zp->z_now_serving = 1ULL; /* yes, 1 (one) as the early boundary */
-#endif
 	zp->z_mr_sync = (hrtime_t)0;
 	return (0);
 }
@@ -239,9 +234,6 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 
 	ASSERT3P(zp->z_map_lock_holder, ==, NULL);
 	ASSERT3S(zp->z_sync_cnt, ==, 0);
-#ifdef COMPLICATED_FSYNC
-	ASSERT3U(zp->z_fsync_cnt, ==, 0);
-#endif
 }
 
 #ifdef sun
