@@ -1508,8 +1508,6 @@ dprintf("%s\n", __func__);
 
 	/* HFS sets this prior to mounting */
 	vfs_setflags(vfsp, (uint64_t)((unsigned int)MNT_DOVOLFS));
-	/* Advisory locking should be handled at the VFS layer */
-	vfs_setlocklocal(vfsp);
 
 	/*
 	 * Record the mount time (for Spotlight)

@@ -5419,6 +5419,46 @@ zfs_isdir()
 }
 
 
+/*
+ * Advisory locking shim: hand most of the work back to (spl_)lf_advlock()
+ */
+
+int
+zfs_vnop_advlock(struct vnop_advlock_args *ap)
+{
+#if 0
+	struct vnop_advlock_args {
+                struct vnodeop_desc *a_desc;
+                vnode_t a_vp;
+                caddr_t a_id;
+                int a_op;
+                struct flock *a_fl;
+                int a_flags;
+                vfs_context_t a_context;
+	}
+#endif
+
+	struct vnode *vp = ap->a_vp;
+	znode_t *zp = VTOZ(ap->a_vp);
+	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+
+	ZFS_ENTER(zfsvfs);
+	ZFS_VERIFY_ZP(zp);
+
+	if (ap->a_op == F_SETLK ||  ap->a_op == F_SETLKW) {
+		if (spl_ubc_is_mapped(vp, NULL)) {
+			printf("ZFS: %s:%d: F_SETLK rejected for mapped file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			ZFS_EXIT(zfsvfs);
+			return (EAGAIN);
+		}
+	}
+
+	ZFS_EXIT(zfsvfs);
+
+	return(spl_lf_advlock(ap));
+}
+
 #define	VOPFUNC int (*)(void *)
 
 /* Directory vnode operations template */
@@ -5616,7 +5656,7 @@ struct vnodeopv_entry_desc zfs_fifonodeops_template[] = {
 	{ &vnop_reclaim_desc, (VOPFUNC)zfs_vnop_reclaim },      /* reclaim */
 	{ &vnop_strategy_desc, (VOPFUNC)fifo_strategy },                /* strategy */
 	{ &vnop_pathconf_desc, (VOPFUNC)fifo_pathconf },                /* pathconf */
-	{ &vnop_advlock_desc, (VOPFUNC)err_advlock },           /* advlock */
+	{ &vnop_advlock_desc, (VOPFUNC)zfs_vnop_advlock },           /* advlock */
 	{ &vnop_bwrite_desc, (VOPFUNC)zfs_vnop_bwrite },
 	{ &vnop_pagein_desc, (VOPFUNC)zfs_vnop_pagein },                /* Pagein */
 #if	HAVE_PAGEOUT_V2
