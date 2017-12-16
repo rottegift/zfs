@@ -1956,6 +1956,11 @@ zfs_extend(znode_t *zp, uint64_t end)
 	 * the oldsize, then setting to the new size.
 	 */
 	vnode_t *vp = ZTOV(zp);
+	if (spl_ubc_is_mapped(vp, NULL)) {
+		printf("ZFS: %s:%d: mapped file (writable? %d), bouncing end %lld -> now %lld ->"
+		    " end %lld file %s", __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
+		    end, ubc_getsize(vp), end, zp->z_name_cache);
+	}
 	const int grow_first_time_retval = ubc_setsize(vp, end);
 	ASSERT3S(grow_first_time_retval, !=, 0); // ubc_setsize returns true on success
 	const int shrink_to_old_retval = ubc_setsize(vp, oldsize);
@@ -2190,7 +2195,11 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		 * which causes it to cluster_zero out junk
 		 * as necessary
 		 */
-		ASSERT0(spl_ubc_is_mapped(vp, NULL));
+		if (spl_ubc_is_mapped(vp, NULL)) {
+			printf("ZFS: %s:%d: mapped file (write? %d) old: %lld new: %lld name: %s\n",
+			    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
+			    ubc_getsize(vp), end, zp->z_name_cache);
+		}
 		int setsize_retval = ubc_setsize(vp, end);
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
 	}
