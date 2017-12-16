@@ -1958,7 +1958,7 @@ zfs_extend(znode_t *zp, uint64_t end)
 	vnode_t *vp = ZTOV(zp);
 	if (spl_ubc_is_mapped(vp, NULL)) {
 		printf("ZFS: %s:%d: mapped file (writable? %d), bouncing end %lld -> now %lld ->"
-		    " end %lld file %s", __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
+		    " end %lld file %s\n", __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
 		    end, ubc_getsize(vp), end, zp->z_name_cache);
 	}
 	const int grow_first_time_retval = ubc_setsize(vp, end);
