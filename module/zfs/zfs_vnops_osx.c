@@ -3465,6 +3465,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
         }
 
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
+	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	ZFS_EXIT(zfsvfs);
 	dprintf("-vnop_mmap\n");
 	return (0);
@@ -3532,6 +3533,8 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		printf("ZFS: %s:%d: mnomap: z_mod_while_mapped set file %s\n",
 		    __func__, __LINE__, zp->z_name_cache);
 	}
+
+	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	dprintf("-vnop_mnomap\n");
 	return (0);
 }
