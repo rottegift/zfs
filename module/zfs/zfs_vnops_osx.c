@@ -5552,6 +5552,7 @@ struct vnodeopv_entry_desc zfs_fvnodeops_template[] = {
 #ifdef WITH_SEARCHFS
 	{&vnop_searchfs_desc,	(VOPFUNC)zfs_vnop_searchfs},
 #endif
+	{ &vnop_advlock_desc, (VOPFUNC)zfs_vnop_advlock },           /* advlock */
 	{NULL, (VOPFUNC)NULL }
 };
 struct vnodeopv_desc zfs_fvnodeop_opv_desc =
