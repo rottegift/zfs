@@ -2794,7 +2794,8 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	/* do not synchronize mapped files */
 	if (spl_ubc_is_mapped(vp, NULL)) {
-		if (flags & ZFS_UBC_FORCE_MSYNC) {
+		if (flags & ZFS_UBC_FORCE_MSYNC && ubc_pages_resident(vp) &&
+		    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
 			printf("ZFS: %s:%d: ZFS_UBC_FORCE_MSYNC file %s [%lld..%lld] resid %lld flags 0x%x\n",
 			    __func__, __LINE__, zp->z_name_cache,
 			    start, end, (resid != NULL) ? *resid : -1LL, flags);
