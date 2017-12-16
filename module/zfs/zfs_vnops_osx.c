@@ -2794,6 +2794,10 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	/* do not synchronize mapped files */
 	if (spl_ubc_is_mapped(vp, NULL)) {
+		/* if we have never synced before, we want to wait a minute before tiemout */
+		if (zp->z_mr_sync == 0)
+			zp->z_mr_sync = gethrtime();
+
 		if ((flags & ZFS_UBC_FORCE_MSYNC) == 0 && ubc_pages_resident(vp) &&
 		    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
 			printf("ZFS: %s:%d: skipping mapped file %s [%lld..%lld] resid %lld"
@@ -2807,11 +2811,16 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 			return (0);
 		} else if (flags & ZFS_UBC_FORCE_MSYNC) {
 			printf("ZFS: %s:%d: ZFS_UBC_FORCE_MSYNC file %s [%lld..%lld] resid %lld"
-			    " clean %d flags 0x%x\n",
+			    " clean %d write %d flags 0x%x\n",
 			    __func__, __LINE__, zp->z_name_cache,
 			    start, end, (resid != NULL) ? *resid : -1LL, is_file_clean(vp, ubc_getsize(vp)),
-			    flags);
+			    spl_ubc_is_mapped_writable(vp), flags);
 			flags &= ~(ZFS_UBC_FORCE_MSYNC);
+		} else if (gethrtime() - zp->z_mr_sync > SEC2NSEC(60)) {
+			printf("ZFS: %s:%d: MINUTE EXPIRED forcing sync of mapped file %s [%lld..%lld]"
+			    " write? %d clean %d flags 0x%x\n", __func__, __LINE__, zp->z_name_cache,
+			    start, end, spl_ubc_is_mapped_writable(vp),
+			    is_file_clean(vp, ubc_getsize(vp)), flags);
 		} else {
 			if (resid != NULL)
 				*resid = start;
@@ -2850,6 +2859,9 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 		printf("ZFS: %s:%d: long ubc_msync, %d seconds, file %s\n",
 		    __func__, __LINE__, elapsed_seconds, zp->z_name_cache);
 	}
+
+	if (retval == 0)
+		zp->z_mr_sync = exit_time;
 
 	ZFS_EXIT(zfsvfs);
 
