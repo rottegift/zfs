@@ -2231,10 +2231,12 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		const uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
 
 		/* fill any holes */
-		int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, B_FALSE);
-		if (fill_err) {
-			printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
-			    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
+		if (!spl_ubc_is_mapped(vp, NULL)) {
+			int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, B_FALSE);
+			if (fill_err) {
+				printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
+				    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
+			}
 		}
 
 		ASSERT3S(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
