@@ -343,6 +343,7 @@ vnops_stat_fini(void)
  *  utility function, since our Solaris emulator for atomic_inc_s32_nv requires
  *  volatile uint32_t *
  */
+#ifdef COMPLICATED_FSYNC
 static inline int32_t
 atomic_inc_s32_nv(_Atomic int32_t *target)
 {
@@ -354,6 +355,7 @@ atomic_dec_s32_nv(_Atomic int32_t *target)
 {
 	return __c11_atomic_fetch_sub(target, 1, __ATOMIC_SEQ_CST);
 }
+#endif
 #endif
 
 /* ARGSUSED */
@@ -5129,6 +5131,7 @@ update:
 
 ulong_t zfs_fsync_sync_cnt = 4;
 
+#ifdef COMPLICATED_FSYNC
 int
 zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 {
@@ -5496,6 +5499,52 @@ validateout:
 
 	return (0);
 }
+#else
+int
+zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
+{
+        znode_t *zp = VTOZ(vp);
+        zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+
+	ZFS_ENTER(zfsvfs);
+	ZFS_VERIFY_ZP(zp);
+
+	if (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
+		VNOPS_STAT_BUMP(zfs_fsync_disabled);
+		ZFS_EXIT(zfsvfs);
+		return (0);
+	}
+
+	if (!vnode_isreg(vp)) {
+		printf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
+		    zp->z_name_cache);
+		VNOPS_STAT_BUMP(zfs_fsync_abandoned);
+		ZFS_EXIT(zfsvfs);
+		return (ENOTSUP);
+	}
+
+	if (spl_ubc_is_mapped(vp, NULL)) {
+		printf("ZFS: %s:%d: fsync called on mapped file (writable? %d) (dirty? %d)"
+		    " (size %lld) %s\n",
+		    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
+		    is_file_clean(vp, ubc_getsize(vp)),
+		    zp->z_size, zp->z_name_cache);
+	}
+
+	off_t resid_off = 0;
+	int flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
+	int retval = zfs_ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flags);
+	if (retval != 0) {
+		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
+		    __func__, __LINE__, retval, zp->z_size, zp->z_name_cache);
+		VNOPS_STAT_BUMP(zfs_fsync_file_gone);
+	}
+
+	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
+	ZFS_EXIT(zfsvfs);
+        return (retval);
+}
+#endif
 
 /*
  * Get the requested file attributes and place them in the provided
