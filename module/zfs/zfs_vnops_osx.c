@@ -3537,6 +3537,7 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 
 	ASSERT(spl_ubc_is_mapped(vp, NULL));
 
+#if 0
 	off_t ubcsize = ubc_getsize(vp);
 	off_t resid_msync_off = ubcsize;
 	/* PUSHDIRTY because we may have precious pages to commit */
@@ -3553,6 +3554,7 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
                     __func__, __LINE__, 0LL, ubcsize, ubcsize,
                     resid_msync_off, zp->z_name_cache);
         }
+#endif
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
