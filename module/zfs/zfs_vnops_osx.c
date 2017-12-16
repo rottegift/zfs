@@ -2817,10 +2817,14 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 			    spl_ubc_is_mapped_writable(vp), flags);
 			flags &= ~(ZFS_UBC_FORCE_MSYNC);
 		} else if (gethrtime() - zp->z_mr_sync > SEC2NSEC(60)) {
-			printf("ZFS: %s:%d: MINUTE EXPIRED forcing sync of mapped file %s [%lld..%lld]"
-			    " write? %d clean %d flags 0x%x\n", __func__, __LINE__, zp->z_name_cache,
-			    start, end, spl_ubc_is_mapped_writable(vp),
-			    is_file_clean(vp, ubc_getsize(vp)), flags);
+			if (is_file_clean(vp, ubc_getsize(vp)) || spl_ubc_is_mapped_writable(vp)) {
+				    printf("ZFS: %s:%d: MINUTE EXPIRED forcing sync of mapped"
+					" file %s [%lld..%lld]"
+					" write? %d clean %d flags 0x%x\n", __func__, __LINE__,
+					zp->z_name_cache,
+					start, end, spl_ubc_is_mapped_writable(vp),
+					is_file_clean(vp, ubc_getsize(vp)), flags);
+			    }
 		} else {
 			if (resid != NULL)
 				*resid = start;
