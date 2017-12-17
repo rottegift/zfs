@@ -153,16 +153,7 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_non_isreg;
 	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t zfs_ubc_msync_error;
-	kstat_named_t zfs_fsync_queue_jump;
-	kstat_named_t zfs_fsync_wait;
 	kstat_named_t zfs_fsync_disabled;
-	kstat_named_t zfs_fsync_disabled_mapped;
-	kstat_named_t zfs_fsync_z_map_lock_held_at_entry;
-	kstat_named_t zfs_fsync_busy_delays;
-	kstat_named_t zfs_fsync_busy_sleeps;
-	kstat_named_t zfs_fsync_busy_suspends;
-	kstat_named_t zfs_fsync_busy_prints;
-	kstat_named_t zfs_fsync_recursive_tidy;
 	kstat_named_t zfs_close_msync;
 } vnops_stats_t;
 
@@ -202,16 +193,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_non_isreg",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_error",                         KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_queue_jump",                        KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_wait",                              KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_disabled_mapped",                   KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_z_map_lock_held_at_entry",          KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_busy_delays",                       KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_busy_sleeps",                       KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_busy_suspends",                     KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_busy_prints",                       KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_recursive_tidy",                    KSTAT_DATA_UINT64 },
 	{ "zfs_close_msync",                             KSTAT_DATA_UINT64 },
 };
 
