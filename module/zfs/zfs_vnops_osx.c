@@ -2784,6 +2784,7 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	znode_t *zp = VTOZ(vp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+	boolean_t do_zil_commit = B_FALSE;
 
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
@@ -2796,27 +2797,38 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	ASSERT3P(zp->z_syncer_active, !=, curthread);
 
-	/* do not synchronize mapped files */
+	/* do not synchronize mapped files unless forced, or dirty or have not been synced in a while */
 	if (spl_ubc_is_mapped(vp, NULL)) {
 		/* if we have never synced before, we want to wait a minute before tiemout */
 		if (zp->z_mr_sync == 0)
 			zp->z_mr_sync = gethrtime();
 
-		if ((flags & ZFS_UBC_FORCE_MSYNC) == 0 && ubc_pages_resident(vp) &&
-		    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
-			// remember is_file_clean returns EINVAL if pages are dirty
-			printf("ZFS: %s:%d: skipping mapped file %s [%lld..%lld] resid %lld"
-			    " clean %d flags 0x%x\n",
-			    __func__, __LINE__, zp->z_name_cache,
-			    start, end,  (resid != NULL) ? *resid : -1LL,
-			    is_file_clean(vp, ubc_getsize(vp)), flags);
-			if (resid != NULL)
-				*resid = start;
-			ZFS_EXIT(zfsvfs);
-			return (0);
+		if ((flags & ZFS_UBC_FORCE_MSYNC) == 0 && ubc_pages_resident(vp)) {
+			if (0 == is_file_clean(vp, ubc_getsize(vp))) {
+				if ((flags & UBC_SYNC) == 0) {
+					// remember is_file_clean returns EINVAL if pages are dirty
+					// this msync would do nothing
+					dprintf("ZFS: %s:%d: skipping mapped file %s [%lld..%lld] resid %lld"
+					    " clean %d flags 0x%x\n",
+					    __func__, __LINE__, zp->z_name_cache,
+					    start, end,  (resid != NULL) ? *resid : -1LL,
+					    is_file_clean(vp, ubc_getsize(vp)), flags);
+					if (resid != NULL)
+						*resid = start;
+					ZFS_EXIT(zfsvfs);
+					return (0);
+				} else {
+					// clean, but UBC_SYNC was set
+					// fall through
+					do_zil_commit = B_TRUE;
+				}
+			} else {
+				// not FORCEd but dirty, we fall through
+			}
 		} else if (flags & ZFS_UBC_FORCE_MSYNC) {
 			if (is_file_clean(vp, ubc_getsize(vp))) {
 				// remember is_file_clean returns EINVAL if pages are dirty
+				// so this is a dirty file
 				printf("ZFS: %s:%d: ZFS_UBC_FORCE_MSYNC file %s [%lld..%lld] resid %lld"
 				    " clean %d write %d flags 0x%x\n",
 				    __func__, __LINE__, zp->z_name_cache,
@@ -2825,6 +2837,7 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 				    spl_ubc_is_mapped_writable(vp), flags);
 			}
 			flags &= ~(ZFS_UBC_FORCE_MSYNC);
+			// forcing a clean file?  fall through
 		} else if (gethrtime() - zp->z_mr_sync > SEC2NSEC(60)) {
 			if (is_file_clean(vp, ubc_getsize(vp))) {
 				// remember is_file_clean returns EINVAL if pages are dirty
