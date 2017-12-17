@@ -5127,7 +5127,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	if (!vnode_isreg(vp)) {
-		printf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
+		dprintf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
 		    zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_STAT_BUMP(zfs_fsync_non_isreg);
