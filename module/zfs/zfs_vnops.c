@@ -119,8 +119,10 @@ int zfs_vnop_force_formd_normalized_output = 0; /* disabled by default */
 
 typedef struct vnops_stats {
 	kstat_named_t fill_holes_ubc_satisfied_all;
-	kstat_named_t fill_holes_present_pages_skipped;
-	kstat_named_t fill_holes_absent_pages_filled;
+	kstat_named_t fill_holes_rop_present_total_skip;
+	kstat_named_t fill_holes_rop_present_bytes_skipped;
+	kstat_named_t fill_holes_upl_present_pages_skipped;
+	kstat_named_t fill_holes_upl_absent_pages_filled;
 	kstat_named_t zfs_write_calls;
 	kstat_named_t zfs_write_clean_on_write;
 	kstat_named_t zfs_write_clean_on_write_sync;
@@ -166,8 +168,10 @@ typedef struct vnops_stats {
 
 static vnops_stats_t vnops_stats = {
 	{ "fill_holes_ubc_satisfied_all",                KSTAT_DATA_UINT64 },
-	{ "fill_holes_present_pages_skipped",            KSTAT_DATA_UINT64 },
-	{ "fill_holes_absent_pages_filled",              KSTAT_DATA_UINT64 },
+	{ "fill_holes_rop_present_total_skip",           KSTAT_DATA_UINT64 },
+	{ "fill_holes_rop_present_bytes_skipped",        KSTAT_DATA_UINT64 },
+	{ "fill_holes_upl_present_pages_skipped",        KSTAT_DATA_UINT64 },
+	{ "fill_holes_upl_absent_pages_filled",          KSTAT_DATA_UINT64 },
 	{ "zfs_write_calls",                             KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write",                    KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write_sync",               KSTAT_DATA_UINT64 },
@@ -869,6 +873,25 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 	off_t cur_upl_file_offset = upl_file_offset;
 	size_t cur_upl_size = upl_size;
 
+	/* see if we can skip over a few pages at the start */
+	int skip_bytes = 0;
+	int rop_retval = ubc_range_op(vp, cur_upl_file_offset, cur_upl_file_offset + cur_upl_size,
+	    UPL_ROP_PRESENT, &skip_bytes);
+	if (rop_retval != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: error %d from ubc_range_op(vp, %lld, %lld, UPL_ROP_PRESENT, *)"
+		    " (skip bytes %d) for file %s\n", __func__, __LINE__, rop_retval,
+		    cur_upl_file_offset, cur_upl_file_offset + cur_upl_size,
+		    skip_bytes, zp->z_name_cache);
+	} else if (skip_bytes > 0) {
+		VNOPS_STAT_INCR(fill_holes_rop_present_bytes_skipped, skip_bytes);
+		if (skip_bytes >= cur_upl_size) {
+			VNOPS_STAT_BUMP(fill_holes_rop_present_total_skip);
+			return (0);
+		}
+		cur_upl_file_offset += skip_bytes;
+		cur_upl_size -= skip_bytes;
+	}
+
 	/*
 	 * loop around, create a upl to find holes, exit loop when no
 	 * holes are found.
@@ -1068,8 +1091,8 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 	ASSERT3P(upl, ==, NULL);
 	ASSERT3P(pl, ==, NULL);
 
-	VNOPS_STAT_INCR(fill_holes_present_pages_skipped, present_pages_skipped);
-	VNOPS_STAT_INCR(fill_holes_absent_pages_filled, absent_pages_filled);
+	VNOPS_STAT_INCR(fill_holes_upl_present_pages_skipped, present_pages_skipped);
+	VNOPS_STAT_INCR(fill_holes_upl_absent_pages_filled, absent_pages_filled);
 
 	if (err == 0) {
 		if (absent_pages_filled == 0 && upl_size > 0)
