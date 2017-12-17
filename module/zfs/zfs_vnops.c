@@ -2664,7 +2664,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		return (SET_ERROR(EINVAL));
 	}
 
-	if (vnode_isreg(vp)) {
+	if (vnode_isreg(vp) && (ioflag & FAPPEND) == 0) {
 		error = zfs_write_possibly_msync(zp, woff, start_resid, ioflag);
 		if (error) {
 			ZFS_EXIT(zfsvfs);
