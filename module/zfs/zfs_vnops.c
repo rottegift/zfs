@@ -1208,36 +1208,6 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 		    __func__, upl_file_offset, upl_size, err, filename);
 	}
 
-	/*
-	 * we have brought in all the holes, so make a final UPL in order
-	 * to set UPL_ABORT_REFERENCE on the pages, which explicitly references
-	 * the page, putting it into the LRU queue.
-	 */
-
-#if 0
-	upl_t upl = NULL;
-	upl_page_info_t *pl = NULL;
-
-	if (err == 0) {
-		int uplcflags = UPL_FILE_IO | UPL_SET_LITE;
-		err = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl, uplcflags);
-
-		if (err != KERN_SUCCESS || (upl == NULL)) {
-			printf("ZFS: %s: failed to create final upl: err %d file %s\n",
-			    __func__, err, filename);
-		}
-
-		ASSERT3P(upl, !=, NULL);
-		ASSERT3P(pl, !=, NULL);
-
-		if (err == 0) {
-			err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
-		}
-		upl = NULL;
-		pl = NULL;
-	}
-#endif
-
 	/* now we copy from the vnode pager object to the uio */
 
 	int cache_resid = arg_bytes;
