@@ -5108,7 +5108,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	off_t resid_off = 0;
-	int flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
+	int flags = UBC_PUSHALL | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
 	int retval = zfs_ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flags);
 	if (retval != 0) {
 		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
