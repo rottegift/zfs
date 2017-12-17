@@ -154,7 +154,6 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t zfs_ubc_msync_error;
 	kstat_named_t zfs_fsync_disabled;
-	kstat_named_t zfs_close_msync;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -194,7 +193,6 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_error",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
-	{ "zfs_close_msync",                             KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -384,41 +382,6 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
-
-#if 0
-	// maybe should lock, maybe should do this only if last closer
-	/*
-	 * vn_has_cached_data is a useless test which will always be
-	 * true if the file has ever been mmapped, so get rid of that
-	 * part of the test, or kablam (mds does a read-only zfs_close,
-	 * while ranlib or fish_history or whatever is doing a write()
-	 * or FWRITE zfs_close()).
-	 *
-	 * we probably don't want to wait for locks held by other
-	 * threads/processes here anyway, let zfs_vfs_sync and the
-	 * writers sort it out among themselves.
-	 */
-	if ((((flag & FWRITE) != 0) && ubc_pages_resident(vp)) ||
-	    (vn_has_cached_data(vp) && vnode_isreg(vp) && !vnode_isswap(vp))) {
-		ASSERT(vn_has_cached_data(vp) || ubc_pages_resident(vp));
-		off_t ubcsize = ubc_getsize(vp);
-		ASSERT3S(zp->z_size, ==, ubcsize);
-		off_t resid_off = 0;
-		int sync = zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS ||
-		    (flag & (FSYNC | FDSYNC)) != 0;
-		int msync_flags = UBC_PUSHDIRTY;
-		if (spl_ubc_is_mapped(vp, NULL))
-			msync_flags = UBC_PUSHDIRTY | UBC_SYNC;
-		if (sync)
-			msync_flags |= UBC_SYNC;
-		int retval = zfs_ubc_msync(vp, 0, ubcsize, &resid_off, msync_flags);
-	        ASSERT3S(retval, ==, 0);
-		if (retval != 0)
-			ASSERT3S(resid_off, ==, ubcsize);
-		ASSERT3P(zp->z_sa_hdl, !=, NULL);
-		VNOPS_STAT_BUMP(zfs_close_msync);
-	}
-#endif
 
 	/* Decrement the synchronous opens in the znode */
 	if ((flag & (FSYNC | FDSYNC)) && (count == 1)) {
