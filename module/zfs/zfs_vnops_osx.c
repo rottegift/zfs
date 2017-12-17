@@ -3138,7 +3138,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	/* debugging */
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		if (!upl_page_present(pl, --pg_index)) {
-			printf("ZFS: %s:%d: page %lld of %lld not present, upl size %ld "
+			dprintf("ZFS: %s:%d: page %lld of %lld not present, upl size %ld "
 			    " starts at %lld file %s\n",
 			    __func__, __LINE__, pg_index, ((isize)/PAGE_SIZE)-1,
 			    ap->a_size, ap->a_f_offset,
