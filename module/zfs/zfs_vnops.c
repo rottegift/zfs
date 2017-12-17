@@ -5083,7 +5083,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		return (0);
 	}
 
-	if (spl_ubc_is_mapped(vp, NULL)) {
+	if (spl_ubc_is_mapped(vp, NULL) && is_file_clean(vp, ubc_getsize(vp))) {
 		printf("ZFS: %s:%d: fsync called on mapped file (writable? %d) (dirty? %d)"
 		    " (size %lld) %s\n",
 		    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
