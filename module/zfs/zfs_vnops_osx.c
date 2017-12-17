@@ -2803,8 +2803,12 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	 * so we should do a zil_commit
 	 */
 
-	ASSERT3S(end, <=, ubc_getsize(vp));
-	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
+	if (ubc_getsize(vp) == 0 && zp->z_size != 0) {
+		printf("ZFS: %s:%d: called with zero ubcsize; z_size %lld, start %lld, end %lld,"
+		    "flags %d, file %s\n",
+		    __func__, __LINE__, zp->z_size, start, end, flags, zp->z_name_cache);
+	}
+
 	if (flags & UBC_SYNC &&
 	    is_file_clean(vp, end) == 0)
 		do_zil_commit = B_TRUE;
