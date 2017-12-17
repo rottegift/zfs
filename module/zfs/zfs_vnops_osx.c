@@ -114,6 +114,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pagein_calls;
 	kstat_named_t pagein_pages;
 	kstat_named_t pagein_want_lock;
+	kstat_named_t zfs_ubc_msync_expired_dirty;
+	kstat_named_t zfs_ubc_msync_expired_clean;
 } vnops_osx_stats_t;
 
 static vnops_osx_stats_t vnops_osx_stats = {
@@ -136,6 +138,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pagein_calls",                      KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 	{ "pagein_want_lock",                  KSTAT_DATA_UINT64 },
+	{ "zfs_ubc_msync_expired_dirty",       KSTAT_DATA_UINT64 },
+	{ "zfs_ubc_msync_expired_clean",       KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_OSX_STAT(statname)           (vnops_osx_stats.statname.value.ui64)
@@ -2823,14 +2827,17 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 			flags &= ~(ZFS_UBC_FORCE_MSYNC);
 		} else if (gethrtime() - zp->z_mr_sync > SEC2NSEC(60)) {
 			if (is_file_clean(vp, ubc_getsize(vp))) {
-				    // remember is_file_clean returns EINVAL if pages are dirty
-				    printf("ZFS: %s:%d: MINUTE EXPIRED forcing sync of mapped"
-					" file %s [%lld..%lld]"
-					" write? %d clean %d flags 0x%x\n", __func__, __LINE__,
-					zp->z_name_cache,
-					start, end, spl_ubc_is_mapped_writable(vp),
-					is_file_clean(vp, ubc_getsize(vp)), flags);
-			    }
+				// remember is_file_clean returns EINVAL if pages are dirty
+				printf("ZFS: %s:%d: MINUTE EXPIRED forcing sync of mapped"
+				    " file %s [%lld..%lld]"
+				    " write? %d clean %d flags 0x%x\n", __func__, __LINE__,
+				    zp->z_name_cache,
+				    start, end, spl_ubc_is_mapped_writable(vp),
+				    is_file_clean(vp, ubc_getsize(vp)), flags);
+				VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_expired_dirty);
+			} else {
+				VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_expired_clean);
+			}
 		} else {
 			if (resid != NULL)
 				*resid = start;
