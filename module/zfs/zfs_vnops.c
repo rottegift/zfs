@@ -1338,7 +1338,13 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 * if we are in ZFS_SYNC_ALWAYS or we are in FDSYNC or FSYNC,
 	 * sync out this znode before readng it.
 	 */
-	if (zfsvfs->z_log && zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
+	if (zfsvfs->z_log &&
+	    zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED &&
+	    (ioflag & (FSYNC | FDSYNC) || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS) &&
+	    !spl_ubc_is_mapped(vp, NULL) &&
+	    ubc_getsize(vp) != 0 &&
+	    is_file_clean(vp, ubc_getsize(vp))) {
+		// remember that is_file_clean returns EINVAL if there are dirty pages
 		boolean_t sync = (ioflag & (/*FRSYNC |*/ FDSYNC | FSYNC)) ||
 		    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS;
 		if (sync) {
