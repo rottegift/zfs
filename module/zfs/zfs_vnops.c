@@ -146,9 +146,9 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
 	kstat_named_t zfs_fsync_zil_commit;
 	kstat_named_t zfs_fsync_ubc_msync;
-	kstat_named_t zfs_fsync_abandoned;
+	kstat_named_t zfs_fsync_non_isreg;
 	kstat_named_t zfs_fsync_want_lock;
-	kstat_named_t zfs_fsync_file_gone;
+	kstat_named_t zfs_ubc_msync_error;
 	kstat_named_t zfs_fsync_queue_jump;
 	kstat_named_t zfs_fsync_wait;
 	kstat_named_t zfs_fsync_disabled;
@@ -168,7 +168,7 @@ static vnops_stats_t vnops_stats = {
 	{ "fill_holes_absent_pages_filled",              KSTAT_DATA_UINT64 },
 	{ "zfs_write_calls",                             KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write",                    KSTAT_DATA_UINT64 },
-	{ "zfs_write_clean_on_write_sync",                  KSTAT_DATA_UINT64 },
+	{ "zfs_write_clean_on_write_sync",               KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_copy_ok",              KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_copy_complete",        KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_copy_bytes",           KSTAT_DATA_UINT64 },
@@ -191,9 +191,9 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit",                        KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_abandoned",                         KSTAT_DATA_UINT64 },
+	{ "zfs_fsync_non_isreg",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_file_gone",                         KSTAT_DATA_UINT64 },
+	{ "zfs_ubc_msync_error",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_queue_jump",                        KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_wait",                              KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
@@ -5129,7 +5129,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	if (!vnode_isreg(vp)) {
 		printf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
 		    zp->z_name_cache);
-		VNOPS_STAT_BUMP(zfs_fsync_abandoned);
+		zil_commit(zfsvfs->z_log, zp->z_id);
+		VNOPS_STAT_BUMP(zfs_fsync_non_isreg);
 		ZFS_EXIT(zfsvfs);
 		return (ENOTSUP);
 	}
@@ -5148,7 +5149,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	if (retval != 0) {
 		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
 		    __func__, __LINE__, retval, zp->z_size, zp->z_name_cache);
-		VNOPS_STAT_BUMP(zfs_fsync_file_gone);
+		VNOPS_STAT_BUMP(zfs_ubc_msync_error);
 	}
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
