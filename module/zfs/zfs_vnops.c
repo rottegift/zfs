@@ -144,6 +144,8 @@ typedef struct vnops_stats {
 	kstat_named_t mappedread_lock_tries;
 	kstat_named_t zfs_read_mappedread_mapped_file_bytes;
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
+	kstat_named_t zfs_mappedread_fill_hole_calls;
+	kstat_named_t zfs_mappedread_skipped_fill_holes;
 	kstat_named_t zfs_fsync_zil_commit_reg_vn;
 	kstat_named_t zfs_fsync_ubc_msync;
 	kstat_named_t zfs_fsync_non_isreg;
@@ -189,6 +191,8 @@ static vnops_stats_t vnops_stats = {
 	{ "mappedread_lock_tries",                       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_mapped_file_bytes",       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
+	{ "zfs_mappedread_fill_hole_calls",              KSTAT_DATA_UINT64 },
+	{ "zfs_mappedread_skipped_fill_holes",           KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit_reg_vn",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_non_isreg",                         KSTAT_DATA_UINT64 },
@@ -1233,42 +1237,17 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 	ASSERT3S(upl_size, >=, PAGE_SIZE_64);
 	ASSERT3S(upl_size, >=, inbytes);
 
-	err = fill_holes_in_range(vp, upl_file_offset, upl_size, B_FALSE);
+	if (!spl_ubc_is_mapped(vp, NULL)) {
+		    err = fill_holes_in_range(vp, upl_file_offset, upl_size, B_FALSE);
 
-	if (err != 0) {
-		printf("ZFS: %s: fill_holes_in_range (%lld, %ld) error %d file %s\n",
-		    __func__, upl_file_offset, upl_size, err, filename);
+		    if (err != 0) {
+			    printf("ZFS: %s: fill_holes_in_range (%lld, %ld) error %d file %s\n",
+				__func__, upl_file_offset, upl_size, err, filename);
+		    }
+		    VNOPS_STAT_BUMP(zfs_mappedread_fill_hole_calls);
+	} else {
+		VNOPS_STAT_BUMP(zfs_mappedread_skipped_fill_holes);
 	}
-
-	/*
-	 * we have brought in all the holes, so make a final UPL in order
-	 * to set UPL_ABORT_REFERENCE on the pages, which explicitly references
-	 * the page, putting it into the LRU queue.
-	 */
-
-#if 0
-	upl_t upl = NULL;
-	upl_page_info_t *pl = NULL;
-
-	if (err == 0) {
-		int uplcflags = UPL_FILE_IO | UPL_SET_LITE;
-		err = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl, uplcflags);
-
-		if (err != KERN_SUCCESS || (upl == NULL)) {
-			printf("ZFS: %s: failed to create final upl: err %d file %s\n",
-			    __func__, err, filename);
-		}
-
-		ASSERT3P(upl, !=, NULL);
-		ASSERT3P(pl, !=, NULL);
-
-		if (err == 0) {
-			err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
-		}
-		upl = NULL;
-		pl = NULL;
-	}
-#endif
 
 	/* now we copy from the vnode pager object to the uio */
 
@@ -1454,11 +1433,15 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		if (tries > 0)
 			VNOPS_STAT_INCR(mappedread_lock_tries, tries);
+		int mapped = spl_ubc_is_mapped(vp, NULL);
 		error = mappedread_new(vp, nbytes, uio);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(error, ==, 0);
 		if (error == 0 && nbytes > 0) {
-			VNOPS_STAT_INCR(zfs_read_mappedread_unmapped_file_bytes, nbytes);
+			if (mapped)
+				VNOPS_STAT_INCR(zfs_read_mappedread_mapped_file_bytes, nbytes);
+			else
+				VNOPS_STAT_INCR(zfs_read_mappedread_unmapped_file_bytes, nbytes);
 		}
 
 		if (error == ERANGE) {
