@@ -4104,7 +4104,8 @@ top:
 		ASSERT3S(inval_err, ==, 0);
 		ASSERT0(is_file_clean(vp, ubc_getsize(vp))); // is_file_clean is 0 if clean
 		ASSERT0(vnode_isinuse(vp, 0));
-
+		if (is_file_clean(vp, ubc_getsize(vp)) != 0 || vnode_isinuse(vp, 0))
+			may_delete_now = 0;
 	}
 #else
 	VI_LOCK(vp);
