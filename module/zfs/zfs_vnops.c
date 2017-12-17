@@ -1811,12 +1811,16 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 
 	/*
 	 * if this file is NOT now mmapped and there are dirty pages,
-	 * in our range, then unless sync is disabled, push them
-	 * (syncing if we are sync always).
+	 * in our range, then unless sync is disabled, if we are in
+	 * sync read mode, then call zfs_ubc_msync.
 	 */
-	if (!spl_ubc_is_mapped(vp, NULL) &&
-	    (zfsvfs->z_log &&
-		(zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED || (ioflag & (FSYNC | FDSYNC))))) {
+	if (zfsvfs->z_log &&
+	    (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) &&
+	    (ioflag & (FSYNC|FDSYNC)) &&
+	    !spl_ubc_is_mapped(vp, NULL) &&
+	    ubc_getsize(vp) != 0 &&
+	    (is_file_clean(vp, ubc_getsize(vp)))) {
+		//remember that is_file_clean() reports EINVAL if there are dirty pages
 		if (ioflag & FAPPEND) {
 			rlock = zfs_range_lock(zp, 0, alen, RL_APPEND);
 			woff = rlock->r_off;
@@ -1860,7 +1864,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 		boolean_t sync = (ioflag & (FSYNC | FDSYNC)) ||
 		    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS;
 
-		if (sync || spl_ubc_is_mapped(vp, NULL)) {
+		if (sync && !spl_ubc_is_mapped(vp, NULL)) {
 			ASSERT3S(zp->z_size, ==, ubcsize);
 			ASSERT3S(ubcsize, >, 0);
 			off_t resid_off = 0;
