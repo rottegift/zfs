@@ -144,7 +144,7 @@ typedef struct vnops_stats {
 	kstat_named_t mappedread_lock_tries;
 	kstat_named_t zfs_read_mappedread_mapped_file_bytes;
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
-	kstat_named_t zfs_fsync_zil_commit;
+	kstat_named_t zfs_fsync_zil_commit_reg_vn;
 	kstat_named_t zfs_fsync_ubc_msync;
 	kstat_named_t zfs_fsync_non_isreg;
 	kstat_named_t zfs_fsync_want_lock;
@@ -189,7 +189,7 @@ static vnops_stats_t vnops_stats = {
 	{ "mappedread_lock_tries",                       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_mapped_file_bytes",       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_zil_commit",                        KSTAT_DATA_UINT64 },
+	{ "zfs_fsync_zil_commit_reg_vn",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_non_isreg",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
@@ -5132,7 +5132,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_STAT_BUMP(zfs_fsync_non_isreg);
 		ZFS_EXIT(zfsvfs);
-		return (ENOTSUP);
+		return (0);
 	}
 
 	if (spl_ubc_is_mapped(vp, NULL)) {
@@ -5141,6 +5141,22 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
 		    is_file_clean(vp, ubc_getsize(vp)),
 		    zp->z_size, zp->z_name_cache);
+	}
+
+	boolean_t do_zil_commit = B_FALSE;
+
+	/*
+	 * msync almost certainly won't do anything if the file is
+	 * empty, wholly-nonresident, or clean now; otherwise it will
+	 * almost certainly cause pageoutv2 to do a zil_commit.
+	 *
+	 */
+	if (ubc_getsize(vp) == 0 || ubc_pages_resident(vp) == 0 ||
+	    is_file_clean(vp, ubc_getsize(vp)) == 0) {
+		// remember the semantics error = is_file_clean()
+		// in particular is_file_clean is EINVAL if the
+		// file has any dirty pages
+		do_zil_commit = B_TRUE;
 	}
 
 	off_t resid_off = 0;
@@ -5153,6 +5169,10 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
+	if (do_zil_commit == B_TRUE) {
+		VNOPS_STAT_BUMP(zfs_fsync_zil_commit_reg_vn);
+		zil_commit(zfsvfs->z_log, zp->z_id);
+	}
 	ZFS_EXIT(zfsvfs);
         return (retval);
 }
