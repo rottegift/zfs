@@ -1823,11 +1823,11 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	const off_t alen = round_page_64(start_resid);
 
 	/*
-	 * if this file has been mmapped and there are dirty pages, in
-	 * our range, then unless sync is disabled, push them (syncing
-	 * if we are sync always).
+	 * if this file is NOT now mmapped and there are dirty pages,
+	 * in our range, then unless sync is disabled, push them
+	 * (syncing if we are sync always).
 	 */
-	if (spl_ubc_is_mapped(vp, NULL) ||
+	if (!spl_ubc_is_mapped(vp, NULL) &&
 	    (zfsvfs->z_log &&
 		(zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED || (ioflag & (FSYNC | FDSYNC))))) {
 		if (ioflag & FAPPEND) {
