@@ -4102,7 +4102,7 @@ top:
 		    __func__, __LINE__, zp->z_drain, zp->z_name_cache);
 		int inval_err = ubc_invalidate_range(vp, 0, ubc_getsize(vp));
 		ASSERT3S(inval_err, ==, 0);
-		ASSERT3S(ubc_pages_resident(vp), ==, 0);
+		ASSERT0(is_file_clean(vp, ubc_getsize(vp))); // is_file_clean is 0 if clean
 		ASSERT0(vnode_isinuse(vp, 0));
 
 	}
@@ -4217,7 +4217,7 @@ top:
 #ifndef __APPLE__
 		VI_UNLOCK(vp);
 #else
-		IMPLY(delete_now, ubc_pages_resident(vp) == 0);
+		IMPLY(delete_now, (is_file_clean(vp, ubc_getsize(vp)) == 0));
 #endif
 	}
 
