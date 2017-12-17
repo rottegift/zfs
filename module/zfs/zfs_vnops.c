@@ -5120,7 +5120,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
 
-	if (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
+	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED) {
 		VNOPS_STAT_BUMP(zfs_fsync_disabled);
 		ZFS_EXIT(zfsvfs);
 		return (0);
