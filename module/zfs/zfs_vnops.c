@@ -473,7 +473,7 @@ int ubc_invalidate_range_impl(vnode_t *vp, off_t start, off_t end)
 
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-	retval_msync = zfs_ubc_msync(vp, start, end, &resid_msync_off, UBC_PUSHDIRTY | UBC_INVALIDATE | UBC_SYNC);
+	retval_msync = zfs_ubc_msync(vp, start, end, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3S(tries, <=, 2);
 
