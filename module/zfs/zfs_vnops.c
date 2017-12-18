@@ -1398,11 +1398,15 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		if (tries > 0)
 			VNOPS_STAT_INCR(mappedread_lock_tries, tries);
+		boolean_t was_mapped = spl_ubc_is_mapped(vp, NULL);
 		error = mappedread_new(vp, nbytes, uio);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(error, ==, 0);
 		if (error == 0 && nbytes > 0) {
-			VNOPS_STAT_INCR(zfs_read_mappedread_unmapped_file_bytes, nbytes);
+			if (was_mapped)
+				VNOPS_STAT_INCR(zfs_read_mappedread_mapped_file_bytes, nbytes);
+			else
+				VNOPS_STAT_INCR(zfs_read_mappedread_unmapped_file_bytes, nbytes);
 		}
 
 		if (error == ERANGE) {
