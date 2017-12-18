@@ -2087,6 +2087,8 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 
 
 		if (spl_ubc_is_mapped(vp, NULL)) {
+			ASSERT3S(unset_syncer, ==, B_TRUE);
+		} else {
 			ASSERT3S(unset_syncer, ==, B_FALSE);
 		}
 
