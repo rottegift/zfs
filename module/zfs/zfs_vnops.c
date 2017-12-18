@@ -2096,7 +2096,50 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 			ASSERT3S(unset_syncer, ==, B_FALSE);
 		}
 
+
+		const off_t ubcsize = ubc_getsize(vp);
+		boolean_t reset_ubcsize = B_FALSE;
+
+		if (spl_ubc_is_mapped(vp, NULL)) {
+			/* round the ubc size up to a multiple of PAGE_SIZE */
+			const off_t cur_woff = uio_offset(uio);
+			const off_t cur_wend = cur_woff + uio_resid(uio);
+			const off_t round_cur_wend = round_page_64(cur_wend);
+			if (ubc_getsize(vp) < round_cur_wend) {
+				printf("ZFS: %s:%d: mapped file, ends before end of page, rounding:"
+				    " ubcsize %lld cur_woff %lld cur_wend %lld round_cur_wend %lld,"
+				    " ioflag %d file %s\n",
+				    __func__, __LINE__,
+				    ubcsize, cur_woff, cur_wend, round_cur_wend,
+				    ioflag, zp->z_name_cache);
+				int setsize_retval = ubc_setsize(vp, round_cur_wend);
+				if (setsize_retval == 0) {
+					// ubc_setsize returns TRUE on success, 0 on failure
+					printf("ZFS: %s:%d rounding up: ubc_setsize(vp, %lld)"
+					    " from %lld failed for file %s\n",
+					    __func__, __LINE__, round_cur_wend, ubcsize,
+					    zp->z_name_cache);
+				}
+				reset_ubcsize = B_TRUE;
+			}
+		}
+
 		error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+
+		if (reset_ubcsize) {
+			ASSERT(spl_ubc_is_mapped(vp, NULL));
+			ASSERT(unset_syncer);
+			int setsize_retval = ubc_setsize(vp, reset_ubcsize);
+			if (setsize_retval == 0) {
+				// ubc_setsize returns TRUE on success, 0 on failure
+				printf("ZFS: %s:%d resetting from round up: ubc_setsize(vp, %lld)"
+				    " from cur ubc_getsize %lld failed for file %s\n",
+				    __func__, __LINE__, ubcsize, ubc_getsize(vp),
+				    zp->z_name_cache);
+			}
+		}
+
+		ASSERT3S(ubc_getsize(vp), ==, reset_ubcsize);
 
 		if (unset_syncer) {
 			ASSERT3S(zp->z_syncer_active, ==, curthread);
