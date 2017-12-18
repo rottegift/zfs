@@ -1961,52 +1961,13 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		}
 		return (ccupl_retval);
 	}
-	/* commit the modified page */
-	kern_return_t abortret =
-	    ubc_upl_abort_range(mupl,
-		0, PAGE_SIZE, UPL_ABORT_FREE_ON_EMPTY);
-	if (abortret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d ERROR %d aborting UPL"
-		    " for file %s XXX continuing\n",
-		    __func__, __LINE__, abortret,
- 		    zp->z_name_cache);
-	}
-	printf("ZFS: %s:%d cluster_copy_upl and abort successful for file %s,"
-	    " cc_ioresid_in %d cc_ioresid_out %d\n",
-	    __func__, __LINE__, zp->z_name_cache,
-	    recov_resid_int, ccupl_ioresid);
-	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
-	ASSERT3S(resid_at_break, >, uio_resid(uio));
-	ASSERT3S(zp->z_size, >=, recov_off + (resid_at_break - uio_resid(uio)));
-	ASSERT3S(ccupl_retval, ==, 0);
-
-	/* now pageout the page */
-	upl_t cupl =  NULL;
-	upl_page_info_t *cpl = NULL;
-	kern_return_t cuplret = ubc_create_upl(vp, upl_f_off, PAGE_SIZE, &cupl, &cpl,
-	    UPL_UBC_PAGEOUT);
-
-	if (cuplret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: failed to create (pageout) UPL error %d! foff %lld file %s\n",
-		    __func__, __LINE__, cuplret, upl_f_off, zp->z_name_cache);
-		return (cuplret);
-	}
-
-	if (!upl_valid_page(cpl, 0)) {
-		printf("ZFS: %s:%d: page is unexpectedly not valid %lld @ file %s\n",
-		    __func__, __LINE__, upl_f_off, zp->z_name_cache);
-		ubc_upl_abort(cupl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
-		return (EINVAL);
-	}
-	if (!upl_dirty_page(cpl, 0)) {
-		printf("ZFS: %s:%d page is unexpectedly not dirty %lld @ file %s\n",
-		    __func__, __LINE__, upl_f_off, zp->z_name_cache);
-		ubc_upl_abort (cupl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
-		return (EINVAL);
-	}
+	/* hand off to zfs_pageout */
+	printf("ZFS: %s:%d: cluster_copy_upl_data done OK, handing off to zfs_pageout,"
+	    " %lld @ file %s\n",  __func__, __LINE__, upl_f_off, zp->z_name_cache);
 
 	int poflags = (ioflags & IO_SYNC) ? UPL_IOSYNC : 0;
-	return (zfs_pageout(zfsvfs, zp, cupl, 0, upl_f_off, PAGE_SIZE, poflags,
+
+	return (zfs_pageout(zfsvfs, zp, mupl, 0, upl_f_off, PAGE_SIZE, poflags,
 		B_FALSE, B_FALSE));
 }
 

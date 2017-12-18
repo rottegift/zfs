@@ -2393,8 +2393,9 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 
 	ASSERT3P(upl, !=, NULL);
 	if (upl == (upl_t)NULL) {
-		dprintf("ZFS: vnop_pageout: failed on NULL upl\n");
-		return EINVAL;
+		printf("ZFS: %s:%d: failed on NULL upl, f_off %lld, size %ld, file %s\n",
+		    __func__, __LINE__, off, size, zp->z_name_cache);
+		return (EINVAL);
 	}
 	/*
 	 * We can't leave this function without either calling upl_commit or
@@ -2404,9 +2405,10 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 	if (zfsvfs->z_unmounted) {
 		if (!(flags & UPL_NOCOMMIT))
 			(void) ubc_upl_abort(upl, UPL_ABORT_DUMP_PAGES|UPL_ABORT_FREE_ON_EMPTY);
-		dprintf("ZFS: vnop_pageout: abort on z_unmounted\n");
+		printf("ZFS: %s:%d:  abort on z_unmounted, off %lld sz %ld file %s\n",
+		    __func__, __LINE__, off, size, zp->z_name_cache);
 		ZFS_EXIT(zfsvfs);
-		return EIO;
+		return (EIO);
 	}
 
 	ASSERT(vn_has_cached_data(ZTOV(zp)));
@@ -2414,14 +2416,16 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 	/* ASSERT(zp->z_dbuf_held); */ /* field no longer present in znode. */
 
 	if (len <= 0) {
+		ASSERT3S(len, <=, 0);
 		if (!(flags & UPL_NOCOMMIT))
 			(void) ubc_upl_abort(upl, UPL_ABORT_DUMP_PAGES|UPL_ABORT_FREE_ON_EMPTY);
 		err = EINVAL;
 		goto exit;
 	}
 	if (vnode_vfsisrdonly(ZTOV(zp))) {
+		ASSERT0(vnode_vfsisrdonly(ZTOV(zp)));
 		if (!(flags & UPL_NOCOMMIT))
-			ubc_upl_abort_range(upl, upl_offset, len,
+			(void) ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 		err = EROFS;
 		goto exit;
@@ -2429,6 +2433,10 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 
 	filesz = zp->z_size; /* get consistent copy of zp_size */
 
+	ASSERT3S(off, >=, 0);
+	ASSERT3S(off, <, filesz);
+	ASSERT0(off & PAGE_MASK_64);
+	ASSERT0(len & PAGE_MASK);
 	if (off < 0 || off >= filesz || (off & PAGE_MASK_64) ||
 	    (len & PAGE_MASK)) {
 		if (!(flags & UPL_NOCOMMIT))
@@ -2470,15 +2478,7 @@ top:
 		err = 0;
 		goto out;
 	} else if (off + len > filesz) {
-#if 0
-		int npages = btopr(filesz - off);
-		page_t *trunc;
 
-		page_list_break(&pp, &trunc, npages);
-		/* ignore pages past end of file */
-		if (trunc)
-			pvn_write_done(trunc, flags);
-#endif
 		len = filesz - off;
 	}
 
@@ -2505,12 +2505,16 @@ top:
 			goto top;
 		}
 		dmu_tx_abort(tx);
+		printf("ZFS: %s:%d, dmu_tx_assign failed, file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
 		goto out;
 	}
 
 	caddr_t va;
 
 	if (ubc_upl_map(upl, (vm_offset_t *)&va) != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: ubc_upl_map failed, file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
 		err = EINVAL;
 		goto out;
 	}
@@ -2531,8 +2535,7 @@ top:
 	}
 
 	/*
-	 * The last, possibly partial block needs to have the data zeroed that
-	 * would extend past the size of the file.
+	 * The last, possibly partial block needs slightly special handling.
 	 */
 	if (len > 0) {
 		ssize_t sz = len;
@@ -2551,14 +2554,6 @@ top:
 		len -= sz;
 
 		pages_written++;
-
-		/*
-		 * Zero out the remainder of the PAGE that didn't fit within
-		 * the file size.
-		 */
-		//bzero(va, PAGESIZE-sz);
-		//dprintf("zero last 0x%lx bytes.\n", PAGESIZE-sz);
-
 	}
 
 	ubc_upl_unmap(upl);
