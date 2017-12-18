@@ -1599,102 +1599,6 @@ out:
 	return (error);
 }
 
-
-static int
-zfs_write_cluster_copy_upl(vnode_t *vp, uio_t *uio, int *xfer_resid, __unused int mark_dirty, znode_t *zp)
-{
-	/* we are called here under appropriate locks */
-
-	/* we are modifying a mapped file */
-
-	ASSERT(spl_ubc_is_mapped(vp, NULL));
-	zp->z_mod_while_mapped = 1;
-
-	/* sanity check */
-	ASSERT3P(xfer_resid, !=, NULL);
-
-	/* get the ranges right */
-	const off_t uio_f_off = uio_offset(uio);
-	const off_t upl_f_off = trunc_page_64(uio_f_off);
-	const off_t offset_in_upl = uio_f_off - upl_f_off;
-	ASSERT3S(offset_in_upl, <, PAGE_SIZE_64);
-	ASSERT3S(offset_in_upl, >=, 0);
-
-	const off_t uio_resid_at_entry = uio_resid(uio);
-	const off_t uio_f_end = uio_f_off + uio_resid_at_entry;
-	const off_t upl_f_end = round_page_64(uio_f_end);
-	const off_t upl_size = upl_f_end - upl_f_off;
-
-	ASSERT3S((upl_size % PAGE_SIZE_64), ==, 0);
-	ASSERT3S(upl_size, >, 0);
-	ASSERT3S(upl_size, <=, MAX_UPL_SIZE_BYTES);
-
-	/*
-	 * make the UPL:
-	 * We use Copy_in_to semantics, so with no page list,
-	 * pages will not be left busy in the original object
-	 */
-	int uplflags = UPL_WILL_MODIFY | UPL_SET_LITE;
-	upl_t upl = NULL;
-
-	int uplretval = ubc_create_upl(vp, upl_f_off, upl_size, &upl, NULL, uplflags);
-
-	ASSERT3S(uplretval, ==, KERN_SUCCESS);
-	if (uplretval != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld size %lld file %s\n",
-		    __func__, __LINE__, uplretval, upl_f_off, upl_size, zp->z_name_cache);
-		return (uplretval);
-	}
-
-	/* cluster_copy_upl_data */
-	int ccupl_resid = *xfer_resid;
-	ASSERT3S(ccupl_resid, <=, uio_resid_at_entry);
-
-	/* our caller has already done requisite locking */
-	int ccupl_retval = cluster_copy_upl_data(uio, upl, offset_in_upl, &ccupl_resid);
-
-	if (ccupl_retval != 0) {
-		printf("ZFS: %s:%d: error %d from cluster_copy_upl_data,"
-		    " xfer_resid (in) %d, ccupl_resid (out) %d,"
-		    " uio_resid (now) %lld, uio_offset (now) %lld, "
-		    " uio_resid_at_entry %lld, file %s\n",
-		    __func__, __LINE__, ccupl_retval,
-		    *xfer_resid, ccupl_resid,
-		    uio_resid(uio), uio_offset(uio),
-		    uio_resid_at_entry, zp->z_name_cache);
-		*xfer_resid = ccupl_resid;
-		/* abort the page */
-		int kret_abort = ubc_upl_abort(upl, UPL_ABORT_ERROR);
-		if (kret_abort != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: error %d from ubc_upl_abort\n",
-			    __func__, __LINE__, kret_abort);
-			return (kret_abort);
-		}
-		return (ccupl_retval);
-	}
-
-	/* commit */
-	kern_return_t commitret = ubc_upl_commit(upl);
-
-	if (commitret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: ERROR %d from ubc_upl_commit()"
-		    " uio_resid_at_entry %lld uio_resid now %lld"
-		    " xfer_resid %d, ccupl_resid %d"
-		    " for file %s\n",
-		    __func__, __LINE__, commitret,
-		    uio_resid_at_entry, uio_resid(uio), *xfer_resid, ccupl_resid,
-		    zp->z_name_cache);
-		*xfer_resid = ccupl_resid;
-		return (commitret);
-	}
-
-	*xfer_resid = ccupl_resid;
-
-	return (0);
-
-	/* return*/
-}
-
 typedef struct sync_range {
 	vnode_t  *vp;
 	off_t     start;
@@ -2160,12 +2064,10 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		const uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
 
 		/* fill any holes */
-		if (!spl_ubc_is_mapped(vp, NULL)) {
-			int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, B_FALSE);
-			if (fill_err) {
-				printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
-				    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
-			}
+		int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, B_FALSE);
+		if (fill_err) {
+			printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
+			    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
 		}
 
 		ASSERT3S(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
@@ -2183,20 +2085,12 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 			unset_syncer = B_TRUE;
 		}
 
-#if 0
+
 		if (spl_ubc_is_mapped(vp, NULL)) {
-			ASSERT3S(unset_syncer, ==, B_TRUE);
-			error = zfs_write_cluster_copy_upl(vp, uio, &xfer_resid, 1, zp);
-		} else {
-#else
-			if (spl_ubc_is_mapped(vp, NULL)) {
-				ASSERT3S(unset_syncer, ==, B_FALSE);
-			}
-#endif
-			error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
-#if 0
+			ASSERT3S(unset_syncer, ==, B_FALSE);
 		}
-#endif
+
+		error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
 
 		if (unset_syncer) {
 			ASSERT3S(zp->z_syncer_active, ==, curthread);
