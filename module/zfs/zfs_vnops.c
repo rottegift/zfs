@@ -1984,7 +1984,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	upl_t cupl =  NULL;
 	upl_page_info_t *cpl = NULL;
 	kern_return_t cuplret = ubc_create_upl(vp, upl_f_off, PAGE_SIZE, &cupl, &cpl,
-	    UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY);
+	    UPL_UBC_PAGEOUT);
 
 	if (cuplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: failed to create (pageout) UPL error %d! foff %lld file %s\n",
