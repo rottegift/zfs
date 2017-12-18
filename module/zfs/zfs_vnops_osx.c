@@ -1089,6 +1089,12 @@ zfs_vnop_write(struct vnop_write_args *ap)
 	const off_t start_resid = uio_resid(uio);
 	const off_t start_eof = ubc_getsize(ap->a_vp);
 	int64_t cur_resid = start_resid;
+
+	if (start_resid == 0) {
+		/* zero length write */
+		return (0);
+	}
+
 	ASSERT3S(cur_resid, >, 0);
 	off_t cum_bytes = 0;
 	char *file_name = NULL;

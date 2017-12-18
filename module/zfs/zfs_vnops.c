@@ -1986,7 +1986,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 
 static inline
 int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int ioflag,
-    rl_t *rl, const ssize_t start_resid, const off_t start_off,
+    rl_t *rl, const ssize_t start_resid, const off_t start_off, const off_t start_size,
     off_t woff, int error)
 {
 	dmu_tx_t *tx;
@@ -2116,14 +2116,15 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 				    " this_chunk %ld xfer_resid %d file_size %lld %lld"
 				    " ioflag %d - punting to update pages function"
 				    " (mapped %d mappedwrite %d)"
-				    " start_off %lld start_resid %ld\n",
+				    " start_off %lld start_resid %ld"
+				    " ubc_size_at_entry %lld start_size %lld\n",
 				    __func__, __LINE__, zp->z_name_cache, c,
 				    woff, this_off, uio_offset(uio), uio_resid(uio),
 				    this_chunk, xfer_resid,
 				    zp->z_size, ubc_getsize(vp), ioflag,
 				    spl_ubc_is_mapped(vp, NULL),
 				    spl_ubc_is_mapped_writable(vp),
-				    start_off, start_resid);
+				    start_off, start_resid, ubcsize_at_entry, start_size);
 				if (xfer_resid == this_chunk) {
 					/*
 					 * We have written nothing at all.
@@ -2527,6 +2528,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	*file_name = zp->z_name_cache;
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
+	const off_t start_size = zp->z_size;
+	ASSERT3S(start_size, ==, ubcsize_at_entry);
 
 	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_MTIME(zfsvfs), NULL, &mtime, 16);
 	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_CTIME(zfsvfs), NULL, &ctime, 16);
@@ -2629,7 +2632,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	if (vnode_isreg(vp) && old_style != B_TRUE) {
 		/* Important: tail call: we use no actual stack space here */
 		return(zfs_write_isreg(vp, zp, zfsvfs, uio, ioflag,
-			rl, start_resid, start_off,
+			rl, start_resid, start_off, start_size,
 			woff, error));
 	}
 
