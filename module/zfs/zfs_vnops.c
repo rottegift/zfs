@@ -2129,7 +2129,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		if (reset_ubcsize) {
 			ASSERT(spl_ubc_is_mapped(vp, NULL));
 			ASSERT(unset_syncer);
-			int setsize_retval = ubc_setsize(vp, reset_ubcsize);
+			int setsize_retval = ubc_setsize(vp, ubcsize);
 			if (setsize_retval == 0) {
 				// ubc_setsize returns TRUE on success, 0 on failure
 				printf("ZFS: %s:%d resetting from round up: ubc_setsize(vp, %lld)"
@@ -2139,7 +2139,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 			}
 		}
 
-		ASSERT3S(ubc_getsize(vp), ==, reset_ubcsize);
+		ASSERT3S(ubc_getsize(vp), ==, ubcsize);
 
 		if (unset_syncer) {
 			ASSERT3S(zp->z_syncer_active, ==, curthread);
