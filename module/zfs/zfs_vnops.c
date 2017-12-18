@@ -2188,8 +2188,11 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 			ASSERT3S(unset_syncer, ==, B_TRUE);
 			error = zfs_write_cluster_copy_upl(vp, uio, &xfer_resid, 1, zp);
 		} else {
+#else
+			if (spl_ubc_is_mapped(vp, NULL)) {
+				ASSERT3S(unset_syncer, ==, B_FALSE);
+			}
 #endif
-			ASSERT3S(unset_syncer, ==, B_FALSE);
 			error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
 #if 0
 		}
