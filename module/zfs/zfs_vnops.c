@@ -1962,18 +1962,16 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		return (ccupl_retval);
 	}
 	/* commit the modified page */
-	kern_return_t commitret =
-	    ubc_upl_commit_range(mupl,
-		0, PAGE_SIZE,
-		UPL_COMMIT_SET_DIRTY |
-		UPL_COMMIT_FREE_ON_EMPTY);
-	if (commitret != KERN_SUCCESS) {
-		printf("ZFS: %s:%d ERROR %d committing UPL"
+	kern_return_t abortret =
+	    ubc_upl_abort_range(mupl,
+		0, PAGE_SIZE, UPL_ABORT_FREE_ON_EMPTY);
+	if (abortret != KERN_SUCCESS) {
+		printf("ZFS: %s:%d ERROR %d aborting UPL"
 		    " for file %s XXX continuing\n",
-		    __func__, __LINE__, commitret,
+		    __func__, __LINE__, abortret,
  		    zp->z_name_cache);
 	}
-	printf("ZFS: %s:%d cluster_copy_upl and commit successful for file %s,"
+	printf("ZFS: %s:%d cluster_copy_upl and abort successful for file %s,"
 	    " cc_ioresid_in %d cc_ioresid_out %d\n",
 	    __func__, __LINE__, zp->z_name_cache,
 	    recov_resid_int, ccupl_ioresid);
