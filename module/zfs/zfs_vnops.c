@@ -2098,12 +2098,14 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 
 
 		const off_t ubcsize = ubc_getsize(vp);
+		off_t target_postwrite_ubcsize;
 		boolean_t reset_ubcsize = B_FALSE;
 
 		if (spl_ubc_is_mapped(vp, NULL)) {
 			/* round the ubc size up to a multiple of PAGE_SIZE */
 			const off_t cur_woff = uio_offset(uio);
 			const off_t cur_wend = cur_woff + uio_resid(uio);
+			target_postwrite_ubcsize = cur_wend;
 			const off_t round_cur_wend = round_page_64(cur_wend);
 			if (ubc_getsize(vp) < round_cur_wend) {
 				printf("ZFS: %s:%d: mapped file, ends before end of page, rounding:"
@@ -2129,12 +2131,15 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		if (reset_ubcsize) {
 			ASSERT(spl_ubc_is_mapped(vp, NULL));
 			ASSERT(unset_syncer);
-			int setsize_retval = ubc_setsize(vp, ubcsize);
+			int setsize_retval = ubc_setsize(vp, target_postwrite_ubcsize);
 			if (setsize_retval == 0) {
 				// ubc_setsize returns TRUE on success, 0 on failure
 				printf("ZFS: %s:%d resetting from round up: ubc_setsize(vp, %lld)"
-				    " from cur ubc_getsize %lld failed for file %s\n",
-				    __func__, __LINE__, ubcsize, ubc_getsize(vp),
+				    " from cur ubc_getsize %lld"
+				    " ubcsize before copy %lld"
+				    " failed for file %s\n",
+				    __func__, __LINE__, target_postwrite_ubcsize, ubc_getsize(vp),
+				    ubcsize,
 				    zp->z_name_cache);
 			}
 		}
