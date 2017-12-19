@@ -3226,8 +3226,21 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			/*
 			 * we asked for RET_ONLY_DIRTY, so it's possible
 			 * to get back empty slots in the UPL.
-			 * just skip over them
+			 * just abort them
 			 */
+			int abortflags = UPL_ABORT_FREE_ON_EMPTY;
+			kern_return_t abortret = ubc_upl_abort_range(upl,
+			    pg_index * PAGE_SIZE, PAGE_SIZE, abortflags);
+			if (abortret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: error %d aborting present page "
+				    " @ index [bytes %lld..%lld],  %lld foff %lld file %s\n",
+				    __func__, __LINE__, abortret,
+				    pg_index, ap->a_f_offset,
+				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
+				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
+				    zp->z_name_cache);
+			}
+
 			VNOPS_OSX_STAT_BUMP(pageoutv2_skip_clean_pages);
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
@@ -3252,21 +3265,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 		xsize = num_of_pages * PAGE_SIZE;
 
-		if (!vnode_isswap(vp)) {
-			off_t end_of_range;
-
-			end_of_range = f_offset + xsize - 1;
-			if (end_of_range >= filesize) {
-				end_of_range = (off_t)(filesize - 1);
-			}
-#if 0 // hfs
-			if (f_offset < filesize) {
-				rl_remove(f_offset, end_of_range, &fp->ff_invalidranges);
-				cp->c_flag |= C_MODIFIED;  /* leof is dirty */
-			}
-#endif
-		}
-
 		// Map it if needed
 		if (!vaddr) {
 			if (ubc_upl_map(upl, (vm_offset_t *)&vaddr) != KERN_SUCCESS) {
@@ -3290,7 +3288,37 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		if ((error == 0) && (merror))
 			error = merror;
 
-		//if (error != EAGAIN) { ASSERT3S(error, ==, 0); }
+		if (error != 0 && merror != 0) {
+			int abortflags = UPL_ABORT_FREE_ON_EMPTY;
+			if (merror == 35)
+				abortflags |= UPL_ABORT_RESTART;
+			else
+				abortflags |= UPL_ABORT_ERROR;
+			kern_return_t abortret = ubc_upl_commit_range(upl,
+			    offset, xsize, abortflags);
+			if (abortret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d error %d aborting after error %d/%d"
+				    " uploff %lld abortlen %lld uplfoff %lld file %s\n",
+				    __func__, __LINE__, abortret, merror, error,
+				    offset, xsize, f_offset, zp->z_name_cache);
+			} else {
+				printf("ZFS: %s:%d successful abort after error %d/%d"
+				    " uploff %lld abortlen %lld uplfoff %lld file %s\n",
+				    __func__, __LINE__, merror, error,
+				    offset, xsize, f_offset, zp->z_name_cache);
+			}
+		} else {
+			int commitflags = UPL_COMMIT_FREE_ON_EMPTY
+			    | UPL_COMMIT_CLEAR_PRECIOUS
+			    | UPL_COMMIT_CLEAR_DIRTY;
+			kern_return_t commitret = ubc_upl_commit_range(upl, offset, xsize, commitflags);
+			if (commitret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: error %d"
+				    " from ubc_upl_commit_range 0 - %ld f_off %lld file %s\n",
+				    __func__, __LINE__, commitret, a_size, ap->a_f_offset, zp->z_name_cache);
+				error = commitret;
+			}
+		}
 
 		f_offset += xsize;
 		offset   += xsize;
@@ -3325,30 +3353,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	if (vaddr) {
 		ubc_upl_unmap(upl);
 		vaddr = NULL;
-	}
-
-	if (error) {
-		int abortflags;
-		if (error == EAGAIN)
-			abortflags = UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY;
-		else
-			abortflags = UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY;
-
-		kern_return_t abortret = ubc_upl_abort(upl, abortflags);
-		if (abortret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: ubc_upl_abort error %d (already had error %d for file %s)\n",
-			    __func__, __LINE__, abortret, error, zp->z_name_cache);
-		}
-	} else {
-		int commitflags = UPL_COMMIT_FREE_ON_EMPTY
-		    | UPL_COMMIT_CLEAR_PRECIOUS
-		    | UPL_COMMIT_CLEAR_DIRTY;
-		kern_return_t commitret = ubc_upl_commit_range(upl, 0, a_size, commitflags);
-		if (commitret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: error %d from ubc_upl_commit_range 0 - %ld f_off %lld file %s\n",
-			    __func__, __LINE__, commitret, a_size, ap->a_f_offset, zp->z_name_cache);
-			error = commitret;
-		}
 	}
 
 	upl = NULL;
