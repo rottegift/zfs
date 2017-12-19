@@ -3192,11 +3192,32 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * This could be the source of the "intransigent" page wiping
 			 * out the changes at unmount.
 			 */
-			printf ("ZFS: %s:%d unforeseen clean page @ index %lld upl_offset %lld for UPL %p,"
+			printf ("ZFS: %s:%d committing unforeseen clean page"
+			    " @ index %lld upl_offset %lld for UPL %p,"
 			    " need_release = %d, msync %d, foff %lld size %ld flags 0x%x file %s\n",
 			    __func__, __LINE__, pg_index, offset, upl, need_release,
 			    (a_flags & UPL_UBC_MSYNC) == UPL_UBC_MSYNC,
 			    ap->a_f_offset, ap->a_size, ap->a_flags, zp->z_name_cache);
+			ASSERT3U(trunc_page_64(offset), ==, pg_index * PAGE_SIZE);
+			int commitflags = UPL_COMMIT_FREE_ON_EMPTY
+			    | UPL_COMMIT_CLEAR_PRECIOUS
+			    | UPL_COMMIT_CLEAR_DIRTY;
+			kern_return_t commitret = ubc_upl_commit_range(upl,
+			    pg_index * PAGE_SIZE, PAGE_SIZE, commitflags);
+			if (commitret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: error %d cleaning precious page "
+				    " @ index [bytes %lld..%lld],  %lld foff %lld file %s\n",
+				    __func__, __LINE__, commitret,
+				    pg_index, ap->a_f_offset,
+				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
+				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
+				    zp->z_name_cache);
+			}
+			f_offset += PAGE_SIZE;
+			offset   += PAGE_SIZE;
+			isize    -= PAGE_SIZE;
+			pg_index++;
+			continue;
 		}
 
 		if ( !upl_page_present(pl, pg_index)) {
