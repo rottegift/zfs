@@ -108,6 +108,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_want_lock;
 	kstat_named_t pageoutv2_upl_iosync;
 	kstat_named_t pageoutv2_cleaned_precious_pages;
+	kstat_named_t pageoutv2_skip_empty_tail_pages;
 	kstat_named_t pageoutv2_skip_clean_pages;
 	kstat_named_t pageoutv2_all_previously_freed;
 	kstat_named_t pageoutv1_pages;
@@ -133,6 +134,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_cleaned_precious_pagess", KSTAT_DATA_UINT64 },
+	{ "pageoutv2_skip_empty_tail_pages",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_skip_clean_pages",        KSTAT_DATA_UINT64 },
 	{ "pageoutv2_all_previously_freed",    KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
@@ -3117,6 +3119,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	filesize = zp->z_size; /* get consistent copy of zp_size */
 
 	isize = ap->a_size;
+	ASSERT3S(isize & PAGE_MASK_64, ==, 0);
+	ASSERT3S(isize, >, 0);
 	f_offset = ap->a_f_offset;
 
 	/*
@@ -3146,17 +3150,24 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		if (upl_page_present(pl, --pg_index))
 			break;
-		VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
+		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
+		kern_return_t abort_present_page_ret =
+		    ubc_upl_abort_range(upl, pg_index * PAGE_SIZE_64, PAGE_SIZE_64,
+			UPL_ABORT_FREE_ON_EMPTY);
+		if (abort_present_page_ret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: error %d aborting present page index %lld upl_f_off %lld,"
+			    " file %s\n", __func__, __LINE__, abort_present_page_ret,
+			    pg_index, ap->a_f_offset, zp->z_name_cache);
+			if (error == 0)
+				error = abort_present_page_ret;
+		}
 		if (pg_index == 0) {
-			dprintf("ZFS: failed on pg_index\n");
 			dmu_tx_commit(tx);
 			if (vaddr) {
 				ubc_upl_unmap(upl);
 				vaddr = NULL;
 			}
-			kern_return_t all_freed_abort_ret =
-			    ubc_upl_abort_range(upl, 0, isize, UPL_ABORT_FREE_ON_EMPTY);
-			ASSERT3S(all_freed_abort_ret, ==, KERN_SUCCESS);
+			VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
 			goto pageout_done;
 		}
 	}
