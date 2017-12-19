@@ -3212,14 +3212,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    (a_flags & UPL_UBC_MSYNC) == UPL_UBC_MSYNC,
 			    ap->a_f_offset, ap->a_size, ap->a_flags, zp->z_name_cache);
 			ASSERT3U(trunc_page_64(offset), ==, pg_index * PAGE_SIZE);
-			int abortflags = UPL_ABORT_FREE_ON_EMPTY
-			    | UPL_ABORT_DUMP_PAGES;
-			kern_return_t abortret = ubc_upl_abort_range(upl,
-			    pg_index * PAGE_SIZE, PAGE_SIZE, abortflags);
-			if (abortret != KERN_SUCCESS) {
+			int commitflags = UPL_COMMIT_FREE_ON_EMPTY;
+			kern_return_t commitret = ubc_upl_commit_range(upl,
+			    pg_index * PAGE_SIZE, PAGE_SIZE, commitflags);
+			if (commitret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d cleaning precious page "
 				    " @ index [bytes %lld..%lld],  %lld foff %lld file %s\n",
-				    __func__, __LINE__, abortret,
+				    __func__, __LINE__, commitret,
 				    pg_index, ap->a_f_offset,
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
