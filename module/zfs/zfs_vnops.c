@@ -1969,7 +1969,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	int poflags = (ioflags & IO_SYNC) ? UPL_IOSYNC : 0;
 
 	return (zfs_pageout(zfsvfs, zp, mupl, 0, upl_f_off, PAGE_SIZE, poflags,
-		B_FALSE, B_TRUE));
+		B_FALSE, B_FALSE, B_FALSE));
 }
 
 static inline
