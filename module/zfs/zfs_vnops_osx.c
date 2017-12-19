@@ -107,6 +107,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_calls;
 	kstat_named_t pageoutv2_want_lock;
 	kstat_named_t pageoutv2_upl_iosync;
+	kstat_named_t pageoutv2_cleaned_precious_pages;
 	kstat_named_t pageoutv2_skip_clean_pages;
 	kstat_named_t pageoutv2_all_previously_freed;
 	kstat_named_t pageoutv1_pages;
@@ -131,6 +132,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
+	{ "pageoutv2_cleaned_precious_pagess", KSTAT_DATA_UINT64 },
 	{ "pageoutv2_skip_clean_pages",        KSTAT_DATA_UINT64 },
 	{ "pageoutv2_all_previously_freed",    KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
@@ -3213,6 +3215,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
 				    zp->z_name_cache);
 			}
+			VNOPS_OSX_STAT_BUMP(pageoutv2_cleaned_precious_pages);
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
 			isize    -= PAGE_SIZE;
