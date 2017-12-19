@@ -678,7 +678,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	int err = 0;
 
-	int upl_flags = UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT;
+	int upl_flags = UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT | UPL_PRECIOUS;
 
 	err = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl, upl_flags);
 
@@ -862,7 +862,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags = UPL_FILE_IO | UPL_SET_LITE;
+		int uplcflags = UPL_PRECIOUS | UPL_FILE_IO | UPL_SET_LITE;
 
 		err = ubc_create_upl(vp, cur_upl_file_offset, cur_upl_size, &upl, &pl, uplcflags);
 
@@ -1916,7 +1916,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	 */
 	upl_t mupl = NULL;
 	kern_return_t muplret = ubc_create_upl(vp, upl_f_off, PAGE_SIZE, &mupl, NULL,
-	    UPL_WILL_MODIFY);
+	    UPL_PRECIOUS | UPL_WILL_MODIFY);
 	ASSERT3S(muplret, ==, KERN_SUCCESS);
 	if (muplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld file %s\n",
