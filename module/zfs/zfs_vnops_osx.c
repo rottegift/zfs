@@ -2984,14 +2984,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			secs = 1;
 		if (rw_tryenter(&zp->z_map_lock, RW_WRITER))
 			break;
-		// couldn't get it, maybe drop the range lock
-		if (rl->r_write_wanted || rl->r_read_wanted) {
-			printf("ZFS: %s:%d range lock contended, dropping it for [%lld, %ld] for file %s\n",
-			    __func__, __LINE__, ap->a_f_offset, a_size, zp->z_name_cache);
-			zfs_range_unlock(rl);
-			IOSleep(1); // we hold no locks, so let work be done
-			rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
-		}
 		hrtime_t cur_time = gethrtime();
 		if (cur_time > print_time) {
 			secs++;
@@ -3002,6 +2994,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
                             : "(NULL)",
 			    zp->z_name_cache);
 			print_time = cur_time + SEC2NSEC(1);
+			zfs_range_unlock(rl);
+			printf("ZFS: %s:%d range lock dropedit for [%lld, %ld] for file %s\n",
+			    __func__, __LINE__, ap->a_f_offset, a_size, zp->z_name_cache);
+			IOSleep(1); // we hold no locks, so let work be done
+			rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
 		}
 		IODelay(1);
 	}
