@@ -3233,8 +3233,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 		boolean_t bluster_print_flag = B_FALSE;
 		while (xsize>0) {
-			if ( !upl_dirty_page (pl, pg_index + num_of_pages)) {
-				printf("ZFS: %s:%d: found non-dirty (precious) page at page index %lld"
+			if ( !upl_dirty_page(pl, pg_index + num_of_pages) &&
+			    upl_page_present(pl, pg_index + num_of_pages)) {
+				printf("ZFS: %s:%d: found non-dirty (but present) page at page index %lld"
 				    " of upl [%lld..%lld] file %s\n",
 				    __func__, __LINE__,
 				    pg_index + num_of_pages, ap->a_f_offset,
