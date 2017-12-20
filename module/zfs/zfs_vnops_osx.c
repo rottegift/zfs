@@ -3160,7 +3160,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    upl_page_present(pl, 0), upl_page_present(pl, 0),
 				    ap->a_f_offset, ap->a_size,  zp->z_name_cache);
 			}
-			if (upl_dirty_page(pl, pg_index))
+			if (!upl_dirty_page(pl, pg_index))
 			    bluster_print_flag = B_TRUE;
 			break;
 		}
