@@ -2724,9 +2724,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     struct vnop_pageout_args *ap,
     caddr_t *pvaddr)
 {
-	int           io_size;
-	int           rounded_size;
-	off_t         max_size;
 	int           is_clcommit = 0;
 	dmu_tx_t *tx;
 	int       error = 0;
@@ -2739,6 +2736,11 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	if ((flags & UPL_NOCOMMIT) == 0)
 		is_clcommit = 1;
 
+	/*
+	 * if is_clcommit (expected to be true) then we MUST commit or
+	 * abort all the pages from upl_offset to upl_offset + size
+	 * before returning
+	 */
 
 	/*
 	 * If they didn't specify any I/O, then we are done...
@@ -2776,25 +2778,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 		return (EINVAL);
 	}
-	max_size = filesize - f_offset;
-
-	if (size < max_size)
-		io_size = size;
-	else
-		io_size = max_size;
-
-	rounded_size = (io_size + (PAGE_SIZE - 1)) & ~PAGE_MASK;
-
-	if (size > rounded_size) {
-		if (is_clcommit) {
-			kern_return_t big_upl_abort_trim_ret =
-			    ubc_upl_abort_range(upl, upl_offset + rounded_size, size - rounded_size,
-								UPL_ABORT_FREE_ON_EMPTY);
-			ASSERT3S(big_upl_abort_trim_ret, ==, KERN_SUCCESS);
-			printf("ZFS: %s:%d: upl was too big, trimmed %d-%d\n", __func__, __LINE__,
-			    upl_offset + rounded_size, size - rounded_size);
-		}
-	}
 
 	if (f_offset > filesize) {
 		printf("ZFS: %s:%d: trying to write starting past filesize %lld : off %lld, size %u,"
@@ -2810,14 +2793,29 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	int write_size = size;
 	if (f_offset + size > filesize) {
-		printf("ZFS: %s:%d (trying to extend file) lowering write_size %u to %llu,"
-		    " off %lld filesize %lld file %s\n",
-		    __func__, __LINE__,
-		    write_size, f_offset > filesize ? 0ULL : filesize - f_offset,
-		    f_offset, filesize, zp->z_name_cache);
 		ASSERT3S(filesize - f_offset, <, INT_MAX);
 		ASSERT3S(filesize - f_offset, >, 0);
-		write_size = filesize - f_offset;
+		int write_space = filesize - f_offset;
+		if (write_space <= 0)  {
+			printf("ZFS: %s:%d: write_space %d, filesize (%lld) - foffset (%lld) < 1 (%d)"
+			    " ! for upl_offset %u a_f_off %lld a_size %ld @ file %s\n",
+			    __func__, __LINE__, write_space, filesize, f_offset, write_space,
+			    upl_offset, ap->a_f_offset, ap->a_size, zp->z_name_cache);
+			if (is_clcommit) {
+				int abortret = ubc_upl_abort_range(upl, upl_offset, size,
+				    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+				ASSERT3S(abortret, ==, KERN_SUCCESS);
+			}
+			return (SET_ERROR(EINVAL));
+		}
+		write_size = MAX(size, write_space);
+		if (write_size < size) {
+			printf("ZFS: %s:%d reducing write_size from size %u to %d,"
+			    " off %lld filesize %lld file %s\n",
+			    __func__, __LINE__,
+			    size, write_size,
+			    f_offset, filesize, zp->z_name_cache);
+		}
 	}
 
 	if (!dmu_write_is_safe(zp, f_offset, f_offset + write_size)) {
@@ -3315,6 +3313,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 	}
 
+	/*
+	 * abort any empty pages at the end of the UPL; additionally, we
+	 * to know where the final present page is, so that we can make
+	 * the FREE_ON_EMPTY logic correct
+	 */
 	const int end_pg = ((isize) / PAGE_SIZE);
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		pg_index--;
@@ -3354,6 +3357,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			goto unmap_pageout_done;
 		}
 	}
+	const int last_nonempty_pg = pg_index;
 
 	dprintf("ZFS: isize %llu pg_index %llu\n", isize, pg_index);
 	/*
@@ -3392,6 +3396,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
 				    zp->z_name_cache);
+			} else {
+				printf("ZFS: %s:%d: (hole) aborted (absent) page index %lld foff %lld"
+				    " size %ld file %s\n", __func__, __LINE__,
+				    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
 			}
 
 			VNOPS_OSX_STAT_BUMP(pageoutv2_skip_absent_pages);
@@ -3410,9 +3418,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		num_of_pages = 1;
 		xsize = isize - PAGE_SIZE;
 
+		ASSERT(upl_page_present(pl, pg_index));
+
 		while (xsize>0) {
 			if ( !upl_dirty_page(pl, pg_index + num_of_pages) &&
 			    upl_page_present(pl, pg_index + num_of_pages)) {
+				/* dirty: 1 present: 1, this is part of a run of present pages */
 				printf("ZFS: %s:%d: found non-dirty (but present) page at page index %lld"
 				    " of upl [%lld..%lld] file %s (continuing to gather)\n",
 				    __func__, __LINE__,
@@ -3420,9 +3431,20 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    ap->a_f_offset + ap->a_size, zp->z_name_cache);
 				bluster_print_flag = B_TRUE;
 			} else if ( !upl_page_present(pl, pg_index + num_of_pages)) {
+				/*
+				 * dirty: 0 present: 0, this ends the run of present pages,
+				 * commit the run that has been found so far, then loop back
+				 * to while loop to abort this closing boundary
+				 */
 				ASSERT0(upl_dirty_page(pl, pg_index + num_of_pages));
+				printf("ZFS: %s:%d: hole found at page index %lld in foff %lld"
+				    " size %ld file %s\n",  __func__, __LINE__,
+				    pg_index + num_of_pages,
+				    ap->a_f_offset, ap->a_size, zp->z_name_cache);
 				break;
 			}
+			/* present: 1: dirty: either, this is part of a run of present pages */
+			ASSERT(upl_page_present(pl, pg_index + num_of_pages));
 			num_of_pages++;
 			xsize -= PAGE_SIZE;
 		}
@@ -3430,14 +3452,20 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		xsize = num_of_pages * PAGE_SIZE;
 
 		if (bluster_print_flag == B_TRUE) {
-			printf("ZFS: %s:%d bluster offset %lld fileoff %lld size %lld filesize %lld"
+			printf("ZFS: %s:%d bluster (upl)offset %lld fileoff %lld size %lld filesize %lld"
 			    " a_flags %d file %s\n",
 			    __func__, __LINE__,
 			    offset, f_offset, xsize, filesize,
 			    a_flags, zp->z_name_cache);
 		}
+
 		ASSERT3S(xsize, <=, MAX_UPL_SIZE_BYTES);
 		ASSERT3S(ubc_getsize(vp), ==, filesize);
+
+		/*
+		 * bluster_pageout MUST abort or commit all the UPL pages between
+		 * offset and offset+xsize
+		 */
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
 		    filesize, a_flags, ap, &v_addr);
 
@@ -3454,6 +3482,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		isize    -= xsize;
 		pg_index += num_of_pages;
 	} // while isize
+
+	ASSERT3S(pg_index, ==, last_nonempty_pg);
 
 	int unmap_ret;
 
@@ -3497,6 +3527,7 @@ pageout_done:
 
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
 
 	zfs_range_unlock(rl);
