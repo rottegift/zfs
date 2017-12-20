@@ -2694,6 +2694,8 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	VNOPS_OSX_STAT_BUMP(bluster_pageout_calls);
 
+	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, filesize);
+
 	if ((flags & UPL_NOCOMMIT) == 0)
 		is_clcommit = 1;
 
@@ -2757,7 +2759,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 
 	if (f_offset + size > filesize) {
-		dprintf("ZFS: %s:%d (trying to extend file) lowering size %u to %llu, file %s\n",
+		printf("ZFS: %s:%d (trying to extend file) lowering size %u to %llu, file %s\n",
 		    __func__, __LINE__,
 		    size, f_offset > filesize ? 0ULL : filesize - f_offset, zp->z_name_cache);
 		size = filesize - f_offset;
@@ -3245,7 +3247,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		 */
 		num_of_pages = 1;
 		xsize = isize - PAGE_SIZE;
-		ASSERT3S(xsize, >=, PAGE_SIZE);
 
 		while (xsize>0) {
 			if ( !upl_dirty_page(pl, pg_index + num_of_pages) &&
@@ -3286,6 +3287,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    offset, f_offset, xsize, filesize, zp->z_name_cache);
 		}
 		ASSERT3S(xsize, <=, MAX_UPL_SIZE_BYTES);
+		ASSERT3S(ubc_getsize(vp), ==, filesize);
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
 								 filesize, a_flags, vaddr, tx);
 
