@@ -3450,8 +3450,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	int unmap_ret;
 
-unmap_pageout_done:
-
 	unmap_ret = ubc_upl_unmap(upl);
 	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
 	if (unmap_ret != KERN_SUCCESS && error == 0)
@@ -3475,6 +3473,13 @@ unmap_pageout_done:
 	if (error)
 		dprintf("ZFS: pageoutv2 failed %d\n", error);
 	return (error);
+
+unmap_pageout_done:
+
+	unmap_ret = ubc_upl_unmap(upl);
+	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
+	if (unmap_ret != KERN_SUCCESS && error == 0)
+		error = EINVAL;
 
 pageout_done:
 
