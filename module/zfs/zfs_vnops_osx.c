@@ -2721,7 +2721,8 @@ static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     upl_offset_t upl_offset, off_t f_offset, int size,
     uint64_t filesize, int flags,
-    struct vnop_pageout_args *ap)
+    struct vnop_pageout_args *ap,
+    caddr_t *pvaddr)
 {
 	int           io_size;
 	int           rounded_size;
@@ -2829,25 +2830,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 
 
-	/* map in UPL address space */
-
-	printf("ZFS: %s:%d: mapping upl [%lld...%lld] @ file %s\n",
-	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-	    zp->z_name_cache);
-
-	caddr_t v_addr;
-	int mapret = 0;
-	if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
-		error = EINVAL;
-		printf("ZFS: %s:%d unable to map, error %d\n", __func__, __LINE__, mapret);
-		if (is_clcommit) {
-			int abortret = ubc_upl_abort_range(upl,
-			    upl_offset, size,
-				UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
-			ASSERT3S(abortret, ==, KERN_SUCCESS);
-		}
-		return(error);
-	}
 
 	printf("ZFS: %s:%d: beginning DMU transaction on %s\n", __func__, __LINE__,
 	    zp->z_name_cache);
@@ -2872,10 +2854,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return (error);
 	}
 
-	printf("ZFS: %s:%d: dmu_write %d bytes from &v_addr[%u] to offset %lld in file %s\n",
+	printf("ZFS: %s:%d: dmu_write %d bytes from pvaddr[%u] to offset %lld in file %s\n",
 	    __func__, __LINE__, size, upl_offset, f_offset, zp->z_name_cache);
 
-	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, &v_addr[upl_offset], tx);
+	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, pvaddr[upl_offset], tx);
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
 	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + size);
 	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, size);
@@ -2883,12 +2865,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	printf("ZFS: %s:%d: success, unmapping upl %lld @ file %s\n", __func__, __LINE__,
 	    ap->a_f_offset, zp->z_name_cache);
-
-	int unmap_ret = ubc_upl_unmap(upl);
-	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
-	if (unmap_ret != KERN_SUCCESS && error == 0)
-		error = EINVAL;
-
 	/* update SA and finish off transaction */
         if (error == 0) {
                 uint64_t mtime[2], ctime[2];
@@ -3086,7 +3062,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (!zp || !zp->z_zfsvfs || !zp->z_sa_hdl) {
 		printf("ZFS: vnop_pageout: null zp or zfsvfs\n");
-		return ENXIO;
+		return (ENXIO);
 	}
 
 	zfsvfs = zp->z_zfsvfs;
@@ -3196,35 +3172,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	if (error) {
 		ZFS_EXIT(zfsvfs);
                 printf("ZFS: %s:%d: (extend fail) returning error %d\n", __func__, __LINE__, error);
-                return (error);
-	}
-
-	/* Grab UPL now */
-	int request_flags;
-
-	/*
-	 * we're in control of any UPL we commit
-	 * make sure someone hasn't accidentally passed in UPL_NOCOMMIT
-	 */
-	a_flags &= ~UPL_NOCOMMIT;
-	a_pl_offset = 0;
-
-	if (a_flags & UPL_MSYNC) {
-		request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
-	}
-	else {
-		request_flags = UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY;
-	}
-
-	ASSERT3S(ap->a_size, <=, MAX_UPL_SIZE_BYTES);
-
-	error = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl,
-						   request_flags );
-	if (error || (upl == NULL)) {
-		printf("ZFS: %s: Failed to create UPL! %d\n", __func__, error);
 		goto pageout_done;
 	}
-
 
 	/*
 	 * If zfs_range_lock() over-locked we grow the blocksize
@@ -3270,15 +3219,54 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			ASSERT3S(error, ==, 0);
 			if (error != 0) {
 				dmu_tx_abort(tx);
-				kern_return_t abort_ret = ubc_upl_abort(upl,
-				    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
-				ASSERT3S(abort_ret, ==, KERN_SUCCESS);
 				goto pageout_done;
 			}
 			zfs_grow_blocksize(zp, new_blksz, tx);
 			dmu_tx_commit(tx);
 		}
 		zfs_range_reduce(rl, rloff, rllen);
+	}
+
+	/* Grab UPL now */
+	int request_flags;
+
+	/*
+	 * we're in control of any UPL we commit
+	 * make sure someone hasn't accidentally passed in UPL_NOCOMMIT
+	 */
+	a_flags &= ~UPL_NOCOMMIT;
+	a_pl_offset = 0;
+
+	if (a_flags & UPL_MSYNC) {
+		request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
+	}
+	else {
+		request_flags = UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY;
+	}
+
+	ASSERT3S(ap->a_size, <=, MAX_UPL_SIZE_BYTES);
+
+	error = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl,
+						   request_flags );
+	if (error || (upl == NULL)) {
+		printf("ZFS: %s: Failed to create UPL! %d\n", __func__, error);
+		goto pageout_done;
+	}
+
+	/* map in UPL address space */
+
+	printf("ZFS: %s:%d: mapping upl [%lld...%lld] @ file %s\n",
+	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+	    zp->z_name_cache);
+
+	caddr_t v_addr;
+	int mapret = 0;
+	if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
+		error = EINVAL;
+		printf("ZFS: %s:%d unable to map, error %d\n", __func__, __LINE__, mapret);
+		int abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+		ASSERT3S(abortret, ==, KERN_SUCCESS);
+		goto pageout_done;
 	}
 
 	off_t f_offset;
@@ -3355,7 +3343,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    " pageout size %ld file %s\n", __func__, __LINE__,
 			    ap->a_f_offset, ap->a_size, zp->z_name_cache);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
-			goto pageout_done;
+			goto unmap_pageout_done;
 		}
 	}
 
@@ -3433,7 +3421,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 		xsize = num_of_pages * PAGE_SIZE;
 
-
 		if (bluster_print_flag == B_TRUE) {
 			printf("ZFS: %s:%d bluster offset %lld fileoff %lld size %lld filesize %lld"
 			    " a_flags %d file %s\n",
@@ -3444,7 +3431,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT3S(xsize, <=, MAX_UPL_SIZE_BYTES);
 		ASSERT3S(ubc_getsize(vp), ==, filesize);
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
-		    filesize, a_flags, ap);
+		    filesize, a_flags, ap, &v_addr);
 
 		if (merror != 35) { ASSERT3S(merror, ==, 0); }
 		if (merror != 0)
@@ -3460,6 +3447,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		isize    -= xsize;
 		pg_index += num_of_pages;
 	} // while isize
+
+	int unmap_ret;
+
+unmap_pageout_done:
+
+	unmap_ret = ubc_upl_unmap(upl);
+	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
+	if (unmap_ret != KERN_SUCCESS && error == 0)
+		error = EINVAL;
 
 	upl = NULL;
 	if (had_map_lock_at_entry == B_FALSE) {
@@ -3480,7 +3476,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		dprintf("ZFS: pageoutv2 failed %d\n", error);
 	return (error);
 
-  pageout_done:
+pageout_done:
 
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
@@ -3488,7 +3484,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	zfs_range_unlock(rl);
 
-  exit_abort:
+exit_abort:
 	dprintf("ZFS: pageoutv2 aborted %d\n", error);
 	//VERIFY(ubc_create_upl(vp, off, len, &upl, &pl, flags) == 0);
 	//ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
