@@ -3199,58 +3199,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 		//printf("isize %d for page %d\n", isize, pg_index);
 
-		if ( !upl_dirty_page(pl, pg_index) && upl_page_present(pl, pg_index)) {
-			/* hfs has a call to panic here, but we trigger this *a lot* so
-			 * unsure what is going on */
-			/*
-			 * RET_ONLY_DIRTY brings forward 'precious' pages that are not
-			 * dirty.   We probably don't want to steal them or modify their
-			 * status beyond what gathering them up into the UPL has done
-			 * (gathering into the UPL sets the hw dirty bit false but the
-			 * sw dirty bit true).    If we commit this page, it will set
-			 * the sw dirty bit false (but not disturb the hw dirty bit
-			 * further).
-			 *
-			 * This could be the source of the "intransigent" page wiping
-			 * out the changes at unmount.
-			 */
-			printf ("ZFS: %s:%d committing unforeseen clean page"
-			    " @ index %lld upl_offset %lld for UPL %p,"
-			    " need_release = %d, msync %d, foff %lld size %ld flags 0x%x file %s\n",
-			    __func__, __LINE__, pg_index, offset, upl, need_release,
-			    (a_flags & UPL_UBC_MSYNC) == UPL_UBC_MSYNC,
-			    ap->a_f_offset, ap->a_size, ap->a_flags, zp->z_name_cache);
-			ASSERT3U(trunc_page_64(offset), ==, pg_index * PAGE_SIZE);
-			int commitflags = UPL_COMMIT_FREE_ON_EMPTY;
-			kern_return_t commitret = ubc_upl_commit_range(upl,
-			    pg_index * PAGE_SIZE, PAGE_SIZE, commitflags);
-			if (commitret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: error %d cleaning precious page"
-				    " @ page index %lld [bytes %lld..%lld], foff %lld file %s\n",
-				    __func__, __LINE__, commitret,
-				    pg_index,
-				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
-				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
-				    ap->a_f_offset,
-				    zp->z_name_cache);
-			} else {
-				printf("ZFS: %s:%d success cleaning precious page"
-				    " @ page index %lld [bytes %lld..%lld], foff %lld file %s\n",
-				    __func__, __LINE__,
-				    pg_index,
-				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
-				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
-				    ap->a_f_offset,
-				    zp->z_name_cache);
-			}
-			VNOPS_OSX_STAT_BUMP(pageoutv2_cleaned_precious_pages);
-			f_offset += PAGE_SIZE;
-			offset   += PAGE_SIZE;
-			isize    -= PAGE_SIZE;
-			pg_index++;
-			continue;
-		}
-
 		if ( !upl_page_present(pl, pg_index)) {
 			/*
 			 * we asked for RET_ONLY_DIRTY, so it's possible
@@ -3287,8 +3235,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		xsize = isize - PAGE_SIZE;
 
 		while (xsize>0) {
-			if ( !upl_dirty_page(pl, pg_index + num_of_pages))
+			if ( !upl_page_present(pl, pg_index + num_of_pages))
 				break;
+			if ( !upl_dirty_page (pl, pg_index + num_of_pages)) {
+				printf("ZFS: %s:%d: found non-dirty (precious) page at page index %lld"
+				    " of upl [%lld..%lld] file %s\n",
+				    __func__, __LINE__,
+				    pg_index + num_of_pages, ap->a_f_offset,
+				    ap->a_f_offset + ap->a_size, zp->z_name_cache);
+			}
 			num_of_pages++;
 			xsize -= PAGE_SIZE;
 		}
