@@ -3127,6 +3127,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 
 	/* debugging */
+	boolean_t bluster_print_flag = B_FALSE;
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		pg_index--;
 		if (!upl_page_present(pl, pg_index)) {
@@ -3141,6 +3142,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    __func__, __LINE__, pg_index, ((isize)/PAGE_SIZE)-1,
 			    ap->a_size, ap->a_f_offset,
 			    zp->z_name_cache);
+			bluster_print_flag = B_TRUE;
 		}
 	}
 
@@ -3154,6 +3156,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    upl_page_present(pl, 0), upl_page_present(pl, 0),
 				    ap->a_f_offset, ap->a_size,  zp->z_name_cache);
 			}
+			if (upl_dirty_page(pl, pg_index))
+			    bluster_print_flag = B_TRUE;
 			break;
 		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
@@ -3196,6 +3200,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * isize is the offset into the UPL of the last non-clean page.
 	 */
 	isize = ((pg_index + 1) * PAGE_SIZE);
+	ASSERT3S(isize, >=, PAGE_SIZE);
 
 	offset = 0;
 	pg_index = 0;
@@ -3240,18 +3245,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		 */
 		num_of_pages = 1;
 		xsize = isize - PAGE_SIZE;
+		ASSERT3S(xsize, >=, PAGE_SIZE);
 
-		boolean_t bluster_print_flag = B_FALSE;
 		while (xsize>0) {
 			if ( !upl_dirty_page(pl, pg_index + num_of_pages) &&
 			    upl_page_present(pl, pg_index + num_of_pages)) {
 				printf("ZFS: %s:%d: found non-dirty (but present) page at page index %lld"
-				    " of upl [%lld..%lld] file %s\n",
+				    " of upl [%lld..%lld] file %s (continuing to gather)\n",
 				    __func__, __LINE__,
 				    pg_index + num_of_pages, ap->a_f_offset,
 				    ap->a_f_offset + ap->a_size, zp->z_name_cache);
 				bluster_print_flag = B_TRUE;
-				break;
 			} else if ( !upl_page_present(pl, pg_index + num_of_pages)) {
 				ASSERT0(upl_dirty_page(pl, pg_index + num_of_pages));
 				break;
@@ -3259,6 +3263,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			num_of_pages++;
 			xsize -= PAGE_SIZE;
 		}
+
 		xsize = num_of_pages * PAGE_SIZE;
 
 		// Map it if needed
