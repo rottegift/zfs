@@ -2858,13 +2858,11 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	    __func__, __LINE__, size, upl_offset, f_offset, zp->z_name_cache);
 
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, pvaddr[upl_offset], tx);
+
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
 	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + size);
 	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, size);
 
-
-	printf("ZFS: %s:%d: success, unmapping upl %lld @ file %s\n", __func__, __LINE__,
-	    ap->a_f_offset, zp->z_name_cache);
 	/* update SA and finish off transaction */
         if (error == 0) {
                 uint64_t mtime[2], ctime[2];
@@ -2881,15 +2879,20 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
                     B_TRUE);
 		error = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(error);
-                zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, ap->a_f_offset,
-                                          ap->a_size, 0,
+                zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, f_offset, size, 0,
                     NULL, NULL);
         } else {
 		printf("ZFS: %s:%d: because of earlier error %d, did not SA update %s\n",
 		    __func__, __LINE__, error, zp->z_name_cache);
 	}
 
+	printf("ZFS: %s:%d: DMU committing tx for [%lld..%lld] in file %s\n",
+	    __func__, __LINE__, f_offset, f_offset + size, zp->z_name_cache);
+
 	dmu_tx_commit(tx);
+
+	printf("ZFS: %s:%d: successfully committed tx for [%lld..%lld] in file %s\n",
+	    __func__, __LINE__, f_offset, f_offset+size, zp->z_name_cache);
 
 	if (is_clcommit) {
 		if (error != 0) {
@@ -2920,6 +2923,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 				    __func__, __LINE__, commitret,
 				    upl_offset, size, f_offset, zp->z_name_cache);
 				error = commitret;
+			} else {
+				printf("ZFS: %s:%d: successfully committed range %u - %d"
+				    " f_off %lld file %s\n", __func__, __LINE__,
+				    upl_offset, size, f_offset, zp->z_name_cache);
 			}
 		}
 	}
@@ -3441,7 +3448,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		if ((error == 0) && (merror))
 			error = merror;
 
-
 		f_offset += xsize;
 		offset   += xsize;
 		isize    -= xsize;
@@ -3449,6 +3455,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	} // while isize
 
 	int unmap_ret;
+
+	printf("ZFS: %s:%d: loop done, unmapping file [%lld..%lld] %s\n",
+	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+	    zp->z_name_cache);
 
 	unmap_ret = ubc_upl_unmap(upl);
 	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
@@ -3464,6 +3474,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	zfs_range_unlock(rl);
 
 	if (a_flags & UPL_IOSYNC) {
+		printf("ZFS: %s:%d zil_commit file %s\n", __func__, __LINE__, zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
 	}
