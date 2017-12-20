@@ -3128,7 +3128,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	/* debugging */
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
-		if (!upl_page_present(pl, --pg_index)) {
+		pg_index--;
+		if (!upl_page_present(pl, pg_index)) {
 			dprintf("ZFS: %s:%d: page %lld of %lld not present, upl size %ld "
 			    " starts at %lld file %s\n",
 			    __func__, __LINE__, pg_index, ((isize)/PAGE_SIZE)-1,
@@ -3145,8 +3146,16 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	const int end_pg = ((isize) / PAGE_SIZE);
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
-		if (upl_page_present(pl, --pg_index))
+		pg_index--;
+		if (upl_page_present(pl, pg_index) || upl_dirty_page(pl, pg_index)) {
+			if (pg_index == 0) {
+				printf("ZFS: %s:%d page_index 0 pres %d dirt %d foff %lld sz %ld file %s\n",
+				    __func__, __LINE__,
+				    upl_page_present(pl, 0), upl_page_present(pl, 0),
+				    ap->a_f_offset, ap->a_size,  zp->z_name_cache);
+			}
 			break;
+		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
 		kern_return_t abort_present_page_ret =
 		    ubc_upl_abort_range(upl, pg_index * PAGE_SIZE_64, PAGE_SIZE_64,
@@ -3197,6 +3206,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		//printf("isize %d for page %d\n", isize, pg_index);
 
 		if ( !upl_page_present(pl, pg_index)) {
+			ASSERT0(upl_dirty_page(pl, pg_index));
 			/*
 			 * we asked for RET_ONLY_DIRTY, so it's possible
 			 * to get back empty slots in the UPL.
@@ -3241,8 +3251,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    pg_index + num_of_pages, ap->a_f_offset,
 				    ap->a_f_offset + ap->a_size, zp->z_name_cache);
 				bluster_print_flag = B_TRUE;
+				break;
 			} else if ( !upl_page_present(pl, pg_index + num_of_pages)) {
-				    break;
+				ASSERT0(upl_dirty_page(pl, pg_index + num_of_pages));
+				break;
 			}
 			num_of_pages++;
 			xsize -= PAGE_SIZE;
