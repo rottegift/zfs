@@ -3095,6 +3095,29 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	ASSERT(ubc_pages_resident(vp));
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 
+	if (vnode_vfsisrdonly(ZTOV(zp))) {
+		printf("ZFS: %s:%d: readonly filesystem for [%lld...%lld] file %s\n",
+		    __func__, __LINE__, ap->a_f_offset,
+		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
+		error = EROFS;
+		goto exit_abort;
+	}
+
+	if (ap->a_size <= 0) {
+		printf("ZFS: %s:%d: invalid ap->a_size %ld, ap->a_f_offset %lld, file %s\n",
+		    __func__, __LINE__, ap->a_size, ap->a_f_offset, zp->z_name_cache);
+		error = EINVAL;
+		goto exit_abort;
+	}
+
+	if (ap->a_f_offset < 0 || ap->a_f_offset >= zp->z_size) {
+		printf("ZFS: %s:%d: invalid offset %lld vs filesize %lld\n",
+		    __func__, __LINE__, ap->a_f_offset, zp->z_size);
+		error = EINVAL;
+		goto exit_abort;
+	}
+
+
 	/*
 	 * To avoid deadlocking, we must take the range lock, then
 	 * acquire the z_map_lock lock.  If we enter with the
