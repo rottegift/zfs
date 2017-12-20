@@ -2772,6 +2772,8 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return(EAGAIN);
 	}
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, &vaddr[upl_offset], tx);
+	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
+	ASSERT3S(ubc_getsize(ZTOV(zp)), <=, f_offset + size);
 	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, size);
 
 	if (size > 0) {
