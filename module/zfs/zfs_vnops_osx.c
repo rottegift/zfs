@@ -2681,6 +2681,42 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	return (retval);
 }
 
+#if 0
+static int
+copy_upl_to_mem(upl_t upl, upl_page_info_t *pl,
+    int upl_offset, int bytes_to_copy, void *mem)
+{
+
+	int error;
+	uio_t uio;
+
+	ASSERT3S(upl_offset, >, 0);
+	ASSERT3S(upl_offset, <=, MAX_UPL_SIZE_BYTES - round_page(bytes_to_copy));
+
+	int page_index_start, page_index_end, it;
+	page_index_start = upl_offset / PAGE_SIZE;
+	page_index_end = howmany(upl_offset + bytes_to_copy, PAGE_SIZE);
+	for (i = page_index_start; i < page_index_end; i++) {
+		ASSERT(upl_valid_page(pl, i));
+	}
+
+	uio = uio_create(1, 0, UIO_SYSSPACE, UIO_READ);
+	uio_addiov(uio, CAST_USER_ADDR_T(mem), bytes_to_copy);
+	error = cluster_copy_upl_data(uio, upl, upl_offset, &bytes_to_copy);
+	ASSERT3S(error, ==, 0);
+	ASSERT3S(bytes_to_copy, ==, 0);
+	uio_free(uio);
+	return (error);
+}
+
+static int
+copy_avoiding_ubc_upl_map(upl_t upl, upl_page_info_t *upl,
+    int upl_offset, int bytes_to_copy)
+{
+	/* where do we get the memory from?  abd? */
+}
+#endif
+
 static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     upl_offset_t upl_offset, off_t f_offset, int size,
@@ -2792,8 +2828,14 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return(EAGAIN);
 	}
 
-	caddr_t v_addr;
+
 	/* map in UPL address space */
+
+	printf("ZFS: %s:%d: mapping upl [%lld...%lld] @ file %s\n",
+	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+	    zp->z_name_cache);
+
+	caddr_t v_addr;
 	int mapret = 0;
 	if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
 		error = EINVAL;
@@ -2806,6 +2848,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		}
 		return(error);
 	}
+
+	printf("ZFS: %s:%d: beginning DMU transaction on %s\n", __func__, __LINE__,
+	    zp->z_name_cache);
 
 	tx = dmu_tx_create(zfsvfs->z_os);
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
@@ -2827,10 +2872,17 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return (error);
 	}
 
+	printf("ZFS: %s:%d: dmu_write %d bytes from &v_addr[%u] to offset %lld in file %s\n",
+	    __func__, __LINE__, size, upl_offset, f_offset, zp->z_name_cache);
+
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, &v_addr[upl_offset], tx);
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
 	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + size);
 	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, size);
+
+
+	printf("ZFS: %s:%d: success, unmapping upl %lld @ file %s\n", __func__, __LINE__,
+	    ap->a_f_offset, zp->z_name_cache);
 
 	int unmap_ret = ubc_upl_unmap(upl);
 	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
