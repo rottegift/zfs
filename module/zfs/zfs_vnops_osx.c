@@ -109,7 +109,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_upl_iosync;
 	kstat_named_t pageoutv2_cleaned_precious_pages;
 	kstat_named_t pageoutv2_skip_empty_tail_pages;
-	kstat_named_t pageoutv2_skip_clean_pages;
+	kstat_named_t pageoutv2_skip_absent_pages;
 	kstat_named_t pageoutv2_all_previously_freed;
 	kstat_named_t pageoutv1_pages;
 	kstat_named_t pageoutv1_want_lock;
@@ -135,7 +135,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_cleaned_precious_pagess", KSTAT_DATA_UINT64 },
 	{ "pageoutv2_skip_empty_tail_pages",   KSTAT_DATA_UINT64 },
-	{ "pageoutv2_skip_clean_pages",        KSTAT_DATA_UINT64 },
+	{ "pageoutv2_skip_absent_pages",        KSTAT_DATA_UINT64 },
 	{ "pageoutv2_all_previously_freed",    KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv1_want_lock",               KSTAT_DATA_UINT64 },
@@ -3209,7 +3209,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			kern_return_t abortret = ubc_upl_abort_range(upl,
 			    pg_index * PAGE_SIZE, PAGE_SIZE, abortflags);
 			if (abortret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: error %d aborting present page "
+				printf("ZFS: %s:%d: error %d aborting absent page "
 				    " @ index [bytes %lld..%lld],  %lld foff %lld file %s\n",
 				    __func__, __LINE__, abortret,
 				    pg_index, ap->a_f_offset,
@@ -3218,7 +3218,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    zp->z_name_cache);
 			}
 
-			VNOPS_OSX_STAT_BUMP(pageoutv2_skip_clean_pages);
+			VNOPS_OSX_STAT_BUMP(pageoutv2_skip_absent_pages);
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
 			isize    -= PAGE_SIZE;
@@ -3228,7 +3228,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 
 		/*
-		 * We know that we have at least one dirty page.
+		 * We know that we have at least one present page.
 		 * Now checking to see how many in a row we have
 		 */
 		num_of_pages = 1;
