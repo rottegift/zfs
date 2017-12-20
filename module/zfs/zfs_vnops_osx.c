@@ -3235,14 +3235,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		xsize = isize - PAGE_SIZE;
 
 		while (xsize>0) {
-			if ( !upl_page_present(pl, pg_index + num_of_pages))
-				break;
 			if ( !upl_dirty_page (pl, pg_index + num_of_pages)) {
 				printf("ZFS: %s:%d: found non-dirty (precious) page at page index %lld"
 				    " of upl [%lld..%lld] file %s\n",
 				    __func__, __LINE__,
 				    pg_index + num_of_pages, ap->a_f_offset,
 				    ap->a_f_offset + ap->a_size, zp->z_name_cache);
+			} else if ( !upl_page_present(pl, pg_index + num_of_pages)) {
+				    break;
 			}
 			num_of_pages++;
 			xsize -= PAGE_SIZE;
