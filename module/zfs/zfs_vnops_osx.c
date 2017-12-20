@@ -3225,20 +3225,22 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			kern_return_t commitret = ubc_upl_commit_range(upl,
 			    pg_index * PAGE_SIZE, PAGE_SIZE, commitflags);
 			if (commitret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: error %d cleaning precious page "
-				    " @ index [bytes %lld..%lld], %lld foff %lld file %s\n",
+				printf("ZFS: %s:%d: error %d cleaning precious page"
+				    " @ page index %lld [bytes %lld..%lld], foff %lld file %s\n",
 				    __func__, __LINE__, commitret,
-				    pg_index, ap->a_f_offset,
+				    pg_index,
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
+				    ap->a_f_offset,
 				    zp->z_name_cache);
 			} else {
-				printf("ZFS: %s:%d success cleaning precious page "
-				    " @ index [bytes %lld..%lld], %lld foff %lld file %s\n",
+				printf("ZFS: %s:%d success cleaning precious page"
+				    " @ page index %lld [bytes %lld..%lld], foff %lld file %s\n",
 				    __func__, __LINE__,
-				    pg_index, ap->a_f_offset,
+				    pg_index,
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
+				    ap->a_f_offset,
 				    zp->z_name_cache);
 			}
 			VNOPS_OSX_STAT_BUMP(pageoutv2_cleaned_precious_pages);
