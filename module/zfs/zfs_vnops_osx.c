@@ -2684,7 +2684,7 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     upl_offset_t upl_offset, off_t f_offset, int size,
-    uint64_t filesize, int flags, caddr_t vaddr,
+    uint64_t filesize, int flags, caddr_t *pvaddr,
     struct vnop_pageout_args *ap)
 {
 	int           io_size;
@@ -2702,25 +2702,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	if ((flags & UPL_NOCOMMIT) == 0)
 		is_clcommit = 1;
 
-	tx = dmu_tx_create(zfsvfs->z_os);
-	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-	zfs_sa_upgrade_txholds(tx, zp);
-	dmu_tx_hold_write(tx, zp->z_id, ap->a_f_offset, ap->a_size);
-	error = dmu_tx_assign(tx, TXG_WAIT);
-	ASSERT3S(error, ==, 0);
-	if (error != 0) {
-		dmu_tx_abort(tx);
-		if (vaddr) {
-			ubc_upl_unmap(upl);
-			vaddr = NULL;
-		}
-		if (is_clcommit) {
-			kern_return_t abort_ret = ubc_upl_abort(upl,
-			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
-			ASSERT3S(abort_ret, ==, KERN_SUCCESS);
-		}
-		return (error);
-	}
 
 	/*
 	 * If they didn't specify any I/O, then we are done...
@@ -2730,7 +2711,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT3S(size, >, 0);
 	if (size <= 0) {
 		dprintf("%s invalid size %d\n", __func__, size);
-		dmu_tx_commit(tx);
 		return (EINVAL);
 	}
 
@@ -2739,7 +2719,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
 		printf("ZFS: %s: readonly fs\n", __func__);
-		dmu_tx_commit(tx);
 		return (EROFS);
 	}
 
@@ -2755,7 +2734,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			ubc_upl_abort_range(upl, upl_offset, size, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 		printf("ZFS: %s:%d invalid offset or size (off %lld, size %d, filesize %lld)"
 		    " file %s\n" , __func__, __LINE__, f_offset, size, filesize, zp->z_name_cache);
-		dmu_tx_commit(tx);
 		return (EINVAL);
 	}
 	max_size = filesize - f_offset;
@@ -2782,7 +2760,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d: trying to write starting past filesize %lld : off %lld, size %u,"
 		    " filename %s\n",
 		    __func__, __LINE__, filesize, f_offset, size, zp->z_name_cache);
-		dmu_tx_commit(tx);
 		return (SET_ERROR(EINVAL));
 	}
 
@@ -2799,10 +2776,31 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d: cannot safely write [%lld, %lld] z_blksz %d file %s\n",
 		    __func__, __LINE__, f_offset, f_offset + size,
 		    zp->z_blksz, zp->z_name_cache);
-		dmu_tx_commit(tx);
 		return(EAGAIN);
 	}
-	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, &vaddr[upl_offset], tx);
+
+	tx = dmu_tx_create(zfsvfs->z_os);
+	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
+	zfs_sa_upgrade_txholds(tx, zp);
+	dmu_tx_hold_write(tx, zp->z_id, f_offset, size);
+	error = dmu_tx_assign(tx, TXG_WAIT);
+	ASSERT3S(error, ==, 0);
+	if (error != 0) {
+		dmu_tx_abort(tx);
+		if (*pvaddr) {
+			int unmapret = ubc_upl_unmap(upl);
+			ASSERT3S(unmapret, ==, KERN_SUCCESS);
+			*pvaddr = NULL;
+		}
+		if (is_clcommit) {
+			kern_return_t abort_ret = ubc_upl_abort(upl,
+			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
+			ASSERT3S(abort_ret, ==, KERN_SUCCESS);
+		}
+		return (error);
+	}
+
+	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, pvaddr[upl_offset], tx);
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
 	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + size);
 	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, size);
@@ -3349,7 +3347,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT3S(xsize, <=, MAX_UPL_SIZE_BYTES);
 		ASSERT3S(ubc_getsize(vp), ==, filesize);
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
-		    filesize, a_flags, vaddr, ap);
+		    filesize, a_flags, &vaddr, ap);
 
 		/* unmap because we may end up freeing the UPL below */
 		if (vaddr) {
