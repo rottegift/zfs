@@ -3231,6 +3231,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		num_of_pages = 1;
 		xsize = isize - PAGE_SIZE;
 
+		boolean_t bluster_print_flag = B_FALSE;
 		while (xsize>0) {
 			if ( !upl_dirty_page (pl, pg_index + num_of_pages)) {
 				printf("ZFS: %s:%d: found non-dirty (precious) page at page index %lld"
@@ -3238,6 +3239,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    __func__, __LINE__,
 				    pg_index + num_of_pages, ap->a_f_offset,
 				    ap->a_f_offset + ap->a_size, zp->z_name_cache);
+				bluster_print_flag = B_TRUE;
 			} else if ( !upl_page_present(pl, pg_index + num_of_pages)) {
 				    break;
 			}
@@ -3259,8 +3261,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			dprintf("ZFS: Mapped %p\n", vaddr);
 		}
 
-		dprintf("ZFS: bluster offset %lld fileoff %lld size %lld filesize %lld\n",
-			   offset, f_offset, xsize, filesize);
+		if (bluster_print_flag == B_TRUE) {
+			printf("ZFS: %s:%d bluster offset %lld fileoff %lld size %lld filesize %lld"
+			    " file %s\n",
+			    __func__, __LINE__,
+			    offset, f_offset, xsize, filesize, zp->z_name_cache);
+		}
 		ASSERT3S(xsize, <=, MAX_UPL_SIZE_BYTES);
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
 								 filesize, a_flags, vaddr, tx);
