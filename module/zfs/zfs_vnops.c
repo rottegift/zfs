@@ -5026,6 +5026,18 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		return (0);
 	}
 
+	if (vfs_isrdonly(zfsvfs->z_vfs) ||
+	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+		VNOPS_STAT_BUMP(zfs_fsync_disabled);
+	        ZFS_EXIT(zfsvfs);
+		return (EROFS);
+	}
+
+	if (zp->z_pflags & ZFS_IMMUTABLE) {
+		ZFS_EXIT(zfsvfs);
+		return (EPERM);
+	}
+
 	if (!vnode_isreg(vp)) {
 		dprintf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
 		    zp->z_name_cache);

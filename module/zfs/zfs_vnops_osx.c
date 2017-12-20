@@ -3095,11 +3095,19 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	ASSERT(ubc_pages_resident(vp));
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 
-	if (vnode_vfsisrdonly(ZTOV(zp))) {
+	if (vnode_vfsisrdonly(ZTOV(zp)) ||
+	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 		printf("ZFS: %s:%d: readonly filesystem for [%lld...%lld] file %s\n",
 		    __func__, __LINE__, ap->a_f_offset,
 		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
 		error = EROFS;
+		goto exit_abort;
+	}
+
+	if (zp->z_pflags & ZFS_IMMUTABLE) {
+		printf("ZFS: %s:%d: immutable flags set for file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
+		error = EPERM;
 		goto exit_abort;
 	}
 
@@ -3506,7 +3514,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		pg_index += num_of_pages;
 	} // while isize
 
-	/* this asssertion is failing */
+	/* this asssertion is failing  (e.g. 3 != 2 or 1 != 0) */
+
 	ASSERT3S(pg_index, ==, last_nonempty_pg);
 
 	int unmap_ret;
