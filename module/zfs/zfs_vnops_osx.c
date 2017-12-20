@@ -3146,7 +3146,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 	}
 
-
+	const int end_pg = ((isize) / PAGE_SIZE);
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		if (upl_page_present(pl, --pg_index))
 			break;
@@ -3155,13 +3155,22 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    ubc_upl_abort_range(upl, pg_index * PAGE_SIZE_64, PAGE_SIZE_64,
 			UPL_ABORT_FREE_ON_EMPTY);
 		if (abort_present_page_ret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: error %d aborting present page index %lld upl_f_off %lld,"
+			printf("ZFS: %s:%d: error %d aborting present page index %lld of %d"
+			    " upl_f_off %lld,"
 			    " file %s\n", __func__, __LINE__, abort_present_page_ret,
-			    pg_index, ap->a_f_offset, zp->z_name_cache);
+			    pg_index, end_pg, ap->a_f_offset, zp->z_name_cache);
 			if (error == 0)
 				error = abort_present_page_ret;
+		} else {
+			printf("ZFS: %s:%d success aborting present page at end index %lld of %d"
+			    " ap->a_size %ld upl_f_off %lld"
+			    " file %s\n", __func__, __LINE__,
+			    pg_index, end_pg, ap->a_size, ap->a_f_offset, zp->z_name_cache);
 		}
 		if (pg_index == 0) {
+			printf("ZFS: %s:%d: all pages of UPL freed from tail to head upl_f_off %lld"
+			    " pageout size %ld file %s\n", __func__, __LINE__,
+			    ap->a_f_offset, ap->a_size, zp->z_name_cache);
 			dmu_tx_commit(tx);
 			if (vaddr) {
 				ubc_upl_unmap(upl);
@@ -3217,8 +3226,16 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    pg_index * PAGE_SIZE, PAGE_SIZE, commitflags);
 			if (commitret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d cleaning precious page "
-				    " @ index [bytes %lld..%lld],  %lld foff %lld file %s\n",
+				    " @ index [bytes %lld..%lld], %lld foff %lld file %s\n",
 				    __func__, __LINE__, commitret,
+				    pg_index, ap->a_f_offset,
+				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
+				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
+				    zp->z_name_cache);
+			} else {
+				printf("ZFS: %s:%d success cleaning precious page "
+				    " @ index [bytes %lld..%lld], %lld foff %lld file %s\n",
+				    __func__, __LINE__,
 				    pg_index, ap->a_f_offset,
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
 				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
@@ -3277,9 +3294,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 		// Map it if needed
 		if (!vaddr) {
-			if (ubc_upl_map(upl, (vm_offset_t *)&vaddr) != KERN_SUCCESS) {
+			int mapret = 0;
+			if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&vaddr)) != KERN_SUCCESS) {
 				error = EINVAL;
-				printf("ZFS: %s: unable to map\n", __func__);
+				printf("ZFS: %s:%d unable to map, error %d\n", __func__, __LINE__, mapret);
+				int total_abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR);
+				ASSERT3S(total_abortret, ==, KERN_SUCCESS);
 				goto out;
 			}
 			dprintf("ZFS: Mapped %p\n", vaddr);
@@ -3290,6 +3310,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT3S(xsize, <=, MAX_UPL_SIZE_BYTES);
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
 								 filesize, a_flags, vaddr, tx);
+
+		/* unmap because we may end up freeing the UPL below */
+		if (vaddr) {
+			int unmapret = 0;
+			if ((unmapret = ubc_upl_unmap(upl)) != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: error %d unmapping UPL\n", __func__, __LINE__,
+				    unmapret);
+			}
+			vaddr = NULL;
+		}
+
 		if (merror != 35) { ASSERT3S(merror, ==, 0); }
 		if (merror != 0)
 			VNOPS_OSX_STAT_BUMP(bluster_pageout_error);
@@ -3318,9 +3349,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    offset, xsize, f_offset, zp->z_name_cache);
 			}
 		} else {
-			int commitflags = UPL_COMMIT_FREE_ON_EMPTY
-			    | UPL_COMMIT_CLEAR_PRECIOUS
-			    | UPL_COMMIT_CLEAR_DIRTY;
+			int commitflags = UPL_COMMIT_FREE_ON_EMPTY;
 			kern_return_t commitret = ubc_upl_commit_range(upl, offset, xsize, commitflags);
 			if (commitret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d"
@@ -3360,8 +3389,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
   out:
 	// unmap
-	if (vaddr) {
-		ubc_upl_unmap(upl);
+	if (vaddr != NULL) {
+		int umapret = ubc_upl_unmap(upl);
+		ASSERT3S(umapret, ==, KERN_SUCCESS);
 		vaddr = NULL;
 	}
 
