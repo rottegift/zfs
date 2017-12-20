@@ -2719,7 +2719,7 @@ copy_avoiding_ubc_upl_map(upl_t upl, upl_page_info_t *upl,
 
 static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
-    upl_offset_t upl_offset, off_t f_offset, int size,
+    upl_offset_t upl_offset, off_t f_offset, const int size,
     uint64_t filesize, int flags,
     struct vnop_pageout_args *ap,
     caddr_t *pvaddr)
@@ -2808,18 +2808,21 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return (SET_ERROR(EINVAL));
 	}
 
+	int write_size = size;
 	if (f_offset + size > filesize) {
-		printf("ZFS: %s:%d (trying to extend file) lowering size %u to %llu,"
+		printf("ZFS: %s:%d (trying to extend file) lowering write_size %u to %llu,"
 		    " off %lld filesize %lld file %s\n",
 		    __func__, __LINE__,
-		    size, f_offset > filesize ? 0ULL : filesize - f_offset,
+		    write_size, f_offset > filesize ? 0ULL : filesize - f_offset,
 		    f_offset, filesize, zp->z_name_cache);
-		size = filesize - f_offset;
+		ASSERT3S(filesize - f_offset, <, INT_MAX);
+		ASSERT3S(filesize - f_offset, >, 0);
+		write_size = filesize - f_offset;
 	}
 
-	if (!dmu_write_is_safe(zp, f_offset, f_offset + size)) {
+	if (!dmu_write_is_safe(zp, f_offset, f_offset + write_size)) {
 		printf("ZFS: %s:%d: cannot safely write [%lld, %lld] z_blksz %d file %s\n",
-		    __func__, __LINE__, f_offset, f_offset + size,
+		    __func__, __LINE__, f_offset, f_offset + write_size,
 		    zp->z_blksz, zp->z_name_cache);
 		if (is_clcommit) {
 			int abortret = ubc_upl_abort_range(upl, upl_offset, size,
@@ -2829,15 +2832,13 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return(EAGAIN);
 	}
 
-
-
 	printf("ZFS: %s:%d: beginning DMU transaction on %s\n", __func__, __LINE__,
 	    zp->z_name_cache);
 
 	tx = dmu_tx_create(zfsvfs->z_os);
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 	zfs_sa_upgrade_txholds(tx, zp);
-	dmu_tx_hold_write(tx, zp->z_id, f_offset, size);
+	dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
 	error = dmu_tx_assign(tx, TXG_WAIT);
 	ASSERT3S(error, ==, 0);
 	if (error != 0) {
@@ -2854,14 +2855,14 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return (error);
 	}
 
-	printf("ZFS: %s:%d: dmu_write %d bytes from pvaddr[%u] to offset %lld in file %s\n",
-	    __func__, __LINE__, size, upl_offset, f_offset, zp->z_name_cache);
+	printf("ZFS: %s:%d: dmu_write %d bytes (of %d) from pvaddr[%u] to offset %lld in file %s\n",
+	    __func__, __LINE__, write_size, size, upl_offset, f_offset, zp->z_name_cache);
 
-	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, size, pvaddr[upl_offset], tx);
+	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, write_size, pvaddr[upl_offset], tx);
 
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
-	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + size);
-	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, size);
+	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + write_size);
+	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, write_size);
 
 	/* update SA and finish off transaction */
         if (error == 0) {
@@ -2879,7 +2880,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
                     B_TRUE);
 		error = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(error);
-                zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, f_offset, size, 0,
+                zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, f_offset, write_size, 0,
                     NULL, NULL);
         } else {
 		printf("ZFS: %s:%d: because of earlier error %d, did not SA update %s\n",
