@@ -3516,7 +3516,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	/* this asssertion is failing  (e.g. 3 != 2 or 1 != 0) */
 
-	ASSERT3S(pg_index, ==, last_nonempty_pg);
+	ASSERT3S(pg_index, ==, last_nonempty_pg - 1);
 
 	int unmap_ret;
 
