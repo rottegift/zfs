@@ -3506,6 +3506,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		pg_index += num_of_pages;
 	} // while isize
 
+	/* this asssertion is failing */
 	ASSERT3S(pg_index, ==, last_nonempty_pg);
 
 	int unmap_ret;
@@ -3518,6 +3519,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
 	if (unmap_ret != KERN_SUCCESS && error == 0)
 		error = EINVAL;
+
+	printf("ZFS: %s:%d: unmapped file [%lld..%lld] %s\n",
+	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+	    zp->z_name_cache);
 
 	upl = NULL;
 	if (had_map_lock_at_entry == B_FALSE) {
@@ -3535,8 +3540,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 	ZFS_EXIT(zfsvfs);
-	if (error)
-		dprintf("ZFS: pageoutv2 failed %d\n", error);
+	if (error != 0) {
+		printf("ZFS: %s:%d: pageoutv2 error %d [%lld..%lld] file %s\n",
+		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    zp->z_name_cache);
+	}
+
 	return (error);
 
 unmap_pageout_done:
