@@ -194,25 +194,92 @@ extern void zfs_ioctl_fini(void);
 int
 zfs_vfs_umcallback(vnode_t *vp, void * arg)
 {
-	if (!vnode_isreg(vp))
-		return (VNODE_RETURNED);
+	int *waitfor_arg = arg;
+	int waitfor = (*waitfor_arg & MNT_WAIT) == MNT_WAIT;
+	int err = 0;
+	boolean_t disclaim = B_FALSE;
+	int disclaim_err = 0;
 
-	int flags = UBC_PUSHALL | UBC_SYNC;
-	off_t resid_off = 0;
-	off_t ubcsize = ubc_getsize(vp);
-
-	if (ubcsize == 0)
-		return (VNODE_RETURNED);
-
-	int msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
-	if (msync_retval != 0) {
+	if (vnode_isreg(vp) &&
+	    ubc_pages_resident(vp) &&
+	    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
+		boolean_t caught_syncer = B_FALSE;
 		znode_t *zp = VTOZ(vp);
-		printf("ZFS: %s:%d: ubc_msync returned %d resid_off %lld vs ubcsize %lld,"
-		    " file %s\n",
-		    __func__, __LINE__, msync_retval, resid_off, ubcsize,
-		    (zp == NULL) ? "(null)" : zp->z_name_cache);
+		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+		ZFS_ENTER(zfsvfs);
+		ZFS_VERIFY_ZP(zp);
+		if (vfs_isrdonly(zfsvfs->z_vfs) ||
+		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+		    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+			disclaim = B_TRUE;
+			disclaim_err = EROFS;
+			printf("ZFS: %s:%d: read only filesystem, will return vnode for (dirty!) file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			ZFS_EXIT(zfsvfs);
+			return (VNODE_RETURNED);
+		}
+		ASSERT0(zp->z_pflags & ZFS_IMMUTABLE);
+		if (zp->z_pflags & ZFS_IMMUTABLE) {
+			disclaim = B_TRUE;
+			disclaim_err = EPERM;
+			printf("ZFS: %s:%d: ZFS object is immutable, will return vnode for (dirty!)"
+			    "  file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			ZFS_EXIT(zfsvfs);
+			return (VNODE_RETURNED);
+ 		}
+		/* take a range lock */
+		/* take z_map_lock */
+		off_t resid_off = 0;
+		off_t ubcsize = ubc_getsize(vp);
+		int flags = UBC_PUSHDIRTY;
+		if (spl_ubc_is_mapped(vp, NULL))
+			flags = UBC_PUSHDIRTY | UBC_SYNC;
+		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
+			flags |= UBC_SYNC;
+		/* give up range_lock, since pageoutv2 may need it */
+		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		zfs_range_unlock(rl);
+		/* do the msync */
+		int msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
+		/* error checking, unlocking, and returning */
+		if (msync_retval != 0 &&
+		    !(msync_retval == EINVAL && resid_off == ubcsize)) {
+			/* we can get an EINVAL spuriously */
+			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d resid_off %lld"
+			    " vs ubcsize %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
+			    msync_retval, resid_off, ubcsize, flags, zp->z_name_cache);
+		} else if (msync_retval && waitfor) {
+			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d but ubcsize %lld !="
+			    "resid_off %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
+			    msync_retval, ubcsize, resid_off, flags, zp->z_name_cache);
+		}
+		if (zp->z_syncer_active != NULL) {
+			ASSERT3P(zp->z_syncer_active, !=, curthread);
+			caught_syncer = B_TRUE;
+		}
+		ZFS_EXIT(zfsvfs);
+		if (caught_syncer == B_TRUE && waitfor != B_TRUE) {
+			printf("ZFS: %s:%d: z_syncer_active isn't NULL (us? %d), returning VNODE_RETURNED"
+			    " for file %s\n", __func__, __LINE__,
+			    (zp->z_syncer_active == curthread),
+			    zp->z_name_cache);
+			return (VNODE_RETURNED);
+		} else if (caught_syncer == B_TRUE) {
+			ASSERT3S(waitfor, ==, B_TRUE);
+			printf("ZFS: %s:%d: z_syncer_active isn't NULL (us? %d), watifor is true,"
+			    " returning VNODE_CLAIMED for file %s\n", __func__, __LINE__,
+			    (zp->z_syncer_active == curthread),
+			    zp->z_name_cache);
+			return (VNODE_CLAIMED);
+		}
 	}
-	return (VNODE_RETURNED);
+	if (err != 0 && disclaim == B_FALSE) {
+		printf("ZFS: %s:%d: VNODE_CLAIMED (err %d)(disclaim %d) for file %s\n",
+		    __func__, __LINE__, err, disclaim, VTOZ(vp)->z_name_cache);
+		return (VNODE_CLAIMED);
+	} else
+		return (VNODE_RETURNED);
 }
 
 int
