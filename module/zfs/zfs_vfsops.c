@@ -268,7 +268,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    zp->z_name_cache);
 			return (VNODE_RETURNED);
 		} else if (caught_syncer == B_TRUE) {
-			ASSERT3(waitfor, ==, B_TRUE);
+			ASSERT3S(waitfor, ==, B_TRUE);
 			printf("ZFS: %s:%d: z_syncer_active isn't NULL (us? %d), watifor is true,"
 			    " returning VNODE_CLAIMED for file %s\n", __func__, __LINE__,
 			    (zp->z_syncer_active == curthread),
