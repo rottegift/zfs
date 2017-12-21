@@ -2382,9 +2382,9 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 }
 
 int
-zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
-    offset_t off, size_t size, int flags, boolean_t take_rlock, boolean_t inactivate,
-    boolean_t clear_flags)
+zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offset,
+    offset_t off, const size_t size, const int flags, const boolean_t take_rlock,
+    const boolean_t inactivate, const boolean_t clear_flags)
 {
 	dmu_tx_t *tx;
 	rl_t *rl;
@@ -2433,9 +2433,11 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 		printf("ZFS: %s:%d: read-only filesystem for file %s\n",
 		    __func__, __LINE__, zp->z_name_cache);
-		if (!(flags & UPL_NOCOMMIT))
+		if (!(flags & UPL_NOCOMMIT)) {
+			ASSERT3S(len, ==, size);
 			(void) ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+		}
 		err = EROFS;
 		goto exit;
 	}
@@ -2449,6 +2451,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 	if (off < 0 || off >= filesz || (off & PAGE_MASK_64) ||
 	    (len & PAGE_MASK)) {
 		if (!(flags & UPL_NOCOMMIT))
+			ASSERT3S(len, ==, size);
 			ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_ERROR |
 			    UPL_ABORT_FREE_ON_EMPTY);
@@ -2456,23 +2459,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 		goto exit;
 	}
 
-	uint64_t pgsize = roundup(filesz, PAGESIZE);
-
-	/* Any whole pages beyond the end of the file while we abort */
-	if ((size + off) > pgsize) {
-		printf("ZFS: %s:%d: pageout abort outside pages (rounded 0x%llx > UPLlen "
-		    "0x%llx\n", __func__, __LINE__, pgsize, size + off);
-		ubc_upl_abort_range(upl, pgsize,
-		    pgsize - (size + off),
-		    UPL_ABORT_FREE_ON_EMPTY);
-	}
-
-	//len = MIN(len, filesz - off);
 	dprintf("ZFS: starting with size %lx\n", len);
-	//if (off + len > zp->z_size) {
-	//	dprintf("ZFS: Extending file to %llx\n", off+len);
-	//	zfs_freesp(zp, off+len, 0, 0, TRUE);
-	//}
 
 top:
 	if (take_rlock)
