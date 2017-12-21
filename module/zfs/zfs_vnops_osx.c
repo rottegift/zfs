@@ -2474,7 +2474,6 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 	//	zfs_freesp(zp, off+len, 0, 0, TRUE);
 	//}
 
-
 top:
 	if (take_rlock)
 		rl = zfs_range_lock(zp, off, len, RL_WRITER);
@@ -2723,8 +2722,8 @@ copy_avoiding_ubc_upl_map(upl_t upl, upl_page_info_t *upl,
 
 static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
-    upl_offset_t upl_offset, off_t f_offset, const int size,
-    uint64_t filesize, int flags,
+    const upl_offset_t upl_offset, const off_t f_offset, const int size,
+    const uint64_t filesize, const int flags,
     struct vnop_pageout_args *ap,
     caddr_t *pvaddr)
 {
@@ -2734,11 +2733,15 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	VNOPS_OSX_STAT_BUMP(bluster_pageout_calls);
 
+	ASSERT0(upl_offset & PAGE_SIZE);
+	ASSERT0(size & PAGE_SIZE);
+	ASSERT3S(size, >=, PAGE_SIZE);
+
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, filesize);
 
+	/* we had better not be calling this with UPL_NOCOMMIT set */
 	ASSERT3S(flags & UPL_NOCOMMIT, ==, 0);
-	if ((flags & UPL_NOCOMMIT) == 0)
-		is_clcommit = 1;
+	is_clcommit = 1;
 
 	/*
 	 * if is_clcommit (expected to be true) then we MUST commit or
@@ -3288,6 +3291,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	ASSERT3S(ap->a_size, <=, MAX_UPL_SIZE_BYTES);
+	int pages_to_retire = howmany(ap->a_size, PAGE_SIZE);
 
 	error = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl,
 						   request_flags );
@@ -3370,6 +3374,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			break;
 		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
+		pages_to_retire--;
 		kern_return_t abort_present_page_ret =
 		    ubc_upl_abort_range(upl, pg_index * PAGE_SIZE_64, PAGE_SIZE_64,
 			UPL_ABORT_FREE_ON_EMPTY);
@@ -3422,6 +3427,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * to get back empty slots in the UPL.
 			 * just abort them
 			 */
+			pages_to_retire--;
 			int abortflags = UPL_ABORT_FREE_ON_EMPTY;
 			kern_return_t abortret = ubc_upl_abort_range(upl,
 			    pg_index * PAGE_SIZE, PAGE_SIZE, abortflags);
@@ -3490,10 +3496,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 		if (bluster_print_flag == B_TRUE) {
 			printf("ZFS: %s:%d bluster (upl)offset %lld fileoff %lld size %lld filesize %lld"
-			    " a_flags %d file %s\n",
+			    " a_flags %d (pages to retire %d) file %s\n",
 			    __func__, __LINE__,
 			    offset, f_offset, xsize, filesize,
-			    a_flags, zp->z_name_cache);
+			    a_flags, pages_to_retire, zp->z_name_cache);
 		}
 
 		ASSERT3S(xsize, <=, MAX_UPL_SIZE_BYTES);
@@ -3505,6 +3511,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		 */
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
 		    filesize, a_flags, ap, &v_addr);
+
+		pages_to_retire -= howmany(xsize, PAGE_SIZE);
+
+		printf("ZFS: %s:%d: after xsize %lld, pages_to_retire now %d, file %s\n",
+		    __func__, __LINE__, xsize, pages_to_retire, zp->z_name_cache);
 
 		if (merror != 35) { ASSERT3S(merror, ==, 0); }
 		if (merror != 0)
@@ -3522,7 +3533,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	/* this asssertion is failing  (e.g. 3 != 2 or 1 != 0) */
 
-	ASSERT3S(pg_index, ==, last_nonempty_pg - 1);
+	ASSERT3S(pages_to_retire, ==, 0);
+	ASSERT3S(pg_index, ==, last_nonempty_pg);
 
 	int unmap_ret;
 
