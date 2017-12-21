@@ -200,8 +200,9 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 	boolean_t disclaim = B_FALSE;
 	int disclaim_err = 0;
 
-	if (vnode_isreg(vp) && (waitfor ||
-		(ubc_pages_resident(vp) && (0 != is_file_clean(vp, ubc_getsize(vp)))))) {
+	if (vnode_isreg(vp) &&
+	    ubc_pages_resident(vp) &&
+	    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
 		boolean_t caught_syncer = B_FALSE;
 		znode_t *zp = VTOZ(vp);
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
