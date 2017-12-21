@@ -3689,6 +3689,19 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		return (ENODEV);
 	}
 
+	/* EPERM to write mmaps if we are r/o */
+	if (ISSET(ap->a_fflags, VM_PROT_WRITE)) {
+		ASSERT0(zp->z_pflags & ZFS_IMMUTABLE);
+		ASSERT0(vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY);
+		ASSERT0(vfs_isrdonly(zfsvfs->z_vfs));
+		if ((zp->z_pflags & ZFS_IMMUTABLE) ||
+		    (vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY) ||
+		    vfs_isrdonly(zfsvfs->z_vfs)) {
+			ZFS_EXIT(zfsvfs);
+			return (EPERM);
+		}
+	}
+
 	if (!spl_ubc_is_mapped(vp, NULL))
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
 
