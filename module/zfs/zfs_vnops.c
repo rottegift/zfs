@@ -2582,7 +2582,9 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	 * callers might not be able to detect properly that we are read-only,
 	 * so check it explicitly here.
 	 */
-	if (vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY) {
+	if (vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+	    vfs_isrdonly(zfsvfs->z_vfs) ||
+	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 		ZFS_EXIT(zfsvfs);
 		return (SET_ERROR(EROFS));
 	}
@@ -5027,6 +5029,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	if (vfs_isrdonly(zfsvfs->z_vfs) ||
+	    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
 	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 		VNOPS_STAT_BUMP(zfs_fsync_disabled);
 	        ZFS_EXIT(zfsvfs);
@@ -5528,7 +5531,9 @@ top:
 	aclp = NULL;
 
 	/* Can this be moved to before the top label? */
-	if (vfs_isrdonly(zfsvfs->z_vfs)) {
+	if (vfs_isrdonly(zfsvfs->z_vfs) ||
+	    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 		err = SET_ERROR(EROFS);
 		goto out3;
 	}

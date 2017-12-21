@@ -219,7 +219,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* give up range_lock, since pageoutv2 may need it */
 		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
-		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY) {
+		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+		    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 			disclaim = B_TRUE;
 			disclaim_err = EROFS;
 			printf("ZFS: %s:%d: read only filesystem, will return vnode for (dirty!) file %s\n",

@@ -760,7 +760,8 @@ printf("F_CHKCLEAN size %llu ret %d\n", fsize, error);
 			 * compression makes this obsolete.
 			 */
 			if (vfs_isrdonly(zfsvfs->z_vfs) ||
-				!spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+			    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+			    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 				error = EROFS;
 				goto out;
 			}
@@ -2427,8 +2428,11 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 		err = EINVAL;
 		goto exit;
 	}
-	if (vnode_vfsisrdonly(ZTOV(zp))) {
-		ASSERT0(vnode_vfsisrdonly(ZTOV(zp)));
+	if (vnode_vfsisrdonly(ZTOV(zp)) ||
+	    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+		printf("ZFS: %s:%d: read-only filesystem for file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
 		if (!(flags & UPL_NOCOMMIT))
 			(void) ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
@@ -2755,7 +2759,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return (EINVAL);
 	}
 
-	if (vnode_vfsisrdonly(ZTOV(zp))) {
+	if (vnode_vfsisrdonly(ZTOV(zp)) ||
+	    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+            !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 		printf("ZFS: %s: readonly fs\n", __func__);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
