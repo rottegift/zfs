@@ -207,6 +207,26 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		ZFS_ENTER(zfsvfs);
 		ZFS_VERIFY_ZP(zp);
+		if (vfs_isrdonly(zfsvfs->z_vfs) ||
+		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+		    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+			disclaim = B_TRUE;
+			disclaim_err = EROFS;
+			printf("ZFS: %s:%d: read only filesystem, will return vnode for (dirty!) file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			ZFS_EXIT(zfsvfs);
+			return (VNODE_RETURNED);
+		}
+		ASSERT0(zp->z_pflags & ZFS_IMMUTABLE);
+		if (zp->z_pflags & ZFS_IMMUTABLE) {
+			disclaim = B_TRUE;
+			disclaim_err = EPERM;
+			printf("ZFS: %s:%d: ZFS object is immutable, will return vnode for (dirty!)"
+			    "  file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			ZFS_EXIT(zfsvfs);
+			return (VNODE_RETURNED);
+ 		}
 		/* take a range lock */
 		/* take z_map_lock */
 		off_t resid_off = 0;
@@ -218,22 +238,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			flags |= UBC_SYNC;
 		/* give up range_lock, since pageoutv2 may need it */
 		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
-		if (vfs_isrdonly(zfsvfs->z_vfs) ||
-		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
-		    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-			disclaim = B_TRUE;
-			disclaim_err = EROFS;
-			printf("ZFS: %s:%d: read only filesystem, will return vnode for (dirty!) file %s\n",
-			    __func__, __LINE__, zp->z_name_cache);
-		}
-		ASSERT0(zp->z_pflags & ZFS_IMMUTABLE);
-		if (zp->z_pflags & ZFS_IMMUTABLE) {
-			disclaim = B_TRUE;
-			disclaim_err = EPERM;
-			printf("ZFS: %s:%d: ZFS object is immutable, will return vnode for (dirty!)"
-			    "  file %s\n",
-			    __func__, __LINE__, zp->z_name_cache);
-		}
 		zfs_range_unlock(rl);
 		/* do the msync */
 		int msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
@@ -258,8 +262,17 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		ZFS_EXIT(zfsvfs);
 		if (caught_syncer == B_TRUE && waitfor != B_TRUE) {
-			printf("ZFS: %s:%d: z_syncer_active isn't NULL, returning VNODE_CLAIMED"
-			    " for file %s\n", __func__, __LINE__, zp->z_name_cache);
+			printf("ZFS: %s:%d: z_syncer_active isn't NULL (us? %d), returning VNODE_RETURNED"
+			    " for file %s\n", __func__, __LINE__,
+			    (zp->z_syncer_active == curthread),
+			    zp->z_name_cache);
+			return (VNODE_RETURNED);
+		} else if (caught_syncer == B_TRUE) {
+			ASSERT3(waitfor, ==, B_TRUE);
+			printf("ZFS: %s:%d: z_syncer_active isn't NULL (us? %d), watifor is true,"
+			    " returning VNODE_CLAIMED for file %s\n", __func__, __LINE__,
+			    (zp->z_syncer_active == curthread),
+			    zp->z_name_cache);
 			return (VNODE_CLAIMED);
 		}
 	}
