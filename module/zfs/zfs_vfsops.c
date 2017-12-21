@@ -191,7 +191,7 @@ extern void zfs_ioctl_fini(void);
 
 #endif
 
-static int
+int
 zfs_vfs_umcallback(vnode_t *vp, void * arg)
 {
 	int *waitfor_arg = arg;
