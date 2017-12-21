@@ -245,7 +245,8 @@ zfs_vfs_sync(struct mount *vfsp, int waitfor, __unused vfs_context_t context)
             return (0);
         }
 
-	int vnode_iter_ret = vnode_iterate(vfsp, 0, zfs_vfs_umcallback, &waitfor);
+#define VNODE_DRAINO		0x800
+	int vnode_iter_ret = vnode_iterate(vfsp, VNODE_DRAINO, zfs_vfs_umcallback, &waitfor);
 	ASSERT0(vnode_iter_ret);
 
         if (zfsvfs->z_log != NULL)
