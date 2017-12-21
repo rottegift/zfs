@@ -245,6 +245,18 @@ zfs_vfs_sync(struct mount *vfsp, int waitfor, __unused vfs_context_t context)
             return (0);
         }
 
+	/*
+	 * VNODE_DRAINO is used in e.g. vnode_getwithvid(); in
+	 * vnode_getiocount() it is used to "beat drain", which avoids
+	 * blocking on the msleep if VL_DRAIN is set, "[i]f this vnode
+	 * is getting drained, there are some cases where we can't block
+	 * ... if the vnode is draining to prevent deadlock, e.g. if
+	 * we're in the filesystem, potentially holding resources that
+	 * could prevent other iocounts from being released.
+	 *
+	 * VNODE_ALWAYS does this even if VL_DRAIN is not set
+	 */
+#define VNODE_ALWAYS		0x400
 #define VNODE_DRAINO		0x800
 	int vnode_iter_ret = vnode_iterate(vfsp, VNODE_DRAINO, zfs_vfs_umcallback, &waitfor);
 	ASSERT0(vnode_iter_ret);
