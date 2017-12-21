@@ -248,13 +248,10 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d resid_off %lld"
 			    " vs ubcsize %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
 			    msync_retval, resid_off, ubcsize, flags, zp->z_name_cache);
-			if (waitfor)
-				err = EAGAIN;
 		} else if (msync_retval && waitfor) {
 			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d but ubcsize %lld !="
 			    "resid_off %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
 			    msync_retval, ubcsize, resid_off, flags, zp->z_name_cache);
-			err = EAGAIN;
 		}
 		if (zp->z_syncer_active != NULL) {
 			ASSERT3P(zp->z_syncer_active, !=, curthread);
@@ -276,9 +273,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			return (VNODE_CLAIMED);
 		}
 	}
-	if (err != 0 && disclaim == B_FALSE)
+	if (err != 0 && disclaim == B_FALSE) {
+		printf("ZFS: %s:%d: VNODE_CLAIMED (err %d)(disclaim %d) for file %s\n",
+		    __func__, __LINE__, err, disclaim, VTOZ(vp)->z_name_cache);
 		return (VNODE_CLAIMED);
-	else
+	} else
 		return (VNODE_RETURNED);
 }
 
@@ -312,7 +311,8 @@ zfs_vfs_sync(struct mount *vfsp, int waitfor, __unused vfs_context_t context)
             return (0);
         }
 
-	vnode_iterate(vfsp, 0, zfs_vfs_umcallback, &waitfor);
+	int vnode_iter_ret = vnode_iterate(vfsp, 0, zfs_vfs_umcallback, &waitfor);
+	ASSERT0(vnode_iter_ret);
 
         if (zfsvfs->z_log != NULL)
             zil_commit(zfsvfs->z_log, 0);
