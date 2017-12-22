@@ -3718,6 +3718,9 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		if ((zp->z_pflags & ZFS_IMMUTABLE) ||
 		    (vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY) ||
 		    vfs_isrdonly(zfsvfs->z_vfs)) {
+			printf("ZFS: %s:%d: EPERM to PROT_WRITE for file %s fs %s\n",
+			    __func__, __LINE__, zp->z_name_cache,
+			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 			ZFS_EXIT(zfsvfs);
 			return (EPERM);
 		}
