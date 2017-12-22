@@ -3432,10 +3432,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				goto pageout_done;
 			}
 			VNOPS_OSX_STAT_BUMP(pageoutv2_cleaned_precious_pages);
-			f_offset += PAGE_SIZE;
-			offset   += PAGE_SIZE;
-			isize    -= PAGE_SIZE;
-			pg_index++;
 			continue;
 		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
@@ -3532,13 +3528,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    " size %ld file %s\n", __func__, __LINE__,
 				    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
 			}
-
 			VNOPS_OSX_STAT_BUMP(pageoutv2_skip_absent_pages);
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
 			isize    -= PAGE_SIZE;
 			pg_index++;
-
 			continue;
 		}
 
