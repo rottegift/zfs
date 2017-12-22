@@ -3446,6 +3446,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
 			}
 		}
+		ASSERT3S(pg_index, <=, end_pg);
 		kern_return_t abort_present_page_ret =
 		    ubc_upl_abort_range(upl, pg_index * PAGE_SIZE_64, PAGE_SIZE_64,
 			    UPL_ABORT_FREE_ON_EMPTY);
@@ -3523,6 +3524,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 					    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
 				}
 			}
+			ASSERT3S(pg_index, <=, end_pg);
+			ASSERT3S(pg_index, <, last_nonempty_pg);
+			printf("ZFS: %s:%d: (hole) aborting page at index %lld upl [%lld..%lld] file %s"
+			    " fs %s\n", __func__, __LINE__, pg_index,
+			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 			int abortflags = UPL_ABORT_FREE_ON_EMPTY;
 			kern_return_t abortret = ubc_upl_abort_range(upl,
 			    pg_index * PAGE_SIZE, PAGE_SIZE, abortflags);
