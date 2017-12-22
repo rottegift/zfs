@@ -3552,11 +3552,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 	    zp->z_name_cache);
 
-	upl = NULL;
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
+
+	ubc_upl_abort(upl, 0);
 
 	zfs_range_unlock(rl);
 
