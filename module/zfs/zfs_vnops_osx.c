@@ -3413,11 +3413,45 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			break;
 		} else if (upl_page_present(pl, pg_index)) {
 			ASSERT0(upl_dirty_page(pl, pg_index));
-			printf("ZFS: %s:%d: (abort, continue) page_index %lld pres %d dirt %d foff %lld"
+			printf("ZFS: %s:%d: (commit, continue) page_index %lld pres %d dirt %d foff %lld"
 			    " sz %ld (remaining to retire %d) file %s\n", __func__, __LINE__, pg_index,
 			    upl_page_present(pl, pg_index),
 			    upl_dirty_page(pl, pg_index),
 			    ap->a_f_offset, ap->a_size, pages_to_retire, zp->z_name_cache);
+			pages_to_retire--;
+			if (pages_to_retire == 0) {
+				int umapret = ubc_upl_unmap(upl);
+				printf("ZFS: %s:%d: unampping UPL (retval %d),"
+				    " pg_index %lld foff %lld sz %ld file %s\n",
+				    __func__, __LINE__, umapret,
+				    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
+			}
+			kern_return_t commit_precious_page_ret =
+			    ubc_upl_commit_range(upl, pg_index * PAGE_SIZE_64, PAGE_SIZE_64,
+				UPL_COMMIT_FREE_ON_EMPTY);
+			if (commit_precious_page_ret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: error %d committing precious page index %lld of %d"
+				    " upl_f_off %lld,"
+				    " file %s\n", __func__, __LINE__, commit_precious_page_ret,
+				    pg_index, end_pg, ap->a_f_offset, zp->z_name_cache);
+				if (error == 0)
+					error = commit_precious_page_ret;
+			} else {
+				printf("ZFS: %s:%d success committing precious page at end index %lld of %d"
+				    " ap->a_size %ld upl_f_off %lld (to_retire %d)"
+				    " file %s\n", __func__, __LINE__,
+				    pg_index, end_pg, ap->a_size, ap->a_f_offset,
+				    pages_to_retire, zp->z_name_cache);
+			}
+			if (pg_index == 0) {
+				printf("ZFS: %s:%d: all pages of UPL freed from tail to head upl_f_off %lld"
+				    " pageout size %ld file %s\n", __func__, __LINE__,
+				    ap->a_f_offset, ap->a_size, zp->z_name_cache);
+				ASSERT3S(pages_to_retire, ==, 0);
+				VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
+			}
+			VNOPS_OSX_STAT_BUMP(pageoutv2_cleaned_precious_pages);
+			continue;
 		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
 		pages_to_retire--;
