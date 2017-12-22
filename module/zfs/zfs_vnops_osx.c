@@ -2910,13 +2910,16 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 				    upl_offset, size, f_offset, zp->z_name_cache);
 			}
 		} else {
-			int commitflags = UPL_COMMIT_FREE_ON_EMPTY;
+			int commitflags = UPL_COMMIT_FREE_ON_EMPTY
+			    | UPL_COMMIT_CLEAR_DIRTY
+			    | UPL_COMMIT_CLEAR_PRECIOUS;
 			kern_return_t commitret = ubc_upl_commit_range(upl, upl_offset, size, commitflags);
 			if (commitret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d"
-				    " from ubc_upl_commit_range %u - %d f_off %lld file %s\n",
+				    " from ubc_upl_commit_range %u - %d f_off %lld .. %lld file %s fs %s\n",
 				    __func__, __LINE__, commitret,
-				    upl_offset, size, f_offset, zp->z_name_cache);
+				    upl_offset, size, f_offset, f_offset + size,
+				    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 				error = commitret;
 			} else {
 				printf("ZFS: %s:%d: successfully committed range %u - %d"
