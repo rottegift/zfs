@@ -3470,11 +3470,27 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    upl_page_present(pl, pg_index + num_of_pages)) {
 				/* dirty: 1 present: 1, this is part of a run of present pages */
 				printf("ZFS: %s:%d: found non-dirty (but present) page at page index %lld"
-				    " of upl [%lld..%lld] file %s (continuing to gather)\n",
+				    " of upl [%lld..%lld] file %s fs %s (committing)\n",
 				    __func__, __LINE__,
 				    pg_index + num_of_pages, ap->a_f_offset,
-				    ap->a_f_offset + ap->a_size, zp->z_name_cache);
+				    ap->a_f_offset + ap->a_size, zp->z_name_cache,
+				    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+				int precious_commit_ret =
+				    ubc_upl_commit_range(upl, (pg_index + num_of_pages) * PAGE_SIZE,
+					PAGE_SIZE, UPL_COMMIT_CLEAR_PRECIOUS);
+				if (precious_commit_ret != KERN_SUCCESS) {
+					printf("ZFS: %s:%d: error %d committing page index %lld,"
+					    " [%lld..%lld] file %s filesystem %s\n",
+					    __func__, __LINE__,
+					    precious_commit_ret,
+					    pg_index + num_of_pages,
+					    ap->a_f_offset + (pg_index + num_of_pages) * PAGE_SIZE,
+					    ap->a_f_offset + (pg_index + num_of_pages + 1) * PAGE_SIZE,
+					    zp->z_name_cache,
+					    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+				}
 				bluster_print_flag = B_TRUE;
+				break;
 			} else if ( !upl_page_present(pl, pg_index + num_of_pages)) {
 				/*
 				 * dirty: 0 present: 0, this ends the run of present pages,
