@@ -2718,9 +2718,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	VNOPS_OSX_STAT_BUMP(bluster_pageout_calls);
 
-	ASSERT0(upl_offset & PAGE_SIZE);
-	ASSERT0(size & PAGE_SIZE);
-	ASSERT3S(size, >=, PAGE_SIZE);
+	ASSERT0(upl_offset & PAGE_MASK_64);
+	ASSERT0(size & PAGE_MASK_64);
+	ASSERT3S(size, >=, PAGE_SIZE_64);
 
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, filesize);
 
@@ -2750,7 +2750,8 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	if (vnode_vfsisrdonly(ZTOV(zp)) ||
 	    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
             !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-		printf("ZFS: %s: readonly fs\n", __func__);
+		printf("ZFS: %s:%d readonly fs [%lld..%lld] file %s\n", __func__,
+		    __LINE__, f_offset, f_offset + size, zp->z_name_cache);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
@@ -3091,12 +3092,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (vnode_vfsisrdonly(ZTOV(zp)) ||
 	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-		printf("ZFS: %s:%d: readonly filesystem for [%lld...%lld] file %s\n",
+		printf("ZFS: %s:%d: WARNING: readonly filesystem for [%lld...%lld] file %s\n",
 		    __func__, __LINE__, ap->a_f_offset,
 		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
-		error = EROFS;
-		goto exit_abort;
-	}
+ 	}
 
 	if (zp->z_pflags & ZFS_IMMUTABLE) {
 		printf("ZFS: %s:%d: immutable flags set for file %s\n",
