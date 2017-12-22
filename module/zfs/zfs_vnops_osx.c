@@ -2882,7 +2882,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 
 	printf("ZFS: %s:%d: DMU committing tx for [%lld..%lld] in file %s\n",
-	    __func__, __LINE__, f_offset, f_offset + size, zp->z_name_cache);
+	    __func__, __LINE__, f_offset, f_offset + write_size, zp->z_name_cache);
 
 	dmu_tx_commit(tx);
 
@@ -2899,7 +2899,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			kern_return_t abortret = ubc_upl_abort_range(upl,
 			    upl_offset, size, abortflags);
 			if (abortret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d error %d aboyrting after error %d"
+				printf("ZFS: %s:%d error %d aborting after error %d"
 				    " uploff %u abortlen %d uplfoff %lld file %s\n",
 				    __func__, __LINE__, abortret, error,
 				    upl_offset, size, f_offset, zp->z_name_cache);
@@ -3279,6 +3279,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
 		int erofs_abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 		ASSERT3S(erofs_abortret, ==, KERN_SUCCESS);
+		error = EROFS;
 		goto pageout_done;
 	}
 
@@ -3525,7 +3526,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	/* this asssertion is failing  (e.g. 3 != 2 or 1 != 0) */
 
 	ASSERT3S(pages_to_retire, ==, 0);
-	ASSERT3S(pg_index, ==, last_nonempty_pg);
+	ASSERT3S(pg_index, ==, last_nonempty_pg + 1);
 
 	int unmap_ret;
 
