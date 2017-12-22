@@ -111,6 +111,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_skip_empty_tail_pages;
 	kstat_named_t pageoutv2_skip_absent_pages;
 	kstat_named_t pageoutv2_all_previously_freed;
+	kstat_named_t pageoutv2_all_previously_freed_clean;
 	kstat_named_t pageoutv1_pages;
 	kstat_named_t pageoutv1_want_lock;
 	kstat_named_t pagein_calls;
@@ -135,8 +136,9 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_cleaned_precious_pagess", KSTAT_DATA_UINT64 },
 	{ "pageoutv2_skip_empty_tail_pages",   KSTAT_DATA_UINT64 },
-	{ "pageoutv2_skip_absent_pages",        KSTAT_DATA_UINT64 },
+	{ "pageoutv2_skip_absent_pages",       KSTAT_DATA_UINT64 },
 	{ "pageoutv2_all_previously_freed",    KSTAT_DATA_UINT64 },
+	{ "pageoutv2_all_previously_freed_clean", KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv1_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pagein_calls",                      KSTAT_DATA_UINT64 },
@@ -3428,7 +3430,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    ap->a_f_offset, ap->a_size,
 				    pages_to_retire, pg_index,
 				    zp->z_name_cache);
-				VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
+				VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed_clean);
 				goto pageout_done;
 			}
 			VNOPS_OSX_STAT_BUMP(pageoutv2_cleaned_precious_pages);
