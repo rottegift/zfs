@@ -3474,7 +3474,18 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			goto pageout_done;
 		}
 	}
-	const int last_nonempty_pg = pg_index;
+	const int last_nonempty_pg = pg_index + 1;
+
+	if (last_nonempty_pg  < end_pg) {
+		printf("ZFS: %s:%d: chopped %lld pages off tail of UPL, pages_to_retire now %d,"
+		    " total_pages %lld, pg_index %lld, isize %lld, [%lld..%lld] file %s fs %s\n",
+		    __func__, __LINE__,
+		    howmany(ap->a_size, PAGE_SIZE_64) - last_nonempty_pg,
+		    pages_to_retire, howmany(ap->a_size, PAGE_SIZE_64),
+		    pg_index, (pg_index + 1) * PAGE_SIZE,
+		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+	}
 
 	dprintf("ZFS: isize %llu pg_index %llu\n", isize, pg_index);
 	/*
@@ -3646,7 +3657,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	/* this asssertion is failing  (e.g. 3 != 2 or 1 != 0) */
 
 	ASSERT3S(pages_to_retire, ==, 0);
-	ASSERT3S(pg_index, ==, last_nonempty_pg + 1);
+	ASSERT3S(pg_index, ==, last_nonempty_pg);
 
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
