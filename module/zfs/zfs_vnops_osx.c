@@ -2481,8 +2481,7 @@ top:
 	if (!tx) {
 		printf("ZFS: %s:%d: zfs_vnops_osx: NULL TX encountered!\n", __func__, __LINE__);
 		if (!(flags & UPL_NOCOMMIT))
-			ubc_upl_abort_range(upl, upl_offset, len,
-			    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+			ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 		err = EINVAL;
 		goto exit;
 	}
@@ -2583,8 +2582,7 @@ out:
 
 	if (!(flags & UPL_NOCOMMIT)) {
 		if (err) {
-			ubc_upl_abort_range(upl, upl_offset, size,
-			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
+			ubc_upl_abort(upl, (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
 		} else {
 			int cflags = UPL_COMMIT_FREE_ON_EMPTY;
 			if (clear_flags) {
@@ -2896,10 +2894,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 				abortflags |= UPL_ABORT_RESTART;
 			else
 				abortflags |= UPL_ABORT_ERROR;
-			kern_return_t abortret = ubc_upl_commit_range(upl,
+			kern_return_t abortret = ubc_upl_aborty_range(upl,
 			    upl_offset, size, abortflags);
 			if (abortret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d error %d aborting after error %d"
+				printf("ZFS: %s:%d error %d aboyrting after error %d"
 				    " uploff %u abortlen %d uplfoff %lld file %s\n",
 				    __func__, __LINE__, abortret, error,
 				    upl_offset, size, f_offset, zp->z_name_cache);
