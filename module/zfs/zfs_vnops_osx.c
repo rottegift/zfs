@@ -3672,9 +3672,11 @@ pageout_done:
 	zfs_range_unlock(rl);
 
 exit_abort:
-	printf("ZFS: %s:%d pageoutv2 aborted with error %d, [%lld..%lld] file %s filesystem %s\n",
-	    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-	    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+	if (error) {
+		printf("ZFS: %s:%d pageoutv2 returning error %d, [%lld..%lld] file %s filesystem %s\n",
+		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+	}
 	//VERIFY(ubc_create_upl(vp, off, len, &upl, &pl, flags) == 0);
 	//ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 
