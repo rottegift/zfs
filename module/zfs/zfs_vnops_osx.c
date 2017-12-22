@@ -2711,7 +2711,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const upl_offset_t upl_offset, const off_t f_offset, const int size,
     const uint64_t filesize, const int flags,
     struct vnop_pageout_args *ap,
-    caddr_t *pvaddr)
+    caddr_t *pvaddr, int pages_remaining)
 {
 	int           is_clcommit = 0;
 	dmu_tx_t *tx;
@@ -2729,6 +2729,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT3S(flags & UPL_NOCOMMIT, ==, 0);
 	is_clcommit = 1;
 
+	boolean_t unmap = B_FALSE;
+	if (pages_remaining == 1 || pages_remaining == howmany(size, PAGE_SIZE)) {
+		if (is_clcommit)
+			unmap = B_TRUE;
+	}
+
 	/*
 	 * if is_clcommit (expected to be true) then we MUST commit or
 	 * abort all the pages from upl_offset to upl_offset + size
@@ -2742,9 +2748,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	 */
 	if (size <= 0) {
 		printf("%s invalid size %d file %s\n", __func__, size, zp->z_name_cache);
+		if (unmap)
+			ubc_upl_unmap(upl);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_ERROR
+			    | UPL_ABORT_FREE_ON_EMPTY
 			    | UPL_ABORT_DUMP_PAGES);
 		return (EINVAL);
 	}
@@ -2755,9 +2764,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d readonly fs %s for [%lld..%lld] file %s\n", __func__,
 		    __LINE__, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
 		    f_offset, f_offset + size, zp->z_name_cache);
+		if (unmap)
+			ubc_upl_unmap(upl);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_ERROR
+			    | UPL_ABORT_FREE_ON_EMPTY
 			    | UPL_ABORT_DUMP_PAGES);
 		return (EROFS);
 	}
@@ -2772,9 +2784,13 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		(f_offset & PAGE_MASK_64) || (size & PAGE_MASK)) {
 		printf("ZFS: %s:%d invalid offset or size (off %lld, size %d, filesize %lld)"
 		    " file %s\n" , __func__, __LINE__, f_offset, size, filesize, zp->z_name_cache);
+		if (unmap)
+			ubc_upl_unmap(upl);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
-			    UPL_ABORT_ERROR | UPL_ABORT_DUMP_PAGES);
+			    UPL_ABORT_ERROR
+			    | UPL_ABORT_FREE_ON_EMPTY
+			    | UPL_ABORT_DUMP_PAGES);
 		return (EINVAL);
 	}
 
@@ -2782,9 +2798,13 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d: trying to write starting past filesize %lld : off %lld, size %u,"
 		    " filename %s\n",
 		    __func__, __LINE__, filesize, f_offset, size, zp->z_name_cache);
+		if (unmap)
+			ubc_upl_unmap(upl);
 		if (is_clcommit) {
 			int abortret = ubc_upl_abort_range(upl, upl_offset, size,
-			    UPL_ABORT_ERROR | UPL_ABORT_DUMP_PAGES);
+			    UPL_ABORT_ERROR
+			    | UPL_ABORT_FREE_ON_EMPTY
+			    | UPL_ABORT_DUMP_PAGES);
 			ASSERT3S(abortret, ==, KERN_SUCCESS);
 		}
 		return (SET_ERROR(EINVAL));
@@ -2800,9 +2820,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			    " ! for upl_offset %u a_f_off %lld a_size %ld @ file %s\n",
 			    __func__, __LINE__, write_space, filesize, f_offset, write_space,
 			    upl_offset, ap->a_f_offset, ap->a_size, zp->z_name_cache);
+			if (unmap)
+				ubc_upl_unmap(upl);
 			if (is_clcommit) {
 				int abortret = ubc_upl_abort_range(upl, upl_offset, size,
-				    UPL_ABORT_ERROR);
+				    UPL_ABORT_FREE_ON_EMPTY
+				    | UPL_ABORT_ERROR);
 				ASSERT3S(abortret, ==, KERN_SUCCESS);
 			}
 			return (SET_ERROR(EINVAL));
@@ -2821,9 +2844,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d: cannot safely write [%lld, %lld] z_blksz %d file %s\n",
 		    __func__, __LINE__, f_offset, f_offset + write_size,
 		    zp->z_blksz, zp->z_name_cache);
+		if (unmap)
+			ubc_upl_unmap(upl);
 		if (is_clcommit) {
 			int abortret = ubc_upl_abort_range(upl, upl_offset, size,
-			    UPL_ABORT_ERROR);
+			    UPL_ABORT_FREE_ON_EMPTY
+			    | UPL_ABORT_ERROR);
 			ASSERT3S(abortret, ==, KERN_SUCCESS);
 		}
 		return(EAGAIN);
@@ -2840,10 +2866,13 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT3S(error, ==, 0);
 	if (error != 0) {
 		dmu_tx_abort(tx);
+		if (unmap)
+			ubc_upl_unmap(upl);
 		if (is_clcommit) {
 			kern_return_t abort_ret = ubc_upl_abort_range(upl,
 			    upl_offset, size,
-			    UPL_ABORT_ERROR);
+			    UPL_ABORT_FREE_ON_EMPTY
+			    | UPL_ABORT_ERROR);
 			ASSERT3S(abort_ret, ==, KERN_SUCCESS);
 		}
 		return (error);
@@ -2889,9 +2918,16 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	printf("ZFS: %s:%d: successfully committed tx for [%lld..%lld] in file %s\n",
 	    __func__, __LINE__, f_offset, f_offset+size, zp->z_name_cache);
 
+	if (unmap) {
+		int unmapret = ubc_upl_unmap(upl);
+		if (unmapret != KERN_SUCCESS)
+			printf("ZFS: %s:%d: error unmapping UPL for [%lld..%lld] file %s\n",
+			    __func__, __LINE__, f_offset, f_offset + size, zp->z_name_cache);
+	}
+
 	if (is_clcommit) {
 		if (error != 0) {
-			int abortflags = 0;
+			int abortflags = UPL_ABORT_FREE_ON_EMPTY;
 			if (error == 35)
 				abortflags |= UPL_ABORT_RESTART;
 			else
@@ -2910,7 +2946,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 				    upl_offset, size, f_offset, zp->z_name_cache);
 			}
 		} else {
-			int commitflags = 0
+			int commitflags = UPL_COMMIT_FREE_ON_EMPTY
 			    | UPL_COMMIT_CLEAR_DIRTY
 			    | UPL_COMMIT_CLEAR_PRECIOUS;
 			kern_return_t commitret = ubc_upl_commit_range(upl, upl_offset, size, commitflags);
@@ -3365,20 +3401,26 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		pg_index--;
 		if (upl_page_present(pl, pg_index) || upl_dirty_page(pl, pg_index)) {
-			if (pg_index == 0) {
-				printf("ZFS: %s:%d page_index 0 pres %d dirt %d foff %lld sz %ld file %s\n",
-				    __func__, __LINE__,
-				    upl_page_present(pl, 0), upl_dirty_page(pl, 0),
-				    ap->a_f_offset, ap->a_size,  zp->z_name_cache);
-			}
+			printf("ZFS: %s:%d page_index 0 pres %d dirt %d foff %lld sz %ld file %s\n",
+			    __func__, __LINE__,
+			    upl_page_present(pl, pg_index), upl_dirty_page(pl, pg_index),
+			    ap->a_f_offset, ap->a_size,  zp->z_name_cache);
 			if (!upl_dirty_page(pl, pg_index))
 			    bluster_print_flag = B_TRUE;
 			break;
 		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
 		pages_to_retire--;
+		if (pages_to_retire == 0) {
+			int umapret = ubc_upl_unmap(upl);
+			printf("ZFS: %s:%d: unampping UPL (retval %d),"
+			    " pg_index %lld foff %lld sz %ld file %s\n",
+			    __func__, __LINE__, umapret,
+			    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
+		}
 		kern_return_t abort_present_page_ret =
-		    ubc_upl_abort_range(upl, pg_index * PAGE_SIZE_64, PAGE_SIZE_64, 0);
+		    ubc_upl_abort_range(upl, pg_index * PAGE_SIZE_64, PAGE_SIZE_64,
+			    UPL_ABORT_FREE_ON_EMPTY);
 		if (abort_present_page_ret != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: error %d aborting present page index %lld of %d"
 			    " upl_f_off %lld,"
@@ -3398,7 +3440,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    ap->a_f_offset, ap->a_size, zp->z_name_cache);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
 			ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
-			goto unmap_pageout_done;
 		}
 	}
 	const int last_nonempty_pg = pg_index;
@@ -3422,6 +3463,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 		//printf("isize %d for page %d\n", isize, pg_index);
 
+		ASSERT3S(pages_to_retire, >, 0);
+
 		if ( !upl_page_present(pl, pg_index)) {
 			ASSERT0(upl_dirty_page(pl, pg_index));
 			/*
@@ -3430,7 +3473,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * just abort them
 			 */
 			pages_to_retire--;
-			int abortflags = 0;
+			if (pages_to_retire == 0) {
+				int umapret = ubc_upl_unmap(upl);
+				printf("ZFS: %s:%d: unampping UPL (retval %d),"
+				    " pg_index %lld foff %lld sz %ld file %s\n",
+				    __func__, __LINE__, umapret,
+				    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
+			}
+			int abortflags = UPL_ABORT_FREE_ON_EMPTY;
 			kern_return_t abortret = ubc_upl_abort_range(upl,
 			    pg_index * PAGE_SIZE, PAGE_SIZE, abortflags);
 			if (abortret != KERN_SUCCESS) {
@@ -3468,16 +3518,25 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		while (xsize>0) {
 			if ( !upl_dirty_page(pl, pg_index + num_of_pages) &&
 			    upl_page_present(pl, pg_index + num_of_pages)) {
-				/* dirty: 1 present: 1, this is part of a run of present pages */
 				printf("ZFS: %s:%d: found non-dirty (but present) page at page index %lld"
 				    " of upl [%lld..%lld] file %s fs %s (committing)\n",
 				    __func__, __LINE__,
 				    pg_index + num_of_pages, ap->a_f_offset,
 				    ap->a_f_offset + ap->a_size, zp->z_name_cache,
 				    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+				pages_to_retire--;
+				if (pages_to_retire == 0) {
+					int umapret = ubc_upl_unmap(upl);
+					printf("ZFS: %s:%d: unampping UPL (retval %d),"
+					    " pg_index %lld foff %lld sz %ld file %s\n",
+					    __func__, __LINE__, umapret,
+					    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
+				}
 				int precious_commit_ret =
 				    ubc_upl_commit_range(upl, (pg_index + num_of_pages) * PAGE_SIZE,
-					PAGE_SIZE, UPL_COMMIT_CLEAR_PRECIOUS);
+					PAGE_SIZE,
+					UPL_COMMIT_FREE_ON_EMPTY
+					| UPL_COMMIT_CLEAR_PRECIOUS);
 				if (precious_commit_ret != KERN_SUCCESS) {
 					printf("ZFS: %s:%d: error %d committing page index %lld,"
 					    " [%lld..%lld] file %s filesystem %s\n",
@@ -3527,8 +3586,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		 * bluster_pageout MUST abort or commit all the UPL pages between
 		 * offset and offset+xsize
 		 */
+
+		ASSERT3S(pages_to_retire, >, 0);
+
 		merror = bluster_pageout(zfsvfs, zp, upl, offset, f_offset, xsize,
-		    filesize, a_flags, ap, &v_addr);
+		    filesize, a_flags, ap, &v_addr, pages_to_retire);
 
 		pages_to_retire -= howmany(xsize, PAGE_SIZE);
 
@@ -3554,21 +3616,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	ASSERT3S(pages_to_retire, ==, 0);
 	ASSERT3S(pg_index, ==, last_nonempty_pg + 1);
 
-	int unmap_ret;
-
-	printf("ZFS: %s:%d: loop done, unmapping file [%lld..%lld] %s\n",
-	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-	    zp->z_name_cache);
-
-	unmap_ret = ubc_upl_unmap(upl);
-	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
-	if (unmap_ret != KERN_SUCCESS && error == 0)
-		error = EINVAL;
-
-	printf("ZFS: %s:%d: unmapped file [%lld..%lld] %s\n",
-	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-	    zp->z_name_cache);
-
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT(!rw_write_held(&zp->z_map_lock));
@@ -3593,13 +3640,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	ZFS_EXIT(zfsvfs);
 	return (error);
-
-unmap_pageout_done:
-
-	unmap_ret = ubc_upl_unmap(upl);
-	ASSERT3S(unmap_ret, ==, KERN_SUCCESS);
-	if (unmap_ret != KERN_SUCCESS && error == 0)
-		error = EINVAL;
 
 pageout_done:
 
