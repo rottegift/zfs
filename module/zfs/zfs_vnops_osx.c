@@ -3404,14 +3404,20 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	const int end_pg = ((isize) / PAGE_SIZE);
 	for (pg_index = ((isize) / PAGE_SIZE); pg_index > 0;) {
 		pg_index--;
-		if (upl_page_present(pl, pg_index) || upl_dirty_page(pl, pg_index)) {
-			printf("ZFS: %s:%d page_index 0 pres %d dirt %d foff %lld sz %ld file %s\n",
-			    __func__, __LINE__,
+		if (upl_page_present(pl, pg_index) && upl_dirty_page(pl, pg_index)) {
+			printf("ZFS: %s:%d (break) page_index %lld pres %d dirt %d foff %lld"
+			    " sz %ld (still to retire %d) file %s\n",
+			    __func__, __LINE__, pg_index,
 			    upl_page_present(pl, pg_index), upl_dirty_page(pl, pg_index),
-			    ap->a_f_offset, ap->a_size,  zp->z_name_cache);
-			if (!upl_dirty_page(pl, pg_index))
-			    bluster_print_flag = B_TRUE;
+			    ap->a_f_offset, ap->a_size, pages_to_retire, zp->z_name_cache);
 			break;
+		} else if (upl_page_present(pl, pg_index)) {
+			ASSERT0(upl_dirty_page(pl, pg_index));
+			printf("ZFS: %s:%d: (abort, continue) page_index %lld pres %d dirt %d foff %lld"
+			    " sz %ld (remaining to retire %d) file %s\n", __func__, __LINE__, pg_index,
+			    upl_page_present(pl, pg_index),
+			    upl_dirty_page(pl, pg_index),
+			    ap->a_f_offset, ap->a_size, pages_to_retire, zp->z_name_cache);
 		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
 		pages_to_retire--;
@@ -3434,14 +3440,16 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				error = abort_present_page_ret;
 		} else {
 			printf("ZFS: %s:%d success aborting present page at end index %lld of %d"
-			    " ap->a_size %ld upl_f_off %lld"
+			    " ap->a_size %ld upl_f_off %lld (to_retire %d)"
 			    " file %s\n", __func__, __LINE__,
-			    pg_index, end_pg, ap->a_size, ap->a_f_offset, zp->z_name_cache);
+			    pg_index, end_pg, ap->a_size, ap->a_f_offset,
+			    pages_to_retire, zp->z_name_cache);
 		}
 		if (pg_index == 0) {
 			printf("ZFS: %s:%d: all pages of UPL freed from tail to head upl_f_off %lld"
 			    " pageout size %ld file %s\n", __func__, __LINE__,
 			    ap->a_f_offset, ap->a_size, zp->z_name_cache);
+			ASSERT3S(pages_to_retire, ==, 0);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
 		}
 	}
