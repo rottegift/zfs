@@ -3368,7 +3368,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			if (pg_index == 0) {
 				printf("ZFS: %s:%d page_index 0 pres %d dirt %d foff %lld sz %ld file %s\n",
 				    __func__, __LINE__,
-				    upl_page_present(pl, 0), upl_page_present(pl, 0),
+				    upl_page_present(pl, 0), upl_dirty_page(pl, 0),
 				    ap->a_f_offset, ap->a_size,  zp->z_name_cache);
 			}
 			if (!upl_dirty_page(pl, pg_index))
