@@ -3609,6 +3609,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 					    zp->z_name_cache,
 					    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 				}
+				num_of_pages--;
+				xsize -= PAGE_SIZE;
 				break;
 			} else if ( !upl_page_present(pl, pg_index + num_of_pages)) {
 				/*
@@ -3629,8 +3631,19 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			xsize -= PAGE_SIZE;
 		}
 
+		if (num_of_pages == 0) {
+			printf("ZFS: %s:%d: num_of_pages 0, xsize %lld, continuing, pg_index %lld,"
+			    " [%lld..%lld] file %s fs %s\n", __func__, __LINE__,
+			    xsize, pg_index,
+			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			    zp->z_name_cache,
+			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+			continue;
+		}
+
 		xsize = num_of_pages * PAGE_SIZE;
 
+		ASSERT3S(xsize, >=, PAGE_SIZE);
 		ASSERT3S(xsize, <=, MAX_UPL_SIZE_BYTES);
 		ASSERT3S(ubc_getsize(vp), ==, filesize);
 
