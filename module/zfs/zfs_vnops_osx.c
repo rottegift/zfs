@@ -2894,7 +2894,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 				abortflags |= UPL_ABORT_RESTART;
 			else
 				abortflags |= UPL_ABORT_ERROR;
-			kern_return_t abortret = ubc_upl_aborty_range(upl,
+			kern_return_t abortret = ubc_upl_abort_range(upl,
 			    upl_offset, size, abortflags);
 			if (abortret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d error %d aboyrting after error %d"
