@@ -2436,7 +2436,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		if (!(flags & UPL_NOCOMMIT)) {
 			ASSERT3S(len, ==, size);
 			(void) ubc_upl_abort_range(upl, upl_offset, len,
-			    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+			    UPL_ABORT_DUMP_PAGES| UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 		}
 		err = EROFS;
 		goto exit;
@@ -2454,6 +2454,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 			ASSERT3S(len, ==, size);
 			ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_ERROR |
+			    UPL_ABORT_DUMP_PAGES |
 			    UPL_ABORT_FREE_ON_EMPTY);
 		err = EINVAL;
 		goto exit;
@@ -2740,10 +2741,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	 * big the upl really is
 	 */
 	if (size <= 0) {
-		printf("%s invalid size %d\n", __func__, size);
+		printf("%s invalid size %d file %s\n", __func__, size, zp->z_name_cache);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
-			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
+			    (UPL_ABORT_ERROR
+				| UPL_ABORT_DUMP_PAGES
+				| UPL_ABORT_FREE_ON_EMPTY));
 		return (EINVAL);
 	}
 
@@ -2755,7 +2758,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		    f_offset, f_offset + size, zp->z_name_cache);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
-			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
+			    UPL_ABORT_ERROR
+			    | UPL_ABORT_DUMP_PAGES
+			    | UPL_ABORT_FREE_ON_EMPTY);
 		return (EROFS);
 	}
 
@@ -2765,13 +2770,13 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	 * or if the file offset isn't page aligned
 	 * or the size requested isn't a multiple of PAGE_SIZE
 	 */
-	if (f_offset < 0 || f_offset >= filesize ||
+	if (f_offset < 0 ||
 		(f_offset & PAGE_MASK_64) || (size & PAGE_MASK)) {
 		printf("ZFS: %s:%d invalid offset or size (off %lld, size %d, filesize %lld)"
 		    " file %s\n" , __func__, __LINE__, f_offset, size, filesize, zp->z_name_cache);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
-			    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+			    UPL_ABORT_ERROR | UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
 		return (EINVAL);
 	}
 
@@ -2781,7 +2786,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		    __func__, __LINE__, filesize, f_offset, size, zp->z_name_cache);
 		if (is_clcommit) {
 			int abortret = ubc_upl_abort_range(upl, upl_offset, size,
-			    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+			    UPL_ABORT_ERROR | UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
 			ASSERT3S(abortret, ==, KERN_SUCCESS);
 		}
 		return (SET_ERROR(EINVAL));
@@ -2837,9 +2842,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT3S(error, ==, 0);
 	if (error != 0) {
 		dmu_tx_abort(tx);
-		/* we have to unmap before aborting */
-		int unmapret = ubc_upl_unmap(upl);
-		ASSERT0(unmapret);
 		if (is_clcommit) {
 			kern_return_t abort_ret = ubc_upl_abort_range(upl,
 			    upl_offset, size,
@@ -3280,7 +3282,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
 		    ap->a_f_offset,
 		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
-		int erofs_abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+		int erofs_abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR
+		    | UPL_ABORT_DUMP_PAGES
+		    | UPL_ABORT_FREE_ON_EMPTY);
 		ASSERT3S(erofs_abortret, ==, KERN_SUCCESS);
 		error = EROFS;
 		goto pageout_done;
@@ -3289,7 +3293,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	if (zp->z_pflags & ZFS_IMMUTABLE) {
 		printf("ZFS: %s:%d: immutable flags set for file %s\n",
 		    __func__, __LINE__, zp->z_name_cache);
-		int immutable_abort_ret = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+		int immutable_abort_ret = ubc_upl_abort(upl, UPL_ABORT_ERROR
+		    | UPL_ABORT_DUMP_PAGES
+		    | UPL_ABORT_FREE_ON_EMPTY);
 		ASSERT3S(immutable_abort_ret, ==, KERN_SUCCESS);
 		error = EPERM;
 		goto pageout_done;
