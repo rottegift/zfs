@@ -3529,6 +3529,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    pg_index, ap->a_f_offset, ap->a_size, zp->z_name_cache);
 			}
 			VNOPS_OSX_STAT_BUMP(pageoutv2_skip_absent_pages);
+			if (pages_to_retire == 0) {
+				printf("ZFS: %s:%d end page aborted, pageout_done, index %lld,"
+				    " [%lld..%lld], foff %lld, sz %ld, file %s\n",
+				    __func__, __LINE__, pg_index,
+				    ap->a_f_offset + (pg_index * PAGE_SIZE_64),
+				    ap->a_f_offset + (pg_index * PAGE_SIZE_64) + PAGE_SIZE_64,
+				    ap->a_f_offset,
+				    ap->a_size,
+				    zp->z_name_cache);
+				goto pageout_done;
+			}
 			f_offset += PAGE_SIZE;
 			offset   += PAGE_SIZE;
 			isize    -= PAGE_SIZE;
