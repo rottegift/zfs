@@ -3420,6 +3420,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    ap->a_f_offset, ap->a_size, pages_to_retire, zp->z_name_cache);
 			pages_to_retire--;
 			if (pages_to_retire == 0) {
+				ASSERT3S(pg_index, ==, 0);
 				int umapret = ubc_upl_unmap(upl);
 				printf("ZFS: %s:%d: unampping UPL (retval %d),"
 				    " pg_index %lld foff %lld sz %ld file %s\n",
@@ -3444,11 +3445,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    pages_to_retire, zp->z_name_cache);
 			}
 			if (pg_index == 0) {
-				printf("ZFS: %s:%d: all pages of UPL freed from tail to head upl_f_off %lld"
-				    " pageout size %ld file %s\n", __func__, __LINE__,
-				    ap->a_f_offset, ap->a_size, zp->z_name_cache);
 				ASSERT3S(pages_to_retire, ==, 0);
+				printf("ZFS: %s:%d: all pages of UPL freed from tail to head upl_f_off %lld"
+				    " pageout size %ld (to retire %d pg_index %lld) file %s\n",
+				    __func__, __LINE__,
+				    ap->a_f_offset, ap->a_size,
+				    pages_to_retire, pg_index,
+				    zp->z_name_cache);
 				VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
+				goto pageout_done;
 			}
 			VNOPS_OSX_STAT_BUMP(pageoutv2_cleaned_precious_pages);
 			continue;
@@ -3456,6 +3461,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
 		pages_to_retire--;
 		if (pages_to_retire == 0) {
+			ASSERT3S(pg_index, ==, 0);
 			int umapret = ubc_upl_unmap(upl);
 			printf("ZFS: %s:%d: unampping UPL (retval %d),"
 			    " pg_index %lld foff %lld sz %ld file %s\n",
@@ -3480,11 +3486,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    pages_to_retire, zp->z_name_cache);
 		}
 		if (pg_index == 0) {
+			ASSERT3S(pages_to_retire, ==, 0);
 			printf("ZFS: %s:%d: all pages of UPL freed from tail to head upl_f_off %lld"
-			    " pageout size %ld file %s\n", __func__, __LINE__,
-			    ap->a_f_offset, ap->a_size, zp->z_name_cache);
+			    " pageout size %ld (to_retire %d pg_index %lld) file %s\n", __func__, __LINE__,
+			    ap->a_f_offset, ap->a_size, pages_to_retire, pg_index,
+			    zp->z_name_cache);
 			ASSERT3S(pages_to_retire, ==, 0);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
+			goto pageout_done;
 		}
 	}
 	const int last_nonempty_pg = pg_index;
