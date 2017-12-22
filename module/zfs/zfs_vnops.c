@@ -2385,6 +2385,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 				    __func__, __LINE__, error);
 				dmu_tx_abort(tx);
 			} else {
+				ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 				error = sa_update(zp->z_sa_hdl, SA_ZPL_SIZE(zfsvfs),
 				    (void *)&zp->z_size, sizeof (uint64_t), tx);
 				if (error) {

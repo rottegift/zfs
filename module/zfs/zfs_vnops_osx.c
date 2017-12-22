@@ -2568,6 +2568,8 @@ top:
 		    &zp->z_pflags, 8);
 		zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
 		    B_TRUE);
+		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs), NULL,
+		    &zp->z_size, 8)
 		err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(err);
 		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, off, size, 0,
@@ -2897,6 +2899,8 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
                     &zp->z_pflags, 8);
                 zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
                     B_TRUE);
+		ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
+		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs), NULL, &zp->z_size, 8);
 		error = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(error);
                 zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, f_offset, write_size, 0,
