@@ -3747,21 +3747,6 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	if (!spl_ubc_is_mapped(vp, NULL))
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
 
-	off_t ubcsize = ubc_getsize(vp);
-        off_t resid_msync_off = ubcsize;
-        int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, UBC_PUSHDIRTY | UBC_SYNC);
-	if (retval_msync != 0) {
-                if (resid_msync_off != ubcsize)
-                        printf("ZFS: %s:%d: msync error %d syncing %lld - %lld,"
-                            " resid_off = %lld, file %s\n",
-                            __func__, __LINE__, retval_msync, 0LL, ubcsize,
-                            resid_msync_off, zp->z_name_cache);
-        } else {
-                dprintf("ZFS: (DEBUG) %s:%d: inval %lld - %lld (%lld), resid %lld , file %s\n",
-                    __func__, __LINE__, 0LL, ubcsize, ubcsize,
-                    resid_msync_off, zp->z_name_cache);
-        }
-
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	ZFS_EXIT(zfsvfs);
@@ -3806,25 +3791,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	}
 
 	ASSERT(spl_ubc_is_mapped(vp, NULL));
-
-#if 0
-	off_t ubcsize = ubc_getsize(vp);
-	off_t resid_msync_off = ubcsize;
-	/* PUSHDIRTY because we may have precious pages to commit */
-	int msyncflags = UBC_PUSHDIRTY | UBC_SYNC;
-        int retval_msync = zfs_ubc_msync(vp, 0, ubcsize, &resid_msync_off, msyncflags);
-	if (retval_msync != 0) {
-                if (resid_msync_off != ubcsize)
-                        printf("ZFS: %s:%d: msync error %d syncing %lld - %lld,"
-                            " resid_off = %lld, file %s\n",
-                            __func__, __LINE__, retval_msync, 0LL, ubcsize,
-                            resid_msync_off, zp->z_name_cache);
-        } else {
-                dprintf("ZFS: (DEBUG) %s:%d: inval %lld - %lld (%lld), resid %lld , file %s\n",
-                    __func__, __LINE__, 0LL, ubcsize, ubcsize,
-                    resid_msync_off, zp->z_name_cache);
-        }
-#endif
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
