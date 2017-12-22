@@ -2854,10 +2854,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, write_size, pvaddr[upl_offset], tx);
 
-	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
-	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + write_size);
-	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, write_size);
-
 	/* update SA and finish off transaction */
         if (error == 0) {
                 uint64_t mtime[2], ctime[2];
@@ -2885,6 +2881,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	    __func__, __LINE__, f_offset, f_offset + write_size, zp->z_name_cache);
 
 	dmu_tx_commit(tx);
+
+	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
+	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + write_size);
+	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, write_size);
 
 	printf("ZFS: %s:%d: successfully committed tx for [%lld..%lld] in file %s\n",
 	    __func__, __LINE__, f_offset, f_offset+size, zp->z_name_cache);
@@ -2933,6 +2933,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		uint64_t pgs = atop_64(size) + 1ULL;
 		VNOPS_OSX_STAT_INCR(bluster_pageout_pages, pgs);
 	}
+
+	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
+	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + write_size);
 
 	return (error);
 }
