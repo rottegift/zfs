@@ -3091,22 +3091,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	ASSERT(ubc_pages_resident(vp));
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 
-	if (vnode_vfsisrdonly(ZTOV(zp)) ||
-	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-		printf("ZFS: %s:%d: WARNING: readonly filesystem %s for [%lld...%lld] file %s\n",
-		    __func__, __LINE__,
-		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
-		    ap->a_f_offset,
-		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
- 	}
-
-	if (zp->z_pflags & ZFS_IMMUTABLE) {
-		printf("ZFS: %s:%d: immutable flags set for file %s\n",
-		    __func__, __LINE__, zp->z_name_cache);
-		error = EPERM;
-		goto exit_abort;
-	}
-
 	if (ap->a_size <= 0) {
 		printf("ZFS: %s:%d: invalid ap->a_size %ld, ap->a_f_offset %lld, file %s\n",
 		    __func__, __LINE__, ap->a_size, ap->a_f_offset, zp->z_name_cache);
@@ -3120,7 +3104,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		error = EINVAL;
 		goto exit_abort;
 	}
-
 
 	/*
 	 * To avoid deadlocking, we must take the range lock, then
@@ -3284,6 +3267,27 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 						   request_flags );
 	if (error || (upl == NULL)) {
 		printf("ZFS: %s: Failed to create UPL! %d\n", __func__, error);
+		goto pageout_done;
+	}
+
+	if (vnode_vfsisrdonly(ZTOV(zp)) ||
+	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+		printf("ZFS: %s:%d: WARNING: readonly filesystem %s for [%lld...%lld] file %s\n",
+		    __func__, __LINE__,
+		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
+		    ap->a_f_offset,
+		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
+		int erofs_abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+		ASSERT3S(erofs_abortret, ==, KERN_SUCCESS);
+		goto pageout_done;
+	}
+
+	if (zp->z_pflags & ZFS_IMMUTABLE) {
+		printf("ZFS: %s:%d: immutable flags set for file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
+		int immutable_abort_ret = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+		ASSERT3S(immutable_abort_ret, ==, KERN_SUCCESS);
+		error = EPERM;
 		goto pageout_done;
 	}
 
@@ -3579,7 +3583,9 @@ pageout_done:
 	zfs_range_unlock(rl);
 
 exit_abort:
-	dprintf("ZFS: pageoutv2 aborted %d\n", error);
+	printf("ZFS: %s:%d pageoutv2 aborted with error %d, [%lld..%lld] file %s filesystem %s\n",
+	    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+	    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 	//VERIFY(ubc_create_upl(vp, off, len, &upl, &pl, flags) == 0);
 	//ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 
