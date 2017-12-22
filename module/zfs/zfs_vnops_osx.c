@@ -2750,8 +2750,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	if (vnode_vfsisrdonly(ZTOV(zp)) ||
 	    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
             !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-		printf("ZFS: %s:%d readonly fs [%lld..%lld] file %s\n", __func__,
-		    __LINE__, f_offset, f_offset + size, zp->z_name_cache);
+		printf("ZFS: %s:%d readonly fs %s for [%lld..%lld] file %s\n", __func__,
+		    __LINE__, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
+		    f_offset, f_offset + size, zp->z_name_cache);
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
@@ -3092,8 +3093,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (vnode_vfsisrdonly(ZTOV(zp)) ||
 	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-		printf("ZFS: %s:%d: WARNING: readonly filesystem for [%lld...%lld] file %s\n",
-		    __func__, __LINE__, ap->a_f_offset,
+		printf("ZFS: %s:%d: WARNING: readonly filesystem %s for [%lld...%lld] file %s\n",
+		    __func__, __LINE__,
+		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
+		    ap->a_f_offset,
 		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
  	}
 
@@ -3550,13 +3553,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
-	ZFS_EXIT(zfsvfs);
 	if (error != 0) {
-		printf("ZFS: %s:%d: pageoutv2 error %d [%lld..%lld] file %s\n",
+		printf("ZFS: %s:%d: pageoutv2 error %d [%lld..%lld] file %s filesystem %s\n",
 		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-		    zp->z_name_cache);
+		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 	}
 
+	ZFS_EXIT(zfsvfs);
 	return (error);
 
 unmap_pageout_done:
