@@ -2099,7 +2099,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 			target_postwrite_ubcsize = cur_wend;
 			const off_t round_cur_wend = round_page_64(cur_wend);
 			if (ubc_getsize(vp) < round_cur_wend) {
-				printf("ZFS: %s:%d: mapped file, ends before end of page, rounding:"
+				dprintf("ZFS: %s:%d: mapped file, ends before end of page, rounding:"
 				    " ubcsize %lld cur_woff %lld cur_wend %lld round_cur_wend %lld,"
 				    " ioflag %d file %s\n",
 				    __func__, __LINE__,
