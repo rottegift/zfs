@@ -3443,7 +3443,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    " pageout size %ld file %s\n", __func__, __LINE__,
 			    ap->a_f_offset, ap->a_size, zp->z_name_cache);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_all_previously_freed);
-			ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 		}
 	}
 	const int last_nonempty_pg = pg_index;
@@ -3624,8 +3623,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
-
-	ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 
 	zfs_range_unlock(rl);
 
