@@ -3432,6 +3432,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				goto pageout_done;
 			}
 			VNOPS_OSX_STAT_BUMP(pageoutv2_cleaned_precious_pages);
+			f_offset += PAGE_SIZE;
+			offset   += PAGE_SIZE;
+			isize    -= PAGE_SIZE;
+			pg_index++;
 			continue;
 		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_skip_empty_tail_pages);
