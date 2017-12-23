@@ -2422,10 +2422,20 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	 */
 	ZFS_ENTER_NOERROR(zfsvfs);
 	if (zfsvfs->z_unmounted) {
+		printf("ZFS: %s:%d: dumping pages on z_unmounted, uploff %ld foff %lld sz %ld file %s\n",
+		    __func__, __LINE__, upl_offset, off, size, zp->z_name_cache);
 		if (!(flags & UPL_NOCOMMIT))
-			(void) ubc_upl_abort(upl, UPL_ABORT_DUMP_PAGES|UPL_ABORT_FREE_ON_EMPTY);
-		printf("ZFS: %s:%d:  abort on z_unmounted, off %lld sz %ld file %s\n",
-		    __func__, __LINE__, off, size, zp->z_name_cache);
+			(void) ubc_upl_abort_range(upl, upl_offset, size,
+			    UPL_ABORT_DUMP_PAGES|UPL_ABORT_FREE_ON_EMPTY);
+		ZFS_EXIT(zfsvfs);
+		return (EIO);
+	}
+	if (zp->z_sa_hdl == NULL) {
+		printf("ZFS: %s:%d: abort on no z_sa_hdl, uploff %ld foff %lld sz %ld file %s\n",
+		    __func__, __LINE__, upl_offset, off, size, zp->z_name_cache);
+		if (!(flags & UPL_NOCOMMIT))
+			(void) ubc_upl_abort_range(upl, upl_offset, size,
+			    UPL_ABORT_FREE_ON_EMPTY);
 		ZFS_EXIT(zfsvfs);
 		return (EIO);
 	}
