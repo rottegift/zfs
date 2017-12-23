@@ -2600,8 +2600,10 @@ top:
 		    &zp->z_pflags, 8);
 		zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
 		    B_TRUE);
+#if 0
 		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs), NULL,
 		    &zp->z_size, 8)
+#endif
 		err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(err);
 		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, off, size, 0,
