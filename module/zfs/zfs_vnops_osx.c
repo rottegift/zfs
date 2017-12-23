@@ -3415,13 +3415,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t last_page_in_range = pg_index + pages_in_range - 1;
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			printf("ZFS: %s:%d: aborting absent upl bytes [%lld..%lld] (%lld pages)"
+			dprintf("ZFS: %s:%d: aborting absent upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (%lld pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, just_past_upl_end_pg, fsname, fname);
 			if (last_page_in_range == upl_end_pg) {
-				printf("ZFS: %s:%d: as aborting last UPL page, unmapping fs %s file %s\n",
+				dprintf("ZFS: %s:%d: as aborting last UPL page, unmapping fs %s file %s\n",
 				    __func__, __LINE__, fsname, fname);
 				const int unmapret = ubc_upl_unmap(upl);
 				if (unmapret != KERN_SUCCESS) {
@@ -3463,13 +3463,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t last_page_in_range = pg_index + pages_in_range - 1;
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			printf("ZFS: %s:%d committing precious (present-but-not-dirty) upl bytes"
+			dprintf("ZFS: %s:%d committing precious (present-but-not-dirty) upl bytes"
 			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%lld pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, just_past_upl_end_pg, fsname, fname);
 			if (last_page_in_range == upl_end_pg) {
-                                printf("ZFS: %s:%d: as committing last UPL page, unmapping fs %s file %s\n",
+                                dprintf("ZFS: %s:%d: as committing last UPL page, unmapping fs %s file %s\n",
                                     __func__, __LINE__, fsname, fname);
                                 const int unmapret = ubc_upl_unmap(upl);
                                 if (unmapret != KERN_SUCCESS) {
@@ -3521,7 +3521,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t last_page_in_range = pg_index + pages_in_range - 1;
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			printf("ZFS: %s:%d bluster_pageout dirty upl bytes"
+			dprintf("ZFS: %s:%d bluster_pageout dirty upl bytes"
 			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%lld pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
@@ -3554,7 +3554,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			}
 
 			if (last_page_in_range == upl_end_pg) {
-                                printf("ZFS: %s:%d: as bluster_pageout handed last UPL page,"
+                                dprintf("ZFS: %s:%d: as bluster_pageout handed last UPL page,"
 				    " unmapping fs %s file %s\n",
                                     __func__, __LINE__, fsname, fname);
 				mapped = B_FALSE;
