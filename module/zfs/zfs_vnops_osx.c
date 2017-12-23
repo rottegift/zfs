@@ -2404,7 +2404,6 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	uint64_t filesz;
 	int err = 0;
 	size_t len = size;
-	int mutflags = flags;
 
 	printf("+vnop_pageout: %p/%p off 0x%llx len 0x%lx upl_off 0x%lx: "
 			"blksz 0x%x, z_size 0x%llx upl %p flags 0x%x\n", zp, ZTOV(zp),
@@ -2588,33 +2587,9 @@ top:
 
 	VNOPS_OSX_STAT_INCR(pageoutv1_pages, pages_written);
 
-	ASSERT3S(mutflags, ==, flags);
-	boolean_t upl_finished = B_FALSE;
-
-	if (!(flags & UPL_NOCOMMIT)) {
-		if (err) {
-			printf("ZFS: %s:%d: aborting UPL range [%lu..%ld] file %s\n",
-			    __func__, __LINE__, upl_offset, size, zp->z_name_cache);
-			ubc_upl_abort_range(upl, upl_offset, size,
-			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
-		} else {
-			int cflags = UPL_COMMIT_FREE_ON_EMPTY;
-			if (clear_flags) {
-				cflags |= UPL_COMMIT_CLEAR_DIRTY;
-				cflags |= UPL_COMMIT_CLEAR_PRECIOUS;
-			}
-			if (inactivate)
-				cflags |= UPL_COMMIT_INACTIVATE;
-
-			ubc_upl_commit_range(upl, upl_offset, size, cflags);
-		}
-		mutflags |= UPL_NOCOMMIT;
-		upl_finished = B_TRUE;
-	}
-
 	if (err == 0 && !zfsvfs->z_unmounted && zp->z_sa_hdl) {
 		uint64_t mtime[2], ctime[2];
-		sa_bulk_attr_t bulk[3];
+		sa_bulk_attr_t bulk[4];
 		int count = 0;
 
 		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_MTIME(zfsvfs), NULL,
@@ -2625,21 +2600,9 @@ top:
 		    &zp->z_pflags, 8);
 		zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
 		    B_TRUE);
-#if 0
-		/*
-		 * update SA_ZPL_SIZE if we finished off the UPL above
-		 * and if this is not a special object
-		 */
-		if (upl_finished) {
-			if (vnode_isreg(ZTOV(zp))) {
-				SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs), NULL,
-				    &zp->z_size, 8);
-			} else {
-				printf("ZFS: %s:%d: skipping SA_ZPL_SIZE (%lld) for object %s\n",
-				    __func__, __LINE__, zp->z_size, zp->z_name_cache);
-			}
-		}
-#endif
+		ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
+		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs), NULL,
+		    &zp->z_size, 8);
 		err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(err);
 		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, off, size, 0,
@@ -2657,14 +2620,7 @@ out:
 	if (flags & UPL_IOSYNC)
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
-	/*
-	 * We only turn on the UPL_NOCOMMIT flag, we don't turn it off,
-	 * so if we did not turn it on in mutflags, then it should
-	 * not be on in flags either.
-	 */
-	IMPLY(!(mutflags & UPL_NOCOMMIT), !(flags & UPL_NOCOMMIT));
-
-	if (!(mutflags & UPL_NOCOMMIT) && !(flags & UPL_NOCOMMIT)) {
+	if (!(flags & UPL_NOCOMMIT)) {
 		if (err) {
 			printf("ZFS: %s:%d: aborting UPL range [%lu..%ld] file %s\n",
 			    __func__, __LINE__, upl_offset, size, zp->z_name_cache);
@@ -2970,7 +2926,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	/* update SA and finish off transaction */
         if (error == 0) {
                 uint64_t mtime[2], ctime[2];
-                sa_bulk_attr_t bulk[3];
+                sa_bulk_attr_t bulk[4];
                 int count = 0;
 
                 SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_MTIME(zfsvfs), NULL,
@@ -2981,10 +2937,8 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
                     &zp->z_pflags, 8);
                 zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
                     B_TRUE);
-#if 0
 		ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
 		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs), NULL, &zp->z_size, 8);
-#endif
 		error = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(error);
                 zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, f_offset, write_size, 0,
