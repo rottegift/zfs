@@ -105,6 +105,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t bluster_pageout_dmu_bytes;
 	kstat_named_t bluster_pageout_pages;
 	kstat_named_t pageoutv2_calls;
+	kstat_named_t pageoutv2_msync;
+	kstat_named_t pageoutv2_pageout;
 	kstat_named_t pageoutv2_want_lock;
 	kstat_named_t pageoutv2_upl_iosync;
 	kstat_named_t pageoutv2_present_pages_aborted;
@@ -131,6 +133,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "bluster_pageout_dmu_bytes",         KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_msync",                   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_pageout",                 KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_present_pages_aborted",   KSTAT_DATA_UINT64 },
@@ -3304,9 +3308,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (a_flags & UPL_MSYNC) {
 		request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
+		VNOPS_OSX_STAT_BUMP(pageoutv2_msync);
 	}
 	else {
 		request_flags = UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY;
+		VNOPS_OSX_STAT_BUMP(pageoutv2_pageout);
 	}
 
 	ASSERT3S(ap->a_size, <=, MAX_UPL_SIZE_BYTES);
