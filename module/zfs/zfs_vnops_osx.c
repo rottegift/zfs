@@ -2626,8 +2626,8 @@ out:
 		}
 	}
 exit:
+	if (err) printf("ZFS: %s:%d err %d\n", __func__, __LINE__, err);
 	ZFS_EXIT(zfsvfs);
-	if (err) printf("%s err %d\n", __func__, err);
 	return (err);
 }
 
