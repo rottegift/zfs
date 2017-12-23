@@ -2383,8 +2383,13 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 	ZFS_EXIT(zfsvfs);
 	if (error) {
-		printf("%s:%d returning error %d for (%lld, %ld) in file %s\n", __func__, __LINE__,
+		printf("ZFS: %s:%d returning error %d for (%lld, %ld) in file %s\n", __func__, __LINE__,
 		    error, ap->a_f_offset, ap->a_size, zp->z_name_cache);
+	}
+	if (error == EAGAIN || error == EPERM) {
+		printf("ZFS: %s:%d: changing error %d to EIO becaus eof special handling in our caller\n",
+		    __func__, __LINE__, error);
+		error = EIO;
 	}
 	return (error);
 }
