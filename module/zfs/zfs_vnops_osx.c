@@ -3576,6 +3576,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
 
+	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
+
 	zfs_range_unlock(rl);
 
 	if (a_flags & UPL_IOSYNC) {
@@ -3584,7 +3586,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
 	}
 
-	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 	if (error != 0) {
 		printf("ZFS: %s:%d: pageoutv2 error %d [%lld..%lld] file %s filesystem %s\n",
 		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
