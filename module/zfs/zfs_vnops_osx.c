@@ -101,7 +101,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mnomap_calls;
 	kstat_named_t reclaim_mapped;
 	kstat_named_t bluster_pageout_calls;
-	kstat_named_t bluster_pageout_error;
 	kstat_named_t bluster_pageout_dmu_bytes;
 	kstat_named_t bluster_pageout_pages;
 	kstat_named_t pageoutv2_calls;
@@ -118,8 +117,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pagein_calls;
 	kstat_named_t pagein_pages;
 	kstat_named_t pagein_want_lock;
-	kstat_named_t zfs_ubc_msync_expired_dirty;
-	kstat_named_t zfs_ubc_msync_expired_clean;
 } vnops_osx_stats_t;
 
 static vnops_osx_stats_t vnops_osx_stats = {
@@ -129,7 +126,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
 	{ "reclaim_mapped",                    KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
-	{ "bluster_pageout_error",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_dmu_bytes",         KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
@@ -146,8 +142,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pagein_calls",                      KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 	{ "pagein_want_lock",                  KSTAT_DATA_UINT64 },
-	{ "zfs_ubc_msync_expired_dirty",       KSTAT_DATA_UINT64 },
-	{ "zfs_ubc_msync_expired_clean",       KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_OSX_STAT(statname)           (vnops_osx_stats.statname.value.ui64)
