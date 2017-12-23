@@ -3535,7 +3535,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t pages_to_retire = just_past_upl_end_pg - pg_index;
 			ASSERT3S(pages_to_retire, >, 0);
 			ASSERT3S(pages_to_retire, <=, just_past_upl_end_pg);
-			ASSERT3S(pages_to_retire, <=, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
+			ASSERT3S(pages_to_retire, >=, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(mapped, ==, B_TRUE);
 
 			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
