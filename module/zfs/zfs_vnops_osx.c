@@ -2577,7 +2577,7 @@ top:
 
 	VNOPS_OSX_STAT_INCR(pageoutv1_pages, pages_written);
 
-	if (err == 0) {
+	if (err == 0 && !zfsvfs->z_unmounted && zp->z_sa_hdl) {
 		uint64_t mtime[2], ctime[2];
 		sa_bulk_attr_t bulk[3];
 		int count = 0;
@@ -2596,6 +2596,10 @@ top:
 		ASSERT0(err);
 		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, off, size, 0,
 		    NULL, NULL);
+	} else {
+		ASSERT0(zfsvfs->z_unmounted);
+		ASSERT3P(zp->z_sa_hdl, !=, NULL);
+		ASSERT0(err);
 	}
 	dmu_tx_commit(tx);
 
