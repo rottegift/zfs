@@ -2178,6 +2178,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	file_sz = zp->z_size;
 	ASSERT3S(file_sz, ==, ubc_getsize(vp));
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 	ASSERT(vn_has_cached_data(vp));
 	if (!vn_has_cached_data(vp)) {
@@ -2191,9 +2193,14 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		(len & PAGE_MASK) || (upl_offset & PAGE_MASK)) {
 		dprintf("passed EOF or size error\n");
 		ZFS_EXIT(zfsvfs);
-		if (!(flags & UPL_NOCOMMIT))
-			ubc_upl_abort_range(upl, upl_offset, len,
+		if (!(flags & UPL_NOCOMMIT)) {
+			printf("ZFS: %s:%d: aborting out-of-range UPL (off %lld file_sz %lld)"
+			    " fs %s file %s\n",
+			    __func__, __LINE__, off, file_sz, fsname, fname);
+			int aret = ubc_upl_abort_range(upl, upl_offset, len,
 			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
+			ASSERT3S(aret, ==, KERN_SUCCESS);
+		}
 		return (EFAULT);
 	}
 
@@ -2335,6 +2342,9 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	if (!(flags & UPL_NOCOMMIT)) {
 		if (error) {
+			printf("ZFS: %s:%d: error %d, aborting UPL (uploffsets) [%u..%lu]"
+			    " foff %lld fs %s fn %s\n", __func__, __LINE__, error,
+			    upl_offset, ap->a_size, ap->a_f_offset, fsname, fname);
 			kern_return_t abortret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
 			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
 			if (abortret != KERN_SUCCESS) {
@@ -2433,8 +2443,13 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		    __func__, __LINE__, zp->z_name_cache);
 		if (!(flags & UPL_NOCOMMIT)) {
 			ASSERT3S(len, ==, size);
-			(void) ubc_upl_abort_range(upl, upl_offset, len,
+			printf("ZFS: %s:%d: aborting UPL range [%lu..%ld] for read-only"
+			    " object fs %s file %s\n",
+			    __func__, __LINE__, upl_offset, len, zp->z_name_cache,
+			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+			int aret = ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_DUMP_PAGES| UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+			ASSERT3S(aret, ==, KERN_SUCCESS);
 		}
 		err = EROFS;
 		goto exit;
@@ -2448,12 +2463,18 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	ASSERT0(len & PAGE_MASK);
 	if (off < 0 || off >= filesz || (off & PAGE_MASK_64) ||
 	    (len & PAGE_MASK)) {
-		if (!(flags & UPL_NOCOMMIT))
+		if (!(flags & UPL_NOCOMMIT)) {
 			ASSERT3S(len, ==, size);
+			printf("ZFS: %s:%d: aborting UPL [%lu..%ld] out of range or unaligned"
+			    " off %lld fsz %lld off&PAGE_MASK_64 %lld len&PAGE_MASK %ld fs %s fn %s\n",
+			    __func__, __LINE__, upl_offset, len, off, filesz,
+			    off & PAGE_MASK_64, len & PAGE_MASK, zp->z_name_cache,
+			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 			ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_ERROR |
 			    UPL_ABORT_DUMP_PAGES |
 			    UPL_ABORT_FREE_ON_EMPTY);
+		}
 		err = EINVAL;
 		goto exit;
 	}
@@ -2744,18 +2765,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	/*
 	 * If they didn't specify any I/O, then we are done...
 	 * we can't issue an abort because we don't know how
-	 * big the upl really is
+	 * big the upl really is : our caller should VERIFY that
+	 * it is not giving us a zero-length size.
 	 */
 	if (size <= 0) {
-		printf("%s invalid size %d file %s\n", __func__, size, zp->z_name_cache);
-		if (unmap)
-			ubc_upl_unmap(upl);
-		if (is_clcommit)
-			ubc_upl_abort_range(upl, upl_offset, size,
-			    UPL_ABORT_ERROR
-			    | UPL_ABORT_FREE_ON_EMPTY
-			    | UPL_ABORT_DUMP_PAGES);
-		return (EINVAL);
+		panic("ZFS: %s:%d invalid size %d file %s\n", __func__, __LINE__,
+		    size, zp->z_name_cache);
 	}
 
 	if (vnode_vfsisrdonly(ZTOV(zp)) ||
@@ -2766,11 +2781,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		    f_offset, f_offset + size, zp->z_name_cache);
 		if (unmap)
 			ubc_upl_unmap(upl);
-		if (is_clcommit)
+		if (is_clcommit) {
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_ERROR
 			    | UPL_ABORT_FREE_ON_EMPTY
 			    | UPL_ABORT_DUMP_PAGES);
+		}
 		return (EROFS);
 	}
 
@@ -2866,6 +2882,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT3S(error, ==, 0);
 	if (error != 0) {
 		dmu_tx_abort(tx);
+		printf("ZFS: %s:%d: dmu_tx_assign error %d, aborting range [%u..%d] file %s fs %s\n",
+		    __func__, __LINE__, error, upl_offset, size, zp->z_name_cache,
+		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 		if (unmap)
 			ubc_upl_unmap(upl);
 		if (is_clcommit) {
@@ -2931,6 +2950,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	if (is_clcommit) {
 		if (error != 0) {
+			printf("ZFS: %s:%d: error %d so aborting uploff %u abortlen %d uplfoff %lld"
+			    " fs %s file %s\n", __func__, __LINE__, error, upl_offset,
+			    size, f_offset, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname, zp->z_name_cache);
 			int abortflags = UPL_ABORT_FREE_ON_EMPTY;
 			if (error == 35)
 				abortflags |= UPL_ABORT_RESTART;
@@ -3529,9 +3551,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			/*
 			 * bluster_pageout MUST commit or abort all the UPL pages
 			 * between start_of_range and end_of_range, and must also
-			 * unmap the upl if necessary
+			 * unmap the upl if necessary.   We cannot give bluster_pageout
+			 * a zero-length write, it would not know what to do and would
+			 * panic in response.
 			 */
-			ASSERT3S(end_of_range - start_of_range, >=, PAGE_SIZE_64);
+			VERIFY3S(end_of_range - start_of_range, >=, PAGE_SIZE_64);
 			const off_t pages_to_retire = just_past_upl_end_pg - pg_index;
 			ASSERT3S(pages_to_retire, >, 0);
 			ASSERT3S(pages_to_retire, <=, just_past_upl_end_pg);
