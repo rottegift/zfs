@@ -2607,7 +2607,10 @@ out:
 
 	if (!(flags & UPL_NOCOMMIT)) {
 		if (err) {
-			ubc_upl_abort(upl, (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
+			printf("ZFS: %s:%d: aborting UPL range [%lu..%ld] file %s\n",
+			    __func__, __LINE__, upl_offset, size, zp->z_name_cache);
+			ubc_upl_abort_range(upl, upl_offset, size,
+			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
 		} else {
 			int cflags = UPL_COMMIT_FREE_ON_EMPTY;
 			if (clear_flags) {
