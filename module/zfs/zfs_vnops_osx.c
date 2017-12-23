@@ -107,11 +107,10 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_calls;
 	kstat_named_t pageoutv2_want_lock;
 	kstat_named_t pageoutv2_upl_iosync;
-	kstat_named_t pageoutv2_cleaned_precious_pages;
-	kstat_named_t pageoutv2_skip_empty_tail_pages;
-	kstat_named_t pageoutv2_skip_absent_pages;
-	kstat_named_t pageoutv2_all_previously_freed;
-	kstat_named_t pageoutv2_all_previously_freed_clean;
+	kstat_named_t pageoutv2_present_pages_aborted;
+	kstat_named_t pageoutv2_precious_pages_cleaned;
+	kstat_named_t pageoutv2_dirty_pages_blustered;
+	kstat_named_t pageoutv2_error;
 	kstat_named_t pageoutv1_pages;
 	kstat_named_t pageoutv1_want_lock;
 	kstat_named_t pagein_calls;
@@ -134,11 +133,10 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
-	{ "pageoutv2_cleaned_precious_pagess", KSTAT_DATA_UINT64 },
-	{ "pageoutv2_skip_empty_tail_pages",   KSTAT_DATA_UINT64 },
-	{ "pageoutv2_skip_absent_pages",       KSTAT_DATA_UINT64 },
-	{ "pageoutv2_all_previously_freed",    KSTAT_DATA_UINT64 },
-	{ "pageoutv2_all_previously_freed_clean", KSTAT_DATA_UINT64 },
+	{ "pageoutv2_present_pages_aborted",   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_precious_pages_cleaned",  KSTAT_DATA_UINT64 },
+	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_error",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv1_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pagein_calls",                      KSTAT_DATA_UINT64 },
@@ -3442,6 +3440,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    fsname, fname);
 				error = abortret;
 			}
+			VNOPS_OSX_STAT_INCR(pageoutv2_present_pages_aborted, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
 		}
@@ -3501,6 +3500,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    f_start_of_upl, f_end_of_upl,
 				    fsname, fname, pg_index, page_past_end_of_range);
 			}
+			VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_cleaned, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
 		}
@@ -3559,7 +3559,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
                                     __func__, __LINE__, fsname, fname);
 				mapped = B_FALSE;
 			}
-
+			VNOPS_OSX_STAT_INCR(pageoutv2_dirty_pages_blustered, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
 		} else {
@@ -3592,10 +3592,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	ZFS_EXIT(zfsvfs);
+	if (error != 0)
+		VNOPS_OSX_STAT_BUMP(pageoutv2_error);
 	return (error);
 
 pageout_done:
 
+	ASSERT0(error);
 	ASSERT3S(mapped, ==, B_FALSE);
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
@@ -3605,10 +3608,13 @@ pageout_done:
 	zfs_range_unlock(rl);
 
 exit_abort:
+
+	ASSERT0(error);
 	if (error) {
 		printf("ZFS: %s:%d pageoutv2 returning error %d, [%lld..%lld] file %s filesystem %s\n",
 		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+		VNOPS_OSX_STAT_BUMP(pageoutv2_error);
 	}
 	//VERIFY(ubc_create_upl(vp, off, len, &upl, &pl, flags) == 0);
 	//ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
