@@ -2449,9 +2449,8 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		if (!(flags & UPL_NOCOMMIT)) {
 			ASSERT3S(len, ==, size);
 			printf("ZFS: %s:%d: aborting UPL range [%lu..%ld] for read-only"
-			    " object fs %s file %s\n",
-			    __func__, __LINE__, upl_offset, len, zp->z_name_cache,
-			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+			    " object file %s\n",
+			    __func__, __LINE__, upl_offset, len, zp->z_name_cache);
 			int aret = ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_DUMP_PAGES| UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 			ASSERT3S(aret, ==, KERN_SUCCESS);
@@ -2471,10 +2470,9 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		if (!(flags & UPL_NOCOMMIT)) {
 			ASSERT3S(len, ==, size);
 			printf("ZFS: %s:%d: aborting UPL [%lu..%ld] out of range or unaligned"
-			    " off %lld fsz %lld off&PAGE_MASK_64 %lld len&PAGE_MASK %ld fs %s fn %s\n",
+			    " off %lld fsz %lld off&PAGE_MASK_64 %lld len&PAGE_MASK %ld fn %s\n",
 			    __func__, __LINE__, upl_offset, len, off, filesz,
-			    off & PAGE_MASK_64, len & PAGE_MASK, zp->z_name_cache,
-			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+			    off & PAGE_MASK_64, len & PAGE_MASK, zp->z_name_cache);
 			ubc_upl_abort_range(upl, upl_offset, len,
 			    UPL_ABORT_ERROR |
 			    UPL_ABORT_DUMP_PAGES |
