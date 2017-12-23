@@ -3412,7 +3412,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t start_of_range = pg_index * PAGE_SIZE_64;
 			const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
 			const off_t pages_in_range = page_past_end_of_range - pg_index;
-			const off_t last_page_in_range = pg_index + pages_in_range;
+			const off_t last_page_in_range = pg_index + pages_in_range - 1;
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			printf("ZFS: %s:%d: aborting absent upl bytes [%lld..%lld] (%lld pages)"
@@ -3447,7 +3447,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 		/* we found a present but not dirty page */
 		else if (upl_page_present(pl, pg_index) && !upl_dirty_page(pl, pg_index)) {
-			int page_past_end_of_range = pg_index + 1;
+			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of present-but-not-dirty pages */
 			for ( ; page_past_end_of_range < just_past_upl_end_pg;
 			      page_past_end_of_range++) {
@@ -3460,7 +3460,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
                         const off_t start_of_range = pg_index * PAGE_SIZE_64;
                         const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
                         const off_t pages_in_range = page_past_end_of_range - pg_index;
-			const off_t last_page_in_range = pg_index + pages_in_range;
+			const off_t last_page_in_range = pg_index + pages_in_range - 1;
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			printf("ZFS: %s:%d committing precious (present-but-not-dirty) upl bytes"
@@ -3492,6 +3492,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    f_start_of_upl, f_end_of_upl,
 				    fsname, fname);
 				error = commit_precious_ret;
+			} else {
+				printf("ZFS: %s:%d: successfully committed precious (unmap %d)"
+				    " UPL range [%lld..%lld] of file range [%lld..%lld] fs %s file %s"
+				    " pg_index %lld page_past_end_of_range %lld\n",
+				    __func__, __LINE__, mapped,
+				    start_of_range, end_of_range,
+				    f_start_of_upl, f_end_of_upl,
+				    fsname, fname, pg_index, page_past_end_of_range);
 			}
 			pg_index = page_past_end_of_range;
 			continue;
@@ -3510,7 +3518,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t start_of_range = pg_index * PAGE_SIZE_64;
                         const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
                         const off_t pages_in_range = page_past_end_of_range - pg_index;
-			const off_t last_page_in_range = pg_index + pages_in_range;
+			const off_t last_page_in_range = pg_index + pages_in_range - 1;
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			printf("ZFS: %s:%d bluster_pageout dirty upl bytes"
