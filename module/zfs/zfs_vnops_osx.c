@@ -3569,6 +3569,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	} // for
 
 	ASSERT3S(pg_index, ==, just_past_upl_end_pg);
+	ASSERT3S(mapped, ==, B_FALSE);
 
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
