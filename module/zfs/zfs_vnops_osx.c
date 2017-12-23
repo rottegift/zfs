@@ -2625,10 +2625,18 @@ top:
 		    &zp->z_pflags, 8);
 		zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
 		    B_TRUE);
-		/* update SA_ZPL_SIZE if we finished off the UPL above */
+		/*
+		 * update SA_ZPL_SIZE if we finished off the UPL above
+		 * and if this is not a special object
+		 */
 		if (upl_finished) {
-			SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs), NULL,
-			    &zp->z_size, 8);
+			if (vnode_isreg(ZTOV(zp))) {
+				SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs), NULL,
+				    &zp->z_size, 8);
+			} else {
+				printf("ZFS: %s:%d: skipping SA_ZPL_SIZE (%lld) for object %s\n",
+				    __func__, __LINE__, zp->z_size, zp->z_name_cache);
+			}
 		}
 		err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(err);
