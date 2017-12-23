@@ -2625,6 +2625,7 @@ top:
 		    &zp->z_pflags, 8);
 		zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime,
 		    B_TRUE);
+#if 0
 		/*
 		 * update SA_ZPL_SIZE if we finished off the UPL above
 		 * and if this is not a special object
@@ -2638,6 +2639,7 @@ top:
 				    __func__, __LINE__, zp->z_size, zp->z_name_cache);
 			}
 		}
+#endif
 		err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(err);
 		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, off, size, 0,
