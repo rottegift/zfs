@@ -3423,7 +3423,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			if (last_page_in_range == upl_end_pg) {
 				printf("ZFS: %s:%d: as aborting last UPL page, unmapping fs %s file %s\n",
 				    __func__, __LINE__, fsname, fname);
-				int unmapret = ubc_upl_unmap(upl);
+				const int unmapret = ubc_upl_unmap(upl);
 				if (unmapret != KERN_SUCCESS) {
 					printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
 					    " fs %s file %s\n", __func__, __LINE__, unmapret,
@@ -3432,7 +3432,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				error = unmapret;
 				mapped = B_FALSE;
 			}
-			int abortret = ubc_upl_abort_range(upl, start_of_range, end_of_range,
+			const int abortret = ubc_upl_abort_range(upl, start_of_range, end_of_range,
 			    UPL_ABORT_FREE_ON_EMPTY);
 			if (abortret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d aborting UPL range [%lld, %lld] of UPL"
@@ -3471,7 +3471,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			if (last_page_in_range == upl_end_pg) {
                                 printf("ZFS: %s:%d: as committing last UPL page, unmapping fs %s file %s\n",
                                     __func__, __LINE__, fsname, fname);
-                                int unmapret = ubc_upl_unmap(upl);
+                                const int unmapret = ubc_upl_unmap(upl);
                                 if (unmapret != KERN_SUCCESS) {
                                         printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
                                             " fs %s file %s\n", __func__, __LINE__, unmapret,
@@ -3480,8 +3480,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
                                 error = unmapret;
 				mapped = B_FALSE;
                         }
-			int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
-			    end_of_range, UPL_COMMIT_FREE_ON_EMPTY);
+			const int commit_precious_flags = UPL_COMMIT_FREE_ON_EMPTY
+			    | UPL_COMMIT_CLEAR_PRECIOUS;
+			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
+			    end_of_range, commit_precious_flags);
 			if (commit_precious_ret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d committing UPL range [%lld, %lld] of UPL"
                                     " [%lld..%lld] fs %s file %s\n", __func__, __LINE__,
@@ -3558,7 +3560,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 	} // for
 
-	ASSERT3S(pg_index, ==, upl_end_pg);
+	ASSERT3S(pg_index, ==, just_past_upl_end_pg);
 
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
