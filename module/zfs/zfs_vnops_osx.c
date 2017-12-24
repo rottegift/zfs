@@ -2970,6 +2970,20 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			    pages_remaining, upl_offset);
 			extern void IOSleep(unsigned milliseconds);
 			IOSleep(10);
+			if (unmap) {
+				ubc_upl_unmap(upl);
+				*caller_unmapped = B_TRUE;
+			}
+			if (is_clcommit) {
+				kern_return_t abort_ret = ubc_upl_abort_range(upl,
+				    upl_offset, size,
+				    UPL_ABORT_FREE_ON_EMPTY
+				    | UPL_ABORT_ERROR);
+				ASSERT3S(abort_ret, ==, KERN_SUCCESS);
+			}
+			dmu_tx_commit(tx);
+			error = EFAULT;
+			return (error);
 		}
 	}
 	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
