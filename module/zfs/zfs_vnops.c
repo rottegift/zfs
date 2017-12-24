@@ -2019,8 +2019,9 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		ASSERT3S(this_chunk, >, 0);
 
 		/* increase ubc size if we are growing the file */
-		end_size = MAX(ubc_getsize(vp), this_off + this_chunk);
-		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
+		const off_t cur_maxfs = MAX(zp->z_size, ubc_getsize(vp));
+		end_size = MAX(cur_maxfs, this_off + this_chunk);
+
 		if (end_size > ubc_getsize(vp)) {
 			ASSERT3S(end_size, >=, ubcsize_at_entry);
 			int setsize_retval = ubc_setsize(vp, end_size);

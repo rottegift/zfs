@@ -2573,12 +2573,19 @@ top:
 
 		printf("ZFS: %s:%d (last block) pageout: dmu_writeX off 0x%llx size 0x%lx file size 0x%llx\n",
 		    __func__, __LINE__, off, sz, zp->z_size);
-		off_t pre_size = zp->z_size;
+		const off_t pre_size = zp->z_size;
 		vnode_t *vp = ZTOV(zp);
-		if (vnode_isreg(vp)) { ASSERT3S(zp->z_size, ==, ubc_getsize(vp)); }
 		dmu_write(zfsvfs->z_os, zp->z_id, off, sz, va, tx);
-		if (vnode_isreg(vp)) { ASSERT3S(zp->z_size, ==, ubc_getsize(vp)); }
 		ASSERT3S(pre_size, ==, zp->z_size);
+		if (vnode_isreg(vp) && ubc_getsize(vp) < zp->z_size) {
+			ASSERT3S(zp->z_size, ==, pre_size);
+			off_t ubcsize = ubc_getsize(vp);
+			int setsize_retval = ubc_setsize(vp, zp->z_size);
+			printf("ZFS: %s:%d: (error if nonzero) %d when increasing ubc size"
+			    " from %lld to z_size %lld fs %s file %s\n",
+			    __func__, __LINE__, setsize_retval, ubcsize, zp->z_size,
+			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname, zp->z_name_cache);
+		}
 
 		va += sz;
 		off += sz;
