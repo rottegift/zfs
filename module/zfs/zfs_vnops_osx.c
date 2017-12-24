@@ -2948,8 +2948,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	upl_page_info_t *pl = ubc_upl_pageinfo(upl);
 	const int64_t stpage = (int64_t)upl_offset / PAGE_SIZE_64;
-	const int64_t endpage = (int64_t)(upl_offset + size) / PAGE_SIZE_64;
-	ASSERT3S((endpage - stpage), ==, pages_remaining);
+	const int64_t endpage = ((int64_t)(upl_offset + size) / PAGE_SIZE_64) - 1LL;
+	ASSERT3S(endpage - stpage, >=, 0);
+	ASSERT3S((endpage - stpage) + 1LL, ==, pages_remaining);
 	for (int64_t i = endpage; i >= stpage; i--) {
 		if (upl_valid_page(pl, i) ||
 		    upl_dirty_page(pl, i)) {
