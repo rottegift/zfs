@@ -3413,7 +3413,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 
 	int upl_pages_dismissed = 0;
-	const int pages_in_upl = howmany(ap->a_size, PAGE_SIZE_64) - 1;
+	const int pages_in_upl = howmany(ap->a_size, PAGE_SIZE_64);
 	for (int page_index = pages_in_upl; page_index > 0; ) {
 		if (upl_valid_page(pl, --page_index))
 			break;
@@ -3433,7 +3433,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		goto pageout_done;
-	} else {
+	} else if (upl_pages_dismissed > 0) {
 		ASSERT3S(pages_in_upl, >, 1);
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
