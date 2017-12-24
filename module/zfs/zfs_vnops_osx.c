@@ -2946,6 +2946,17 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return (error);
 	}
 
+	upl_page_info_t *pl = ubc_upl_pageinfo(upl);
+	const int64_t stpage = (int64_t)upl_offset / PAGE_SIZE_64;
+	const int64_t endpage = (int64_t)(upl_offset + size) / PAGE_SIZE_64;
+	ASSERT3S((endpage - stpage), ==, pages_remaining);
+	for (int64_t i = endpage; i >= stpage; i++) {
+		ASSERT(upl_page_present(pl, i));
+		ASSERT(upl_valid_page(pl, i));
+		ASSERT(upl_dirty_page(pl, i));
+	}
+	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
+
 	dprintf("ZFS: %s:%d: dmu_write %lld bytes (of %d) from pvaddr[%u] to offset %lld in file %s\n",
 	    __func__, __LINE__, write_size, size, upl_offset, f_offset, zp->z_name_cache);
 
@@ -3422,10 +3433,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	int upl_pages_dismissed = 0;
 	const int pages_in_upl = howmany(ap->a_size, PAGE_SIZE_64);
 	for (int page_index = pages_in_upl; page_index > 0; ) {
-		if (upl_valid_page(pl, --page_index))
+		if (upl_valid_page(pl, --page_index)) {
+			ASSERT(upl_page_present(pl, page_index));
 			break;
-		else
+		} else {
 			upl_pages_dismissed++;
+		}
 	}
 
 	if (upl_pages_dismissed == pages_in_upl) {
@@ -3531,7 +3544,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	for (pg_index = 0; pg_index < just_past_last_valid_pg; ) {
 		VERIFY3S(mapped, ==, B_TRUE);
 		/* we found an absent page */
-		if (!upl_page_present(pl, pg_index)) {
+		if (!upl_valid_page(pl, pg_index)) {
+			ASSERT(upl_page_present(pl, pg_index));
 			ASSERT0(upl_dirty_page(pl, pg_index));
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of absent pages */
@@ -3589,7 +3603,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			continue;
 		}
 		/* we found a present but not dirty page */
-		else if (upl_page_present(pl, pg_index) && !upl_dirty_page(pl, pg_index)) {
+		else if (upl_valid_page(pl, pg_index) && !upl_dirty_page(pl, pg_index)) {
+			ASSERT(upl_page_present(pl, pg_index));
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of present-but-not-dirty pages */
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
@@ -3658,6 +3673,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		/* we have found a dirty page */
 		else if (upl_dirty_page(pl, pg_index)) {
 			ASSERT(upl_page_present(pl, pg_index));
+			ASSERT(upl_valid_page(pl, pg_index));
 			int page_past_end_of_range = pg_index + 1;
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
@@ -3690,6 +3706,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			ASSERT3S(pages_remaining, <=, just_past_last_valid_pg);
 			ASSERT3S(pages_remaining, >=, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(mapped, ==, B_TRUE);
+			ASSERT3S(end_of_range, <=, trimmed_upl_size);
 
 			boolean_t bl_unmapped = B_FALSE;
 			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
@@ -3742,6 +3759,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			pg_index = page_past_end_of_range;
 			continue;
 		} else {
+			ASSERT0(upl_page_present(pl, pg_index));
+			ASSERT0(upl_dirty_page(pl, pg_index));
+			ASSERT0(upl_valid_page(pl, pg_index));
 			panic("unknown page type, pg_index %lld of file range [%lld..%lld] fs %s file %s",
 			    pg_index, f_start_of_upl, f_end_of_upl, fsname, fname);
 		}
