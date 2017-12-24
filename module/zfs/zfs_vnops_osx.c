@@ -2753,13 +2753,15 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const upl_offset_t upl_offset, const off_t f_offset, const int size,
     const uint64_t filesize, const int flags,
     struct vnop_pageout_args *ap,
-    caddr_t *pvaddr, int pages_remaining)
+    caddr_t *pvaddr, int pages_remaining, boolean_t *caller_unmapped)
 {
 	int           is_clcommit = 0;
 	dmu_tx_t *tx;
 	int       error = 0;
 
 	VNOPS_OSX_STAT_BUMP(bluster_pageout_calls);
+
+	ASSERT3P(caller_unmapped, !=, NULL);
 
 	ASSERT0(upl_offset & PAGE_MASK_64);
 	ASSERT0(size & PAGE_MASK_64);
@@ -2800,8 +2802,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d readonly fs %s for [%lld..%lld] file %s\n", __func__,
 		    __LINE__, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
 		    f_offset, f_offset + size, zp->z_name_cache);
-		if (unmap)
+		if (unmap) {
 			ubc_upl_unmap(upl);
+			*caller_unmapped = B_TRUE;
+		}
 		if (is_clcommit) {
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_ERROR
@@ -2821,8 +2825,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		(f_offset & PAGE_MASK_64) || (size & PAGE_MASK)) {
 		printf("ZFS: %s:%d invalid offset or size (off %lld, size %d, filesize %lld)"
 		    " file %s\n" , __func__, __LINE__, f_offset, size, filesize, zp->z_name_cache);
-		if (unmap)
+		if (unmap) {
 			ubc_upl_unmap(upl);
+			*caller_unmapped = B_TRUE;
+		}
 		if (is_clcommit)
 			ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_ERROR
@@ -2835,8 +2841,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d: trying to write starting past filesize %lld : off %lld, size %u,"
 		    " filename %s\n",
 		    __func__, __LINE__, filesize, f_offset, size, zp->z_name_cache);
-		if (unmap)
+		if (unmap) {
 			ubc_upl_unmap(upl);
+			*caller_unmapped = B_TRUE;
+		}
 		if (is_clcommit) {
 			int abortret = ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_ERROR
@@ -2857,8 +2865,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			    " ! for upl_offset %u a_f_off %lld a_size %ld @ file %s\n",
 			    __func__, __LINE__, write_space, filesize, f_offset, write_space,
 			    upl_offset, ap->a_f_offset, ap->a_size, zp->z_name_cache);
-			if (unmap)
+			if (unmap) {
 				ubc_upl_unmap(upl);
+				*caller_unmapped = B_TRUE;
+			}
 			if (is_clcommit) {
 				int abortret = ubc_upl_abort_range(upl, upl_offset, size,
 				    UPL_ABORT_FREE_ON_EMPTY
@@ -2881,8 +2891,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d: cannot safely write [%lld, %lld] z_blksz %d file %s\n",
 		    __func__, __LINE__, f_offset, f_offset + write_size,
 		    zp->z_blksz, zp->z_name_cache);
-		if (unmap)
+		if (unmap) {
 			ubc_upl_unmap(upl);
+			*caller_unmapped = B_TRUE;
+		}
 		if (is_clcommit) {
 			int abortret = ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_FREE_ON_EMPTY
@@ -2906,8 +2918,10 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		printf("ZFS: %s:%d: dmu_tx_assign error %d, aborting range [%u..%d] file %s fs %s\n",
 		    __func__, __LINE__, error, upl_offset, size, zp->z_name_cache,
 		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
-		if (unmap)
+		if (unmap) {
 			ubc_upl_unmap(upl);
+			*caller_unmapped = B_TRUE;
+		}
 		if (is_clcommit) {
 			kern_return_t abort_ret = ubc_upl_abort_range(upl,
 			    upl_offset, size,
@@ -2965,6 +2979,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		if (unmapret != KERN_SUCCESS)
 			printf("ZFS: %s:%d: error unmapping UPL for [%lld..%lld] file %s\n",
 			    __func__, __LINE__, f_offset, f_offset + size, zp->z_name_cache);
+		*caller_unmapped = B_TRUE;
 	}
 
 	if (is_clcommit) {
@@ -3177,7 +3192,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
 	ASSERT(ubc_pages_resident(vp));
-	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 
 	if (ap->a_size <= 0) {
 		printf("ZFS: %s:%d: invalid ap->a_size %ld, ap->a_f_offset %lld, file %s\n",
@@ -3331,6 +3345,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		zfs_range_reduce(rl, rloff, rllen);
 	}
 
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	if (ubc_getsize(vp) < zp->z_size) {
+		printf("ZFS: %s:%d: increasing ubc size from %lld to z_size %lld for"
+		    " fs %s file %s\n", __func__, __LINE__,
+		    ubc_getsize(vp), zp->z_size, fsname, fname);
+		int setsize_retval = ubc_setsize(vp, zp->z_size);
+		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+	}
+
 	/* Grab UPL now */
 	int request_flags;
 
@@ -3429,15 +3454,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	const off_t f_start_of_upl = ap->a_f_offset;
 	const off_t f_end_of_upl = f_start_of_upl + ap->a_size;
-	const char *fname = zp->z_name_cache;
-	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 	const off_t just_past_upl_end_pg = howmany(isize, PAGE_SIZE_64);
 	const off_t upl_end_pg = just_past_upl_end_pg - 1;
 	ASSERT3S(upl_end_pg, >=, 0);
 
 	for (pg_index = 0; pg_index < just_past_upl_end_pg; ) {
-		ASSERT3S(mapped, ==, B_TRUE);
+		VERIFY3S(mapped, ==, B_TRUE);
 		/* we found an absent page */
 		if (!upl_page_present(pl, pg_index)) {
 			ASSERT0(upl_dirty_page(pl, pg_index));
@@ -3597,18 +3620,22 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			ASSERT3S(pages_remaining, >=, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(mapped, ==, B_TRUE);
 
+			boolean_t bl_unmapped = B_FALSE;
 			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
 			    f_start_of_upl,
 			    (end_of_range - start_of_range), filesize, a_flags, ap,
-			    &v_addr, pages_remaining);
+			    &v_addr, pages_remaining, &bl_unmapped);
 
+			EQUIV(last_page_in_range == upl_end_pg, bl_unmapped == B_TRUE);
 			/* post-bluster test if we should set mapped flag false */
 			if (last_page_in_range == upl_end_pg) {
+				ASSERT3S(bl_unmapped, ==, B_TRUE);
                                 dprintf("ZFS: %s:%d: as bluster_pageout handed last UPL page,"
 				    " it must have unmapped fs %s file %s\n",
                                     __func__, __LINE__, fsname, fname);
 				mapped = B_FALSE;
 			}
+			ASSERT3S(mapped, ==, !bl_unmapped);
 
 			if (error != 0) {
 				printf("ZFS: %s:%d: bluster_pageout error %d for"
@@ -3626,8 +3653,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 					int umapret_err = ubc_upl_unmap(upl);
 					ASSERT3S(umapret_err, ==, KERN_SUCCESS);
 				}
-				if (last_page_in_range < upl_end_pg)
-					ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+				if (last_page_in_range < upl_end_pg) {
+					if (bl_unmapped == B_FALSE) {
+						ubc_upl_abort(upl,
+						    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+					} else {
+						printf("ZFS: %s:%d: WOAH, bl_unmapped true but"
+						    " %lld < %lld fs %s file %s\n", __func__, __LINE__,
+						    last_page_in_range, upl_end_pg,
+						    fsname, fname);
+					}
+				}
 				goto pageout_done;
 			}
 
@@ -3643,12 +3679,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	ASSERT3S(pg_index, ==, just_past_upl_end_pg);
 	ASSERT3S(mapped, ==, B_FALSE);
 
+	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
+
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
-
-	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 
 	zfs_range_unlock(rl);
 
