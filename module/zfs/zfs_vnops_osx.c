@@ -2958,13 +2958,15 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			printf("ZFS: %s:%d: bad page %lld (pgs %lld-%lld)"
 			    " [file bytes to write %lld-%lld] (size %lld)"
 			    " fs %s file %s (mapped %d) (caller_unmapped %d)"
-			    " val %d pres %d dirt %d\n",
+			    " val %d pres %d dirt %d size %d f_offset+size %lld"
+			    " pages remaining %d upl_offset %d\n",
 			    __func__, __LINE__, i, stpage, endpage,
 			    f_offset, f_offset + write_size, write_size,
 			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
 			    zp->z_name_cache, unmap, *caller_unmapped,
 			    upl_valid_page(pl, i), upl_page_present(pl, i),
-			    upl_dirty_page(pl, i));
+			    upl_dirty_page(pl, i), size, f_offset + size,
+			    pages_remaining, upl_offset);
 			extern void IOSleep(unsigned milliseconds);
 			IOSleep(10);
 		}
