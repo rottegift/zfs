@@ -3454,6 +3454,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			ASSERT(upl_page_present(pl, page_index));
 			break;
 		} else {
+			ASSERT0(upl_dirty_page(pl, page_index));
+			if (upl_page_present(pl, page_index)) {
+				printf("ZFS: %s:%d: page index %d (of %d) not valid but"
+				    " present, dismissing anyway XXX, [%lld..%lld] in"
+				    " filesize %lld fs %s file %s\n",
+				    __func__, __LINE__, page_index, pages_in_upl - 1,
+				    f_start_of_upl, f_end_of_upl, zp->z_size,
+				    fsname, fname);
+			}
 			upl_pages_dismissed++;
 		}
 	}
