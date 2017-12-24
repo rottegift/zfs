@@ -2950,7 +2950,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	const int64_t stpage = (int64_t)upl_offset / PAGE_SIZE_64;
 	const int64_t endpage = (int64_t)(upl_offset + size) / PAGE_SIZE_64;
 	ASSERT3S((endpage - stpage), ==, pages_remaining);
-	for (int64_t i = endpage; i >= stpage; i++) {
+	for (int64_t i = endpage; i >= stpage; i--) {
 		ASSERT(upl_page_present(pl, i));
 		ASSERT(upl_valid_page(pl, i));
 		ASSERT(upl_dirty_page(pl, i));
