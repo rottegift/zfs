@@ -2759,7 +2759,7 @@ copy_avoiding_ubc_upl_map(upl_t upl, upl_page_info_t *upl,
 }
 #endif
 
-int
+static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const upl_offset_t upl_offset, const off_t f_offset, const int size,
     const uint64_t filesize, const int flags,
