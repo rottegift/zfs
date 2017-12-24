@@ -108,6 +108,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_pageout;
 	kstat_named_t pageoutv2_want_lock;
 	kstat_named_t pageoutv2_upl_iosync;
+	kstat_named_t pageoutv2_no_pages_valid;
+	kstat_named_t pageoutv2_invalid_tail_pages;
 	kstat_named_t pageoutv2_present_pages_aborted;
 	kstat_named_t pageoutv2_precious_pages_cleaned;
 	kstat_named_t pageoutv2_dirty_pages_blustered;
@@ -133,6 +135,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_pageout",                 KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
+	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
+	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_present_pages_aborted",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_cleaned",  KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
@@ -3388,6 +3392,68 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		goto pageout_done;
 	}
 
+	const off_t f_start_of_upl = ap->a_f_offset;
+	const off_t f_end_of_upl = f_start_of_upl + ap->a_size;
+
+	/*
+	 * The caller may hand us a memory range that results in a run
+	 * of pages at the end of the UPL that aren't present now.
+	 * Under memory pressure, the kernel may reclaim the whole UPL
+	 * from the moment we use a FREE_ON_EMPTY, if the UPL is
+	 * entirely non-present pages.  If this happens while we hold a
+	 * ubc_upl_map, then we have one of two problems: [a] if we call
+	 * ubc_upl_unmap, we will panic because the UPL is now empty or
+	 * [b] we cannot call ubc_upl_unmap, but the mapping is not
+	 * automatically reclaimed by the kernel, so an ioreference
+	 * remains on the backing file.
+	 *
+	 * So here we scan from the back of the UPL looking for the first
+	 * valid (== present and not marked absent) page; we will treat
+	 * that as the practical end of the UPL.
+	 */
+
+	int upl_pages_dismissed = 0;
+	const int pages_in_upl = howmany(ap->a_size, PAGE_SIZE_64) - 1;
+	for (int page_index = pages_in_upl; page_index > 0; ) {
+		if (upl_valid_page(pl, --page_index))
+			break;
+		else
+			upl_pages_dismissed++;
+	}
+
+	if (upl_pages_dismissed == pages_in_upl) {
+		printf("ZFS: %s:%d: entire UPL absent (%d pages)"
+		    " [%lld..%lld] filesize %lld fs %s file %s\n",
+		    __func__, __LINE__, upl_pages_dismissed,
+		    f_start_of_upl, f_end_of_upl, zp->z_size,
+		    fsname, fname);
+		int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+		ASSERT3S(abortall, ==, KERN_SUCCESS);
+		error = abortall;
+		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
+		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
+		goto pageout_done;
+	} else {
+		ASSERT3S(pages_in_upl, >, 1);
+		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
+		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
+		const int end_of_tail = ap->a_size;
+		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
+		    " [%lld..%lld] fs %s file %s\n",
+		    __func__, __LINE__, upl_pages_dismissed, pages_in_upl,
+		    start_of_tail, end_of_tail,
+		    f_start_of_upl, f_end_of_upl, fsname, fname);
+		/*
+		 * We are not obliged to abort these pages; the kernel
+		 * will do so automatically thanks to the FREE_ON_EMPTY semantics
+		 * invoked below.
+		 */
+		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
+	}
+
+	const off_t trimmed_upl_size = (off_t)ap->a_size - ((off_t)upl_pages_dismissed * PAGE_SIZE_64);
+	ASSERT3S(trimmed_upl_size, >=, PAGE_SIZE_64);
+
 	if (vnode_vfsisrdonly(ZTOV(zp)) ||
 	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 		printf("ZFS: %s:%d: WARNING: readonly filesystem %s for [%lld...%lld] file %s\n",
@@ -3435,12 +3501,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	filesize = zp->z_size; /* get consistent copy of zp_size */
 
-	const off_t isize = ap->a_size;
-	ASSERT3S(isize & PAGE_MASK_64, ==, 0);
-	ASSERT3S(isize, >, 0);
-
 	/*
-	 * Scan from the start of the UPL to the front of the UPL.
+	 * Scan from the start of the UPL to the last valid page in the UPL.
 	 *
 	 * If we have an absent page, keep gathering subsequnt absent pages,
 	 * then abort them as a range.
@@ -3455,27 +3517,23 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 *
 	 * If we have run out of pages, we are done.
 	 */
-
-	const off_t f_start_of_upl = ap->a_f_offset;
-	const off_t f_end_of_upl = f_start_of_upl + ap->a_size;
-
-	const off_t just_past_upl_end_pg = howmany(isize, PAGE_SIZE_64);
-	const off_t upl_end_pg = just_past_upl_end_pg - 1;
+	const off_t just_past_last_valid_pg = howmany(trimmed_upl_size, PAGE_SIZE_64);
+	const off_t upl_end_pg = just_past_last_valid_pg - 1;
 	ASSERT3S(upl_end_pg, >=, 0);
 
-	for (pg_index = 0; pg_index < just_past_upl_end_pg; ) {
+	for (pg_index = 0; pg_index < just_past_last_valid_pg; ) {
 		VERIFY3S(mapped, ==, B_TRUE);
 		/* we found an absent page */
 		if (!upl_page_present(pl, pg_index)) {
 			ASSERT0(upl_dirty_page(pl, pg_index));
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of absent pages */
-			for ( ; page_past_end_of_range < just_past_upl_end_pg;
+			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
 				if (upl_page_present(pl, page_past_end_of_range))
 					break;
 			}
-			ASSERT3S(page_past_end_of_range, <=, just_past_upl_end_pg);
+			ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
 			const off_t start_of_range = pg_index * PAGE_SIZE_64;
 			const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
 			const off_t pages_in_range = page_past_end_of_range - pg_index;
@@ -3483,10 +3541,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			dprintf("ZFS: %s:%d: aborting absent upl bytes [%lld..%lld] (%lld pages)"
-			    " of file bytes [%lld..%lld] (%lld pages)"
+			    " of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
-			    f_start_of_upl, f_end_of_upl, just_past_upl_end_pg, fsname, fname);
+			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
 			if (last_page_in_range == upl_end_pg) {
 				dprintf("ZFS: %s:%d: as aborting last UPL page, unmapping fs %s file %s\n",
 				    __func__, __LINE__, fsname, fname);
@@ -3527,14 +3585,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		else if (upl_page_present(pl, pg_index) && !upl_dirty_page(pl, pg_index)) {
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of present-but-not-dirty pages */
-			for ( ; page_past_end_of_range < just_past_upl_end_pg;
+			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
 				if (!upl_page_present(pl, page_past_end_of_range) ||
 				    upl_dirty_page(pl, page_past_end_of_range)) {
 					break;
 				}
 			}
-                        ASSERT3S(page_past_end_of_range, <=, just_past_upl_end_pg);
+                        ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
                         const off_t start_of_range = pg_index * PAGE_SIZE_64;
                         const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
                         const off_t pages_in_range = page_past_end_of_range - pg_index;
@@ -3542,10 +3600,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			dprintf("ZFS: %s:%d committing precious (present-but-not-dirty) upl bytes"
-			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%lld pages)"
+			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
-			    f_start_of_upl, f_end_of_upl, just_past_upl_end_pg, fsname, fname);
+			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
 			if (last_page_in_range == upl_end_pg) {
                                 dprintf("ZFS: %s:%d: as committing last UPL page, unmapping fs %s file %s\n",
                                     __func__, __LINE__, fsname, fname);
@@ -3594,13 +3652,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		else if (upl_dirty_page(pl, pg_index)) {
 			ASSERT(upl_page_present(pl, pg_index));
 			int page_past_end_of_range = pg_index + 1;
-			for ( ; page_past_end_of_range < just_past_upl_end_pg;
+			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
 				if (!upl_dirty_page(pl, page_past_end_of_range))
 					break;
 				ASSERT(upl_page_present(pl, page_past_end_of_range));
 			}
-			ASSERT3S(page_past_end_of_range, <=, just_past_upl_end_pg);
+			ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
 			const off_t start_of_range = pg_index * PAGE_SIZE_64;
                         const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
                         const off_t pages_in_range = page_past_end_of_range - pg_index;
@@ -3611,7 +3669,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%lld pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
-			    f_start_of_upl, f_end_of_upl, just_past_upl_end_pg, fsname, fname);
+			    f_start_of_upl, f_end_of_upl, just_past_last_valid_pg, fsname, fname);
 			/*
 			 * bluster_pageout MUST commit or abort all the UPL pages
 			 * between start_of_range and end_of_range, and must also
@@ -3620,9 +3678,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * panic in response.
 			 */
 			VERIFY3S(end_of_range - start_of_range, >=, PAGE_SIZE_64);
-			const off_t pages_remaining = just_past_upl_end_pg - pg_index;
+			const off_t pages_remaining = just_past_last_valid_pg - pg_index;
 			ASSERT3S(pages_remaining, >, 0);
-			ASSERT3S(pages_remaining, <=, just_past_upl_end_pg);
+			ASSERT3S(pages_remaining, <=, just_past_last_valid_pg);
 			ASSERT3S(pages_remaining, >=, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(mapped, ==, B_TRUE);
 
@@ -3682,7 +3740,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 	} // for
 
-	ASSERT3S(pg_index, ==, just_past_upl_end_pg);
+	ASSERT3S(pg_index, ==, just_past_last_valid_pg);
 	ASSERT3S(mapped, ==, B_FALSE);
 
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
