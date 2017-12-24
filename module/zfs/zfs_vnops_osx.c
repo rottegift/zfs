@@ -3626,9 +3626,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
 				if (!upl_page_present(pl, page_past_end_of_range) ||
+				    !upl_valid_page(pl, page_past_end_of_range) ||
 				    upl_dirty_page(pl, page_past_end_of_range)) {
 					break;
 				}
+				ASSERT0(upl_dirty_page(pl, page_past_end_of_range));
+				ASSERT(upl_page_present(pl, page_past_end_of_range));
+				ASSERT(upl_valid_page(pl, page_past_end_of_range));
 			}
                         ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
                         const off_t start_of_range = pg_index * PAGE_SIZE_64;
