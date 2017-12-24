@@ -3474,8 +3474,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		const int end_of_tail = ap->a_size;
 		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
 		    " [%lld..%lld] fs %s file %s\n",
-		    __func__, __LINE__, upl_pages_dismissed, pages_in_upl,
-		    start_of_tail, end_of_tail,
+		    __func__, __LINE__, upl_pages_dismissed,
+		    start_of_tail, end_of_tail, pages_in_upl,
 		    f_start_of_upl, f_end_of_upl, fsname, fname);
 		/*
 		 * We are not obliged to abort these pages; the kernel
@@ -3690,9 +3690,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			int page_past_end_of_range = pg_index + 1;
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
-				if (!upl_dirty_page(pl, page_past_end_of_range))
+				if (!upl_dirty_page(pl, page_past_end_of_range) ||
+				    !upl_valid_page(pl, page_past_end_of_range) ||
+				    !upl_page_present(pl, page_past_end_of_range))
 					break;
 				ASSERT(upl_page_present(pl, page_past_end_of_range));
+				ASSERT(upl_valid_page(pl, page_past_end_of_range));
 			}
 			ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
 			const off_t start_of_range = pg_index * PAGE_SIZE_64;
