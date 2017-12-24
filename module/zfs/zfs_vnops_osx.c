@@ -2748,7 +2748,7 @@ copy_avoiding_ubc_upl_map(upl_t upl, upl_page_info_t *upl,
 }
 #endif
 
-static int
+int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const upl_offset_t upl_offset, const off_t f_offset, const int size,
     const uint64_t filesize, const int flags,
@@ -2777,6 +2777,9 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	if (pages_remaining == 1 || pages_remaining == howmany(size, PAGE_SIZE)) {
 		if (is_clcommit)
 			unmap = B_TRUE;
+	} else {
+		ASSERT3S(pages_remaining, >, 1);
+		ASSERT3S(pages_remaining, >, howmany(size, PAGE_SIZE));
 	}
 
 	/*
@@ -2975,6 +2978,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	    __func__, __LINE__, f_offset, f_offset+size, zp->z_name_cache);
 
 	if (unmap) {
+		ASSERT3S(*caller_unmapped, ==, B_FALSE);
 		int unmapret = ubc_upl_unmap(upl);
 		if (unmapret != KERN_SUCCESS)
 			printf("ZFS: %s:%d: error unmapping UPL for [%lld..%lld] file %s\n",
@@ -3499,11 +3503,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    UPL_ABORT_FREE_ON_EMPTY);
 			if (abortret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d aborting UPL range [%lld, %lld] of UPL"
-				    " [%lld..%lld] fs %s file %s (mapped %d)\n", __func__, __LINE__,
+				    " [%lld..%lld] fs %s file %s (mapped %d)"
+				    " z_size %lld ubcsize %lld a_size %ld\n", __func__, __LINE__,
 				    abortret,
 				    start_of_range, end_of_range,
 				    f_start_of_upl, f_end_of_upl,
-				    fsname, fname, mapped);
+				    fsname, fname, mapped,
+				    zp->z_size, ubc_getsize(vp), ap->a_size);
 				error = abortret;
 				if (mapped) {
 					mapped = B_FALSE;
