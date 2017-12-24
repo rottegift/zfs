@@ -2951,9 +2951,23 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	const int64_t endpage = (int64_t)(upl_offset + size) / PAGE_SIZE_64;
 	ASSERT3S((endpage - stpage), ==, pages_remaining);
 	for (int64_t i = endpage; i >= stpage; i--) {
-		ASSERT(upl_page_present(pl, i));
-		ASSERT(upl_valid_page(pl, i));
-		ASSERT(upl_dirty_page(pl, i));
+		if (upl_valid_page(pl, i) ||
+		    upl_dirty_page(pl, i)) {
+			ASSERT(upl_page_present(pl, i));
+		} else {
+			printf("ZFS: %s:%d: bad page %lld (pgs %lld-%lld)"
+			    " [file bytes to write %lld-%lld] (size %lld)"
+			    " fs %s file %s (mapped %d) (caller_unmapped %d)"
+			    " val %d pres %d dirt %d\n",
+			    __func__, __LINE__, i, stpage, endpage,
+			    f_offset, f_offset + write_size, write_size,
+			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
+			    zp->z_name_cache, unmap, *caller_unmapped,
+			    upl_valid_page(pl, i), upl_page_present(pl, i),
+			    upl_dirty_page(pl, i));
+			extern void IOSleep(unsigned milliseconds);
+			IOSleep(10);
+		}
 	}
 	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
 
@@ -3545,7 +3559,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		VERIFY3S(mapped, ==, B_TRUE);
 		/* we found an absent page */
 		if (!upl_valid_page(pl, pg_index)) {
-			ASSERT(upl_page_present(pl, pg_index));
 			ASSERT0(upl_dirty_page(pl, pg_index));
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of absent pages */
