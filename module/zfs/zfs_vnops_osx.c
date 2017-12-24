@@ -2988,6 +2988,11 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
 
+	for (int i = endpage; i >= stpage; i--) {
+		dprintf("ZFS: %s:%d: page %d : '0x%x'\n", __func__, __LINE__, i,
+		    *pvaddr[i*PAGE_SIZE]);
+	}
+
 	dprintf("ZFS: %s:%d: dmu_write %lld bytes (of %d) from pvaddr[%u] to offset %lld in file %s\n",
 	    __func__, __LINE__, write_size, size, upl_offset, f_offset, zp->z_name_cache);
 
