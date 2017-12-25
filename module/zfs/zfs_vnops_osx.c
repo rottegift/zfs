@@ -2190,9 +2190,10 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	ASSERT(vn_has_cached_data(vp));
 	if (!vn_has_cached_data(vp)) {
-		printf("ZFS: %s:%d: file without vn_has_cached_data(vp) (file_sz %lld): %s\n",
-		    __func__, __LINE__, file_sz, zp->z_name_cache);
-
+		printf("ZFS: %s:%d: file without vn_has_cached_data(vp) (is_mapped %d) (file_sz %lld):"
+		    " fs %s file %s\n",
+		    __func__, __LINE__, spl_ubc_is_mapped(vp, NULL), file_sz,
+		    fsname, fname);
 	}
 	/* ASSERT(zp->z_dbuf_held && zp->z_phys); */
 	/* can't fault passed EOF */
@@ -2235,14 +2236,23 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	boolean_t need_z_lock;
 	rl_t *rl;
 
-	if (rw_write_held(&zp->z_map_lock)) {
+	if (zp->z_in_pageout > 0) {
+		printf("ZFS: %s:%d: already in pageout (number %d) skipping locking for"
+		    " [%lld..%lld] (size %ld uploff %u) fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout,
+		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    ap->a_size, ap->a_pl_offset,
+		    fsname, fname);
+		need_rl_unlock = B_FALSE;
+		need_z_lock = B_FALSE;
+	} else if (rw_write_held(&zp->z_map_lock)) {
 		need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
 		printf("ZFS: %s:%d: lock held on entry for [%lld..%lld] (size %ld uploff %u) fs %s file %s,"
 		    " avoiding rangelocking\n",
 		    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
-		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname, zp->z_name_cache);
+		    fsname, fname);
 	} else {
 		need_rl_unlock = B_TRUE;
 		need_z_lock = B_TRUE;
@@ -2270,7 +2280,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    __func__, __LINE__, ap->a_f_offset, ap->a_size, zp->z_name_cache);
 				zfs_range_unlock(rl);
 				IOSleep(1); // we hold no locks, so let work be done
-				rl = zfs_range_lock(zp, off, len, RL_WRITER);
+				rl = zfs_range_lock(zp, off, len, RL_READER);
 			}
 			hrtime_t cur_time = gethrtime();
 			if (cur_time > print_time) {
@@ -2717,7 +2727,8 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		VNOPS_OSX_STAT_INCR(pageoutv1_want_lock, tries);
 	} else {
-		printf("ZFS: %s: z_map_lock already held\n", __func__);
+		printf("ZFS: %s:%d: z_map_lock already held for file %s\n", __func__, __LINE__,
+			zp->z_name_cache);
 	}
 
 	/*
@@ -3192,6 +3203,35 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	return (retval);
 }
 
+inline static void
+inc_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
+{
+	if (zp->z_in_pageout != 0) {
+		printf("ZFS: %s:%d z_in_pageout already nonzero %d for"
+		    " fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+	}
+        if (zp->z_in_pageout++ != 1) {
+		printf("ZFS: %s:%d z_in_pageout expected inc to 1 is now %d"
+		    " for fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+	}
+}
+
+inline static void
+    dec_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
+{
+	if (zp->z_in_pageout != 1) {
+		printf("ZFS: %s:%d: z_in_pageout expected to be 1 is %d"
+		    " for fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+	}
+	if (zp->z_in_pageout-- != 0) {
+		printf("ZFS: %s:%d: z_in_pageout expected to be 0 after dec"
+		    " is now %d for fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+	}
+}
 
 /*
  * In V2 of vnop_pageout, we are given a NULL upl, so that we can
@@ -3263,18 +3303,22 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
+
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
 	ASSERT(ubc_pages_resident(vp));
 
 	if (ap->a_size <= 0) {
-		printf("ZFS: %s:%d: invalid ap->a_size %ld, ap->a_f_offset %lld, file %s\n",
-		    __func__, __LINE__, ap->a_size, ap->a_f_offset, zp->z_name_cache);
+		printf("ZFS: %s:%d: invalid ap->a_size %ld, ap->a_f_offset %lld, fs %s file %s\n",
+		    __func__, __LINE__, ap->a_size, ap->a_f_offset, fsname, fname);
 		error = EINVAL;
 		goto exit_abort;
 	}
 
 	if (ap->a_f_offset < 0 || ap->a_f_offset >= zp->z_size) {
-		printf("ZFS: %s:%d: invalid offset %lld vs filesize %lld\n",
-		    __func__, __LINE__, ap->a_f_offset, zp->z_size);
+		printf("ZFS: %s:%d: invalid offset %lld vs filesize %lld fs %s file %s\n",
+		    __func__, __LINE__, ap->a_f_offset, zp->z_size, fsname, fname);
 		error = EINVAL;
 		goto exit_abort;
 	}
@@ -3292,8 +3336,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 	boolean_t had_map_lock_at_entry = B_FALSE;
 	if (rw_write_held(&zp->z_map_lock)) {
-		dprintf("ZFS: %s:%d: dropping held-on-entry z_map_lock for file %s\n",
-		    __func__, __LINE__, zp->z_name_cache);
+		dprintf("ZFS: %s:%d: dropping held-on-entry z_map_lock for fs %s file %s\n",
+		    __func__, __LINE__, fsname, fname);
 		rw_exit(&zp->z_map_lock);
 		had_map_lock_at_entry = B_TRUE;
 	}
@@ -3309,6 +3353,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	const off_t rllen = round_page_64(a_size);
 
 	rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
+	inc_z_in_pageout(zp, fsname, fname);
 
 	hrtime_t print_time = gethrtime() + SEC2NSEC(1);
 	int secs = 0;
@@ -3329,15 +3374,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		if (cur_time > print_time) {
 			secs++;
 			printf("ZFS: %s:%d: looping for z_map_lock for %d sec"
-			    " (held by %s) file %s\n", __func__, __LINE__, secs,
+			    " (held by %s) fs %s file %s\n", __func__, __LINE__, secs,
                             (zp->z_map_lock_holder != NULL)
                             ? zp->z_map_lock_holder
                             : "(NULL)",
-			    zp->z_name_cache);
+			    fsname, fname);
 			print_time = cur_time + SEC2NSEC(1);
 			zfs_range_unlock(rl);
-			printf("ZFS: %s:%d range lock dropedit for [%lld, %ld] for file %s\n",
-			    __func__, __LINE__, ap->a_f_offset, a_size, zp->z_name_cache);
+			printf("ZFS: %s:%d range lock dropedit for [%lld, %ld] for fs %s file %s\n",
+			    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname);
 			IOSleep(1); // we hold no locks, so let work be done
 			rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
 		}
@@ -3349,8 +3394,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	zp->z_map_lock_holder = __func__;
 
 	if (secs == 0) {
-		printf("ZFS: %s:%d: lock was already held for %s\n",
-		    __func__, __LINE__, zp->z_name_cache);
+		printf("ZFS: %s:%d: lock was already held for fs %s file %s\n",
+		    __func__, __LINE__, fsname, fname);
 	} else {
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, secs);
 	}
@@ -3361,7 +3406,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (error) {
 		ZFS_EXIT(zfsvfs);
-                printf("ZFS: %s:%d: (extend fail) returning error %d\n", __func__, __LINE__, error);
+                printf("ZFS: %s:%d: (extend fail) returning error %d fs %s file %s\n",
+		    __func__, __LINE__, error, fsname, fname);
 		goto pageout_done;
 	}
 
@@ -3399,8 +3445,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			new_blksz = new_new_blksz;
 		}
 		if (new_blksz > zp->z_blksz) {
-			printf("ZFS: %s:%d growing buffer to %llu (from %d) file %s\n",
-			    __func__, __LINE__, new_blksz, zp->z_blksz, zp->z_name_cache);
+			printf("ZFS: %s:%d growing buffer to %llu (from %d) fs %s file %s\n",
+			    __func__, __LINE__, new_blksz, zp->z_blksz, fsname, fname);
 			dmu_tx_t *tx = dmu_tx_create(zfsvfs->z_os);
 			dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 			zfs_sa_upgrade_txholds(tx, zp);
@@ -3416,9 +3462,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 		zfs_range_reduce(rl, rloff, rllen);
 	}
-
-	const char *fname = zp->z_name_cache;
-	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 	if (ubc_getsize(vp) < zp->z_size) {
 		printf("ZFS: %s:%d: increasing ubc size from %lld to z_size %lld for"
@@ -3851,6 +3894,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	zfs_range_unlock(rl);
+	dec_z_in_pageout(zp, fsname, fname);
 
 	if (a_flags & UPL_IOSYNC) {
 		dprintf("ZFS: %s:%d zil_commit file %s\n", __func__, __LINE__, zp->z_name_cache);
@@ -3878,6 +3922,7 @@ pageout_done:
 	}
 
 	zfs_range_unlock(rl);
+	dec_z_in_pageout(zp, fsname, fname);
 
 exit_abort:
 

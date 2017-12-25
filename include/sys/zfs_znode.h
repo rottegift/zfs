@@ -238,6 +238,8 @@ typedef struct znode {
 
 	_Atomic hrtime_t        z_mr_sync;      /* most recent sync */
 
+	_Atomic int16_t z_in_pageout;           /* How many pageouts are there in progress */
+
 	list_node_t	z_link_reclaim_node;	/* all reclaim znodes in fs link */
 	uint32_t        z_vid;                  /* OSX vnode_vid */
 	uint32_t        z_document_id;          /* OSX document ID */
