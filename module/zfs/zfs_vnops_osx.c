@@ -3530,7 +3530,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		} else {
 			int abortall_after_tail_fail = ubc_upl_abort(upl,
-			    UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
+			    UPL_ABORT_FREE_ON_EMPTY);
 			ASSERT3S(abortall_after_tail_fail, ==, KERN_SUCCESS);
 			error = abort_tail;
 			goto pageout_done;
