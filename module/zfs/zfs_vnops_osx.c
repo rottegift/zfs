@@ -3604,10 +3604,18 @@ create_upl:
 			ASSERT3S(abortall_after_tail_fail, ==, KERN_SUCCESS);
 			printf("ZFS: %s:%d: aborted_all (retval %d)"
 			    " going back to create_upl (foff %lld, sz %ld) for"
-			    " fs %s file %s (pass %d)\n", __func__, __LINE__,
+			    " fs %s file %s (pass %d) (new size %ld)\n", __func__, __LINE__,
 			    abortall_after_tail_fail,
-			    ap->a_f_offset, ap->a_size, fsname, fname, upl_create_passes);
-			goto create_upl;
+			    ap->a_f_offset, ap->a_size,
+			    fsname, fname, upl_create_passes,
+			    ap->a_size - (upl_pages_dismissed * PAGE_SIZE));
+			ap->a_size -= (upl_pages_dismissed * PAGE_SIZE);
+			if (ap->a_size > 0) {
+				goto create_upl;
+			} else {
+				ASSERT3S(ap->a_size, >, 0);
+				goto pageout_done;
+			}
 		}
 	}
 
