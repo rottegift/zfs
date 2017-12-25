@@ -3509,15 +3509,25 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	ASSERT3S(ap->a_size, <=, MAX_UPL_SIZE_BYTES);
 
+	const off_t f_start_of_upl = ap->a_f_offset;
+	const off_t f_end_of_upl = f_start_of_upl + ap->a_size;
+	const int pages_in_upl = howmany(ap->a_size, PAGE_SIZE_64);
+	int upl_create_passes = 0;
+
+create_upl:
+
+	upl_create_passes++;
+	upl = NULL;
+	pl = NULL;
+
+	ASSERT3S(ubc_getsize(vp), >=, ap->a_f_offset + ap->a_size);
+
 	error = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl,
 						   request_flags );
 	if (error || (upl == NULL)) {
 		printf("ZFS: %s: Failed to create UPL! %d\n", __func__, error);
 		goto pageout_done;
 	}
-
-	const off_t f_start_of_upl = ap->a_f_offset;
-	const off_t f_end_of_upl = f_start_of_upl + ap->a_size;
 
 	/*
 	 * The caller may hand us a memory range that results in a run
@@ -3537,7 +3547,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 
 	int upl_pages_dismissed = 0;
-	const int pages_in_upl = howmany(ap->a_size, PAGE_SIZE_64);
+
 	for (int page_index = pages_in_upl; page_index > 0; ) {
 		if (upl_valid_page(pl, --page_index)) {
 			ASSERT(upl_page_present(pl, page_index));
@@ -3592,8 +3602,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			int abortall_after_tail_fail = ubc_upl_abort(upl,
 			    UPL_ABORT_FREE_ON_EMPTY);
 			ASSERT3S(abortall_after_tail_fail, ==, KERN_SUCCESS);
-			error = abort_tail;
-			goto pageout_done;
+			printf("ZFS: %s:%d: aborted_all (retval %d)"
+			    " going back to create_upl (foff %lld, sz %ld) for"
+			    " fs %s file %s (pass %d)\n", __func__, __LINE__,
+			    abortall_after_tail_fail,
+			    ap->a_f_offset, ap->a_size, fsname, fname, upl_create_passes);
+			goto create_upl;
 		}
 	}
 
