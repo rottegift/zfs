@@ -2238,9 +2238,10 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	if (rw_write_held(&zp->z_map_lock)) {
 		need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
-		printf("ZFS: %s:%d: lock held on entry for [%lld..%ld] (uploff %u) fs %s file %s,"
+		printf("ZFS: %s:%d: lock held on entry for [%lld..%lld] (size %ld uploff %u) fs %s file %s,"
 		    " avoiding rangelocking\n",
-		    __func__, __LINE__, ap->a_f_offset, ap->a_size, ap->a_pl_offset,
+		    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    ap->a_size, ap->a_pl_offset,
 		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname, zp->z_name_cache);
 	} else {
 		need_rl_unlock = B_TRUE;
@@ -3512,14 +3513,19 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
 		const int end_of_tail = ap->a_size;
-		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
-		    " [%lld..%lld] fs %s file %s\n",
-		    __func__, __LINE__, upl_pages_dismissed,
-		    start_of_tail, end_of_tail, pages_in_upl,
-		    f_start_of_upl, f_end_of_upl, fsname, fname);
+		/*
+		 * The abort can return 5 (KERN_FAILURE) without
+		 * apparent problem We are not outright obliged to abort
+		 * empty pages, and they are "donated" to the vm map, which
+		 * disposes of them at unmap time.
+		 */
 		int abort_tail = ubc_upl_abort_range(upl, start_of_tail, end_of_tail,
 		    UPL_ABORT_FREE_ON_EMPTY);
-		ASSERT3S(abort_tail, ==, KERN_SUCCESS);
+		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
+		    " [%lld..%lld] fs %s file %s (abort_tail err %d : continuing XXX)\n",
+		    __func__, __LINE__, upl_pages_dismissed,
+		    start_of_tail, end_of_tail, pages_in_upl,
+		    f_start_of_upl, f_end_of_upl, fsname, fname, abort_tail);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
 
@@ -3698,7 +3704,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
 			if (commit_precious_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: error %d committing UPL range [%lld, %lld] of UPL"
+				printf("ZFS: %s:%d: ERROR %d committing UPL range [%lld, %lld] of UPL"
                                     " [%lld..%lld] fs %s file %s (mapped %d)\n", __func__, __LINE__,
 				    commit_precious_ret,
                                     start_of_range, end_of_range,
@@ -3845,7 +3851,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	if (error != 0) {
-		printf("ZFS: %s:%d: pageoutv2 error %d [%lld..%lld] file %s filesystem %s\n",
+		printf("ZFS: %s:%d: pageoutv2 ERROR %d [%lld..%lld] file %s filesystem %s\n",
 		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 	}
@@ -3857,7 +3863,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 pageout_done:
 
-	ASSERT0(error);
 	ASSERT3S(mapped, ==, B_FALSE);
 	if (had_map_lock_at_entry == B_FALSE) {
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
@@ -3868,9 +3873,8 @@ pageout_done:
 
 exit_abort:
 
-	ASSERT0(error);
 	if (error) {
-		printf("ZFS: %s:%d pageoutv2 returning error %d, [%lld..%lld] file %s filesystem %s\n",
+		printf("ZFS: %s:%d pageoutv2 returning ERROR %d, [%lld..%lld] file %s filesystem %s\n",
 		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_error);
