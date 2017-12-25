@@ -2418,9 +2418,39 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	return (error);
 }
 
+inline static void
+inc_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
+{
+	if (zp->z_in_pageout != 0) {
+		printf("ZFS: %s:%d z_in_pageout already nonzero %d for"
+		    " fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+	}
+        if (zp->z_in_pageout++ != 1) {
+		printf("ZFS: %s:%d z_in_pageout expected inc to 1 is now %d"
+		    " for fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+	}
+}
+
+inline static void
+dec_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
+{
+	if (zp->z_in_pageout != 1) {
+		printf("ZFS: %s:%d: z_in_pageout expected to be 1 is %d"
+		    " for fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+	}
+	if (zp->z_in_pageout-- != 0) {
+		printf("ZFS: %s:%d: z_in_pageout expected to be 0 after dec"
+		    " is now %d for fs %s file %s\n",
+		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+	}
+}
+
 int
 zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offset,
-    offset_t off, const size_t size, const int flags, const boolean_t take_rlock,
+    offset_t off, const size_t size, const int flags, boolean_t take_rlock,
     const boolean_t inactivate, const boolean_t clear_flags)
 {
 	dmu_tx_t *tx;
@@ -2463,6 +2493,9 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		ZFS_EXIT(zfsvfs);
 		return (EIO);
 	}
+
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 	ASSERT(vn_has_cached_data(ZTOV(zp)));
 	ASSERT(ubc_pages_resident(ZTOV(zp)));
@@ -2519,8 +2552,18 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	dprintf("ZFS: starting with size %lx\n", len);
 
 top:
-	if (take_rlock)
-		rl = zfs_range_lock(zp, off, len, RL_WRITER);
+	if (take_rlock) {
+		if (zp->z_in_pageout > 0) {
+			printf("ZFS: %s:%d: nonzero z_in_pageout %d for fs %s file %s"
+			    " overriding range_lock (off %lld, len %ld)\n",
+			    __func__, __LINE__, zp->z_in_pageout, fsname, fname,
+			    off, len);
+			take_rlock = B_FALSE;
+		} else {
+			rl = zfs_range_lock(zp, off, len, RL_WRITER);
+			inc_z_in_pageout(zp, fsname, fname);
+		}
+	}
 	/*
 	 * can't push pages past end-of-file
 	 */
@@ -2549,8 +2592,10 @@ top:
 	err = dmu_tx_assign(tx, TXG_WAIT);
 	if (err != 0) {
 		if (err == ERESTART) {
-			if (take_rlock)
+			if (take_rlock) {
 				zfs_range_unlock(rl);
+				dec_z_in_pageout(zp, fsname, fname);
+			}
 			dmu_tx_wait(tx);
 			dmu_tx_abort(tx);
 			goto top;
@@ -2646,8 +2691,10 @@ top:
 	dmu_tx_commit(tx);
 
 out:
-	if (take_rlock)
+	if (take_rlock) {
 		zfs_range_unlock(rl);
+		dec_z_in_pageout(zp, fsname, fname);
+	}
 	if (flags & UPL_IOSYNC)
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
@@ -3201,36 +3248,6 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	ZFS_EXIT(zfsvfs);
 
 	return (retval);
-}
-
-inline static void
-inc_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
-{
-	if (zp->z_in_pageout != 0) {
-		printf("ZFS: %s:%d z_in_pageout already nonzero %d for"
-		    " fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
-	}
-        if (zp->z_in_pageout++ != 1) {
-		printf("ZFS: %s:%d z_in_pageout expected inc to 1 is now %d"
-		    " for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
-	}
-}
-
-inline static void
-    dec_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
-{
-	if (zp->z_in_pageout != 1) {
-		printf("ZFS: %s:%d: z_in_pageout expected to be 1 is %d"
-		    " for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
-	}
-	if (zp->z_in_pageout-- != 0) {
-		printf("ZFS: %s:%d: z_in_pageout expected to be 0 after dec"
-		    " is now %d for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
-	}
 }
 
 /*
