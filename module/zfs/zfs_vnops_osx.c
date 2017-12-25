@@ -3522,11 +3522,19 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		int abort_tail = ubc_upl_abort_range(upl, start_of_tail, end_of_tail,
 		    UPL_ABORT_FREE_ON_EMPTY);
 		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
-		    " [%lld..%lld] fs %s file %s (abort_tail err %d : continuing XXX)\n",
+		    " [%lld..%lld] fs %s file %s (abort_tail err %d)\n",
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    f_start_of_upl, f_end_of_upl, fsname, fname, abort_tail);
-		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
+		if (abort_tail == KERN_SUCCESS) {
+			VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
+		} else {
+			int abortall_after_tail_fail = ubc_upl_abort(upl,
+			    UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
+			ASSERT3S(abortall_after_tail_fail, ==, KERN_SUCCESS);
+			error = abort_tail;
+			goto pageout_done;
+		}
 	}
 
 	const off_t trimmed_upl_size = (off_t)ap->a_size - ((off_t)upl_pages_dismissed * PAGE_SIZE_64);
