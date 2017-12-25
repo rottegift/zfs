@@ -3520,7 +3520,7 @@ create_upl:
 	upl = NULL;
 	pl = NULL;
 
-	ASSERT3S(ubc_getsize(vp), >=, ap->a_f_offset + ap->a_size);
+	ASSERT3S(ubc_getsize(vp), >=, ap->a_f_offset);
 
 	error = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl,
 						   request_flags );
