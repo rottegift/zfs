@@ -3579,6 +3579,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	} else if (upl_pages_dismissed > 0) {
 		ASSERT3S(pages_in_upl, >, 1);
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
+		ASSERT3S(lowest_page_dismissed, >, 0);
 		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
 		const int end_of_tail = ap->a_size;
 		/*
@@ -3605,6 +3606,20 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    abortall_after_tail_fail,
 			    ap->a_f_offset, ap->a_size,
 			    fsname, fname);
+			for (int pg = lowest_page_dismissed - 1; pg > 0; ) {
+				if (upl_valid_page(pl, pg)) {
+					printf("ZFS: %s:%d: XXX phew valid page at %d\n",
+					    __func__, __LINE__, pg);
+					break;
+				}
+				if (pg == 0) {
+					printf("ZFS: %s:%d: XXX DONE reached 0 without finding"
+					    " a valid page in UPL [%lld...%lld] fs %s file %s\n",
+					    __func__, __LINE__, f_start_of_upl, f_end_of_upl,
+					    fsname, fname);
+					goto pageout_done;
+				}
+			}
 			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
 		}
 	}
