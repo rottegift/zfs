@@ -3527,6 +3527,23 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		goto pageout_done;
 	}
 
+	/* map in UPL address space */
+
+	dprintf("ZFS: %s:%d: mapping upl [%lld...%lld] @ file %s\n",
+	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+	    zp->z_name_cache);
+
+	caddr_t v_addr;
+	int mapret = 0;
+	if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
+		error = EINVAL;
+		printf("ZFS: %s:%d unable to map, error %d\n", __func__, __LINE__, mapret);
+		int abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+		ASSERT3S(abortret, ==, KERN_SUCCESS);
+		goto pageout_done;
+	}
+	mapped = B_TRUE;
+
 	/*
 	 * The caller may hand us a memory range that results in a run
 	 * of pages at the end of the UPL that aren't present now.
@@ -3570,6 +3587,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    __func__, __LINE__, upl_pages_dismissed,
 		    f_start_of_upl, f_end_of_upl, zp->z_size,
 		    fsname, fname);
+		if (mapped) {
+			mapped = B_FALSE;
+			int umapret_err = ubc_upl_unmap(upl);
+			ASSERT3S(umapret_err, ==, KERN_SUCCESS);
+		}
 		int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 		ASSERT3S(abortall, ==, KERN_SUCCESS);
 		error = abortall;
@@ -3597,13 +3619,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    f_start_of_upl, f_end_of_upl, fsname, fname, abort_tail);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		if (abort_tail != KERN_SUCCESS) {
-			int abortall_after_tail_fail = ubc_upl_abort(upl,
-			    UPL_ABORT_FREE_ON_EMPTY);
-			ASSERT3S(abortall_after_tail_fail, ==, KERN_SUCCESS);
-			printf("ZFS: %s:%d: aborted_all (retval %d)"
-			    " going back to create_upl (foff %lld, sz %ld) for"
-			    " fs %s file %s (XXX continuing)\n", __func__, __LINE__,
-			    abortall_after_tail_fail,
+			printf("ZFS: %s:%d: abort tail failed (retval %d)"
+			    " (foff %lld, sz %ld) for"
+			    " fs %s file %s (XXX possibly continuing)\n", __func__, __LINE__,
+			    abort_tail,
 			    ap->a_f_offset, ap->a_size,
 			    fsname, fname);
 			for (int pg = lowest_page_dismissed - 1; pg > 0; ) {
@@ -3617,6 +3636,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 					    " a valid page in UPL [%lld...%lld] fs %s file %s\n",
 					    __func__, __LINE__, f_start_of_upl, f_end_of_upl,
 					    fsname, fname);
+					if (mapped) {
+						mapped = B_FALSE;
+						int umapret_err = ubc_upl_unmap(upl);
+						ASSERT3S(umapret_err, ==, KERN_SUCCESS);
+					}
+					int abortall_after_tail_fail = ubc_upl_abort(upl,
+					    UPL_ABORT_FREE_ON_EMPTY);
+					ASSERT3S(abortall_after_tail_fail, ==, KERN_SUCCESS);
 					goto pageout_done;
 				}
 			}
@@ -3634,6 +3661,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
 		    ap->a_f_offset,
 		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
+		if (mapped) {
+			mapped = B_FALSE;
+			int umapret_err = ubc_upl_unmap(upl);
+			ASSERT3S(umapret_err, ==, KERN_SUCCESS);
+		}
 		int erofs_abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR
 		    | UPL_ABORT_DUMP_PAGES
 		    | UPL_ABORT_FREE_ON_EMPTY);
@@ -3645,6 +3677,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	if (zp->z_pflags & ZFS_IMMUTABLE) {
 		printf("ZFS: %s:%d: immutable flags set for file %s\n",
 		    __func__, __LINE__, zp->z_name_cache);
+		if (mapped) {
+			mapped = B_FALSE;
+			int umapret_err = ubc_upl_unmap(upl);
+			ASSERT3S(umapret_err, ==, KERN_SUCCESS);
+		}
 		int immutable_abort_ret = ubc_upl_abort(upl, UPL_ABORT_ERROR
 		    | UPL_ABORT_DUMP_PAGES
 		    | UPL_ABORT_FREE_ON_EMPTY);
@@ -3653,22 +3690,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		goto pageout_done;
 	}
 
-	/* map in UPL address space */
-
-	dprintf("ZFS: %s:%d: mapping upl [%lld...%lld] @ file %s\n",
-	    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-	    zp->z_name_cache);
-
-	caddr_t v_addr;
-	int mapret = 0;
-	if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
-		error = EINVAL;
-		printf("ZFS: %s:%d unable to map, error %d\n", __func__, __LINE__, mapret);
-		int abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
-		ASSERT3S(abortret, ==, KERN_SUCCESS);
-		goto pageout_done;
-	}
-	mapped = B_TRUE;
 
 	int64_t pg_index;
 
