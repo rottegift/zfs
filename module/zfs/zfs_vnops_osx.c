@@ -2171,9 +2171,12 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		panic("zfs_vnop_pagein: no upl!");
 
 	if (len <= 0) {
-		dprintf("zfs_vnop_pagein: invalid size %ld", len);
-		if (!(flags & UPL_NOCOMMIT))
-			(void) ubc_upl_abort(upl, 0);
+		printf("ZFS: %s:%d: invalid size %ld upl_off %d\n", __func__, __LINE__, len, upl_offset);
+		if (!(flags & UPL_NOCOMMIT)) {
+			int abort_unknown_ret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
+				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+			ASSERT3S(abort_unknown_ret, ==, KERN_SUCCESS);
+		}
 		return (EINVAL);
 	}
 
@@ -2235,8 +2238,10 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	if (rw_write_held(&zp->z_map_lock)) {
 		need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
-		printf("ZFS: %s:%d: lock held on entry for file %s, avoiding rangelocking\n",
-		    __func__, __LINE__, zp->z_name_cache);
+		printf("ZFS: %s:%d: lock held on entry for [%lld..%ld] (uploff %u) fs %s file %s,"
+		    " avoiding rangelocking\n",
+		    __func__, __LINE__, ap->a_f_offset, ap->a_size, ap->a_pl_offset,
+		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname, zp->z_name_cache);
 	} else {
 		need_rl_unlock = B_TRUE;
 		need_z_lock = B_TRUE;
@@ -2290,8 +2295,11 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		ASSERT3S(ubc_map_retval, ==, KERN_SUCCESS);
 		printf("%s:%d error %d failed to ubc_upl_map for file %s\n", __func__, __LINE__,
 		    ubc_map_retval, zp->z_name_cache);
-		if (!(flags & UPL_NOCOMMIT))
-			(void) ubc_upl_abort(upl, 0);
+		if (!(flags & UPL_NOCOMMIT)) {
+			int aret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
+				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+			ASSERT3S(aret, ==, KERN_SUCCESS);
+		}
 		if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
 		if (need_rl_unlock) { zfs_range_unlock(rl); }
 		ZFS_EXIT(zfsvfs);
@@ -2358,7 +2366,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    zp->z_name_cache, error);
 			}
 		} else {
-			kern_return_t commitret = ubc_upl_commit(upl);
+			kern_return_t commitret = ubc_upl_commit_range(upl, upl_offset,
+			    ap->a_size, UPL_COMMIT_FREE_ON_EMPTY);
 			if (commitret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: ubc_upl_commit_range returned %d"
 				    " (uoff %d sz %ld) at off %lld file %s error was already %d\n",
@@ -2950,7 +2959,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	const int64_t stpage = (int64_t)upl_offset / PAGE_SIZE_64;
 	const int64_t endpage = ((int64_t)(upl_offset + size) / PAGE_SIZE_64) - 1LL;
 	ASSERT3S(endpage - stpage, >=, 0);
-	ASSERT3S((endpage - stpage) + 1LL, ==, pages_remaining);
+	ASSERT3S((endpage - stpage) + 1LL, <=, pages_remaining);
 	for (int64_t i = endpage; i >= stpage; i--) {
 		if (upl_valid_page(pl, i) ||
 		    upl_dirty_page(pl, i)) {
@@ -3508,11 +3517,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    f_start_of_upl, f_end_of_upl, fsname, fname);
-		/*
-		 * We are not obliged to abort these pages; the kernel
-		 * will do so automatically thanks to the FREE_ON_EMPTY semantics
-		 * invoked below.
-		 */
+		int abort_tail = ubc_upl_abort_range(upl, start_of_tail, end_of_tail,
+		    UPL_ABORT_FREE_ON_EMPTY);
+		ASSERT3S(abort_tail, ==, KERN_SUCCESS);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
 
