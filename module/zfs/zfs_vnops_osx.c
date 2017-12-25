@@ -2426,7 +2426,7 @@ inc_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
 		    " fs %s file %s\n",
 		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
 	}
-        if (zp->z_in_pageout++ != 1) {
+        if (++zp->z_in_pageout != 1) {
 		printf("ZFS: %s:%d z_in_pageout expected inc to 1 is now %d"
 		    " for fs %s file %s\n",
 		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
@@ -2441,7 +2441,7 @@ dec_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
 		    " for fs %s file %s\n",
 		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
 	}
-	if (zp->z_in_pageout-- != 0) {
+	if (--zp->z_in_pageout != 0) {
 		printf("ZFS: %s:%d: z_in_pageout expected to be 0 after dec"
 		    " is now %d for fs %s file %s\n",
 		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
