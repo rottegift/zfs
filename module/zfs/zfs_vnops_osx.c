@@ -110,6 +110,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_upl_iosync;
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
+	kstat_named_t pageoutv2_invalid_tail_err;
 	kstat_named_t pageoutv2_present_pages_aborted;
 	kstat_named_t pageoutv2_precious_pages_cleaned;
 	kstat_named_t pageoutv2_dirty_pages_blustered;
@@ -137,6 +138,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
+	{ "pageoutv2_invalid_tail_err",        KSTAT_DATA_UINT64 },
 	{ "pageoutv2_present_pages_aborted",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_cleaned",  KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
@@ -3512,11 +3514,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	const off_t f_start_of_upl = ap->a_f_offset;
 	const off_t f_end_of_upl = f_start_of_upl + ap->a_size;
 	const int pages_in_upl = howmany(ap->a_size, PAGE_SIZE_64);
-	int upl_create_passes = 0;
 
-create_upl:
-
-	upl_create_passes++;
 	upl = NULL;
 	pl = NULL;
 
@@ -3596,26 +3594,18 @@ create_upl:
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    f_start_of_upl, f_end_of_upl, fsname, fname, abort_tail);
-		if (abort_tail == KERN_SUCCESS) {
-			VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
-		} else {
+		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
+		if (abort_tail != KERN_SUCCESS) {
 			int abortall_after_tail_fail = ubc_upl_abort(upl,
 			    UPL_ABORT_FREE_ON_EMPTY);
 			ASSERT3S(abortall_after_tail_fail, ==, KERN_SUCCESS);
 			printf("ZFS: %s:%d: aborted_all (retval %d)"
 			    " going back to create_upl (foff %lld, sz %ld) for"
-			    " fs %s file %s (pass %d) (new size %ld)\n", __func__, __LINE__,
+			    " fs %s file %s (XXX continuing)\n", __func__, __LINE__,
 			    abortall_after_tail_fail,
 			    ap->a_f_offset, ap->a_size,
-			    fsname, fname, upl_create_passes,
-			    ap->a_size - (upl_pages_dismissed * PAGE_SIZE));
-			ap->a_size -= (upl_pages_dismissed * PAGE_SIZE);
-			if (ap->a_size > 0) {
-				goto create_upl;
-			} else {
-				ASSERT3S(ap->a_size, >, 0);
-				goto pageout_done;
-			}
+			    fsname, fname);
+			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
 		}
 	}
 
