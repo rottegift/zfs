@@ -2196,7 +2196,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		 * as necessary
 		 */
 		if (spl_ubc_is_mapped(vp, NULL)) {
-			printf("ZFS: %s:%d: mapped file (write? %d) old: %lld new: %lld name: %s fs: %s\n",
+			dprintf("ZFS: %s:%d: mapped file (write? %d) old: %lld new: %lld name: %s fs: %s\n",
 			    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
 			    ubc_getsize(vp), end, zp->z_name_cache,
 			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
