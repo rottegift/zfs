@@ -3056,7 +3056,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
 
-	void *safebuf = kmem_zalloc(write_size, KM_SLEEP);
+	void *safebuf = zio_data_buf_alloc(write_size);
 
 	bcopy(pvaddr[upl_offset], safebuf, write_size);
 
@@ -3090,7 +3090,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, write_size, safebuf, tx);
 
-	kmem_free(safebuf, write_size);
+	zio_data_buf_free(safebuf, write_size);
 
 	/* update SA and finish off transaction */
         if (error == 0) {
