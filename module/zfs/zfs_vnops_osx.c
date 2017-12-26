@@ -3474,15 +3474,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, secs);
 	}
 
-	/* extend file if necessary */
-	extern int zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl);
-	error = zfs_write_maybe_extend_file(zp, ap->a_f_offset, ap->a_size, rl);
+	/* extend file if necessary, but not if we have re-entered */
+	if (had_map_lock_at_entry == B_TRUE) {
+		extern int zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl);
+		error = zfs_write_maybe_extend_file(zp, ap->a_f_offset, ap->a_size, rl);
 
-	if (error) {
+		if (error) {
 		ZFS_EXIT(zfsvfs);
                 printf("ZFS: %s:%d: (extend fail) returning error %d fs %s file %s\n",
 		    __func__, __LINE__, error, fsname, fname);
 		goto pageout_done;
+		}
 	}
 
 	/*
@@ -3498,6 +3500,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	    (end_size > zp->z_blksz &&
 		((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
 		    !dmu_write_is_safe(zp, woff, end_size)))) {
+
+		/* This shouldn't happen */
+		ASSERT3S(had_map_lock_at_entry, !=, B_TRUE);
 
 		uint64_t new_blksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
