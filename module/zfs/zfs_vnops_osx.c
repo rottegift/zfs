@@ -2479,14 +2479,26 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		    __func__, __LINE__, off, size, zp->z_name_cache);
 		return (EINVAL);
 	}
+
+	caddr_t va;
+
+	if (ubc_upl_map(upl, (vm_offset_t *)&va) != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: ubc_upl_map failed, file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
+		err = EINVAL;
+		goto out;
+	}
+
 	/*
-	 * We can't leave this function without either calling upl_commit or
-	 * upl_abort. So use the non-error version.
+	 * We can't leave this function without either calling
+	 * ubc_upl_unmap then upl_commit or upl_abort. So use the
+	 * non-error version.
 	 */
 	ZFS_ENTER_NOERROR(zfsvfs);
 	if (zfsvfs->z_unmounted) {
 		printf("ZFS: %s:%d: dumping pages on z_unmounted, uploff %ld foff %lld sz %ld file %s\n",
 		    __func__, __LINE__, upl_offset, off, size, zp->z_name_cache);
+		(void) ubc_upl_unmap(upl);
 		if (!(flags & UPL_NOCOMMIT))
 			(void) ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_DUMP_PAGES|UPL_ABORT_FREE_ON_EMPTY);
@@ -2496,6 +2508,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	if (zp->z_sa_hdl == NULL) {
 		printf("ZFS: %s:%d: abort on no z_sa_hdl, uploff %ld foff %lld sz %ld file %s\n",
 		    __func__, __LINE__, upl_offset, off, size, zp->z_name_cache);
+		(void) ubc_upl_unmap(upl);
 		if (!(flags & UPL_NOCOMMIT))
 			(void) ubc_upl_abort_range(upl, upl_offset, size,
 			    UPL_ABORT_FREE_ON_EMPTY);
@@ -2512,6 +2525,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 
 	if (len <= 0) {
 		ASSERT3S(len, <=, 0);
+		(void) ubc_upl_unmap(upl);
 		if (!(flags & UPL_NOCOMMIT))
 			(void) ubc_upl_abort(upl, UPL_ABORT_DUMP_PAGES|UPL_ABORT_FREE_ON_EMPTY);
 		err = EINVAL;
@@ -2522,6 +2536,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
 		printf("ZFS: %s:%d: read-only filesystem for file %s\n",
 		    __func__, __LINE__, zp->z_name_cache);
+		(void) ubc_upl_unmap(upl);
 		if (!(flags & UPL_NOCOMMIT)) {
 			ASSERT3S(len, ==, size);
 			printf("ZFS: %s:%d: aborting UPL range [%lu..%ld] for read-only"
@@ -2543,6 +2558,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	ASSERT0(len & PAGE_MASK);
 	if (off < 0 || off >= filesz || (off & PAGE_MASK_64) ||
 	    (len & PAGE_MASK)) {
+		(void) ubc_upl_unmap(upl);
 		if (!(flags & UPL_NOCOMMIT)) {
 			ASSERT3S(len, ==, size);
 			printf("ZFS: %s:%d: aborting UPL [%lu..%ld] out of range or unaligned"
@@ -2589,6 +2605,7 @@ top:
 	tx = dmu_tx_create(zfsvfs->z_os);
 	if (!tx) {
 		printf("ZFS: %s:%d: zfs_vnops_osx: NULL TX encountered!\n", __func__, __LINE__);
+		(void) ubc_upl_unmap(upl);
 		if (!(flags & UPL_NOCOMMIT))
 			ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 		err = EINVAL;
@@ -2612,15 +2629,7 @@ top:
 		dmu_tx_abort(tx);
 		printf("ZFS: %s:%d, dmu_tx_assign failed, file %s\n",
 		    __func__, __LINE__, zp->z_name_cache);
-		goto out;
-	}
-
-	caddr_t va;
-
-	if (ubc_upl_map(upl, (vm_offset_t *)&va) != KERN_SUCCESS) {
-		printf("ZFS: %s:%d: ubc_upl_map failed, file %s\n",
-		    __func__, __LINE__, zp->z_name_cache);
-		err = EINVAL;
+		(void) ubc_upl_unmap(upl);
 		goto out;
 	}
 
@@ -2668,7 +2677,7 @@ top:
 		pages_written++;
 	}
 
-	ubc_upl_unmap(upl);
+	(void) ubc_upl_unmap(upl);
 
 	VNOPS_OSX_STAT_INCR(pageoutv1_pages, pages_written);
 
