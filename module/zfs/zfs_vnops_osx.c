@@ -3757,7 +3757,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t start_of_range = pg_index * PAGE_SIZE_64;
 			const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
 			const off_t pages_in_range = page_past_end_of_range - pg_index;
-			const off_t last_page_in_range = pg_index + pages_in_range - 1;
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			if (xxxbleat) printf("ZFS: %s:%d: aborting absent upl bytes [%lld..%lld] (%lld pages)"
@@ -3765,17 +3764,21 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
-			if (last_page_in_range == upl_end_pg) {
-				if (xxxbleat) printf("ZFS: %s:%d: as aborting last UPL page, unmapping fs %s file %s\n",
-				    __func__, __LINE__, fsname, fname);
-				const int unmapret = ubc_upl_unmap(upl);
-				if (unmapret != KERN_SUCCESS) {
-					printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
-					    " fs %s file %s\n", __func__, __LINE__, unmapret,
-					    f_start_of_upl, f_end_of_upl, fsname, fname);
+			if (page_past_end_of_range > upl_end_pg) {
+				if (xxxbleat) printf("ZFS: %s:%d: as aborting last UPL page, unmapping"
+				    " fs %s file %s (unmapped %d)\n",
+				    __func__, __LINE__, fsname, fname, mapped);
+				ASSERT3S(mapped, !=, B_FALSE);
+				if (mapped) {
+					const int unmapret = ubc_upl_unmap(upl);
+					if (unmapret != KERN_SUCCESS) {
+						printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
+						    " fs %s file %s\n", __func__, __LINE__, unmapret,
+						    f_start_of_upl, f_end_of_upl, fsname, fname);
+					}
+					error = unmapret;
+					mapped = B_FALSE;
 				}
-				error = unmapret;
-				mapped = B_FALSE;
 			}
 			const int abortret = ubc_upl_abort_range(upl, start_of_range, end_of_range,
 			    UPL_ABORT_FREE_ON_EMPTY);
@@ -3821,7 +3824,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
                         const off_t start_of_range = pg_index * PAGE_SIZE_64;
                         const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
                         const off_t pages_in_range = page_past_end_of_range - pg_index;
-			const off_t last_page_in_range = pg_index + pages_in_range - 1;
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			if (xxxbleat) printf("ZFS: %s:%d committing precious (present-but-not-dirty) upl bytes"
@@ -3829,17 +3831,22 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
-			if (last_page_in_range == upl_end_pg) {
-                                if (xxxbleat) printf("ZFS: %s:%d: as committing last UPL page, unmapping fs %s file %s\n",
-                                    __func__, __LINE__, fsname, fname);
-                                const int unmapret = ubc_upl_unmap(upl);
-                                if (unmapret != KERN_SUCCESS) {
-                                        printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
-                                            " fs %s file %s\n", __func__, __LINE__, unmapret,
-                                            f_start_of_upl, f_end_of_upl, fsname, fname);
-                                }
-                                error = unmapret;
-				mapped = B_FALSE;
+			if (page_past_end_of_range > upl_end_pg) {
+                                if (xxxbleat) printf("ZFS: %s:%d: as committing last UPL page, unmapping"
+				    " fs %s file %s (mapped %d)\n",
+                                    __func__, __LINE__, fsname, fname, mapped);
+				ASSERT3S(mapped, !=, B_FALSE);
+				if (mapped) {
+					const int unmapret = ubc_upl_unmap(upl);
+					if (unmapret != KERN_SUCCESS) {
+						printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
+						    " fs %s file %s\n", __func__, __LINE__, unmapret,
+						    f_start_of_upl, f_end_of_upl, fsname, fname);
+						if (!error)
+							error = unmapret;
+					}
+					mapped = B_FALSE;
+				}
                         }
 			const int commit_precious_flags = UPL_COMMIT_FREE_ON_EMPTY
 			    | UPL_COMMIT_CLEAR_PRECIOUS;
@@ -3861,13 +3868,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 				goto pageout_done;
 			} else {
-				printf("ZFS: %s:%d: successfully committed precious (unmap %d)"
+				printf("ZFS: %s:%d: successfully committed precious (mapped %d)"
 				    " UPL range [%lld..%lld] of file range [%lld..%lld] fs %s file %s"
-				    " pg_index %lld page_past_end_of_range %lld\n",
+				    " pg_index %lld page_past_end_of_range %lld upl_end_pg %lld (done: %d)\n",
 				    __func__, __LINE__, mapped,
 				    start_of_range, end_of_range,
 				    f_start_of_upl, f_end_of_upl,
-				    fsname, fname, pg_index, page_past_end_of_range);
+				    fsname, fname, pg_index, page_past_end_of_range, upl_end_pg,
+				    page_past_end_of_range > upl_end_pg);
+				xxxbleat = B_TRUE;
 			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_cleaned, pages_in_range);
 			pg_index = page_past_end_of_range;
@@ -3921,13 +3930,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    (end_of_range - start_of_range), filesize, a_flags, ap,
 			    &v_addr, pages_remaining, &bl_unmapped);
 
+			/*
+			 * bluster_pageout only unamps if it has the last page in the UPL;
+			 * if it returns error, we must unmap below
+			 */
 			EQUIV(last_page_in_range == upl_end_pg, bl_unmapped == B_TRUE);
 			/* post-bluster test if we should set mapped flag false */
-			if (last_page_in_range == upl_end_pg) {
+			if (page_past_end_of_range > upl_end_pg) {
 				ASSERT3S(bl_unmapped, ==, B_TRUE);
                                 if (xxxbleat) printf("ZFS: %s:%d: as bluster_pageout handed last UPL page,"
-				    " it must have unmapped fs %s file %s\n",
-                                    __func__, __LINE__, fsname, fname);
+				    " it must have unmapped fs %s file %s (mapped %d : F) (bl_unmapped %d : T)\n",
+                                    __func__, __LINE__, fsname, fname, mapped, bl_unmapped);
 				mapped = B_FALSE;
 			}
 			ASSERT3S(mapped, ==, !bl_unmapped);
@@ -3935,23 +3948,31 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			if (error != 0) {
 				printf("ZFS: %s:%d: bluster_pageout error %d for"
 				    " UPL range [%lld..%lld], for file range [%lld..%lld], "
-				    " pages_remaining %lld, fsz %lld, fs %s file %s (mapped %d)"
-				    " last_page_in_range %lld upl_end_pg %lld\n",
+				    " pages_remaining %lld, fsz %lld, fs %s file %s"
+				    " last_page_in_range %lld upl_end_pg %lld (mapped %d bl_unmapped %d)\n",
 				    __func__, __LINE__, error,
 				    start_of_range, end_of_range,
 				    f_start_of_upl, f_end_of_upl, pages_remaining,
-				    filesize, fsname, fname, mapped,
-				    last_page_in_range, upl_end_pg);
+				    filesize, fsname, fname,
+				    last_page_in_range, upl_end_pg, mapped, bl_unmapped);
 				/* bluster may not have unmapped */
 				if (mapped) {
+					extern void IOSleep(unsigned milliseconds);
+					IOSleep(10);
 					mapped = B_FALSE;
 					int umapret_err = ubc_upl_unmap(upl);
 					ASSERT3S(umapret_err, ==, KERN_SUCCESS);
 				}
 				if (last_page_in_range < upl_end_pg) {
 					if (bl_unmapped == B_FALSE) {
-						ubc_upl_abort(upl,
+						printf("ZFS: %s:%d: aborting UPL range [%lld..%lld]"
+						    " of fs %s file %s\n", __func__, __LINE__,
+						    end_of_range, upl_end_pg * PAGE_SIZE,
+						    fsname, fname);
+						int aret = ubc_upl_abort_range(upl,
+						    end_of_range, upl_end_pg * PAGE_SIZE,
 						    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+						ASSERT3S(aret, ==, KERN_SUCCESS);
 					} else {
 						printf("ZFS: %s:%d: WOAH, bl_unmapped true but"
 						    " %lld < %lld fs %s file %s\n", __func__, __LINE__,
@@ -3963,14 +3984,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			} else if (xxxbleat) {
 				printf("ZFS: %s:%d: bluster_pageout OK for"
 				    " UPL range [%lld..%lld], for file range [%lld..%lld], "
-				    " pages_remaining %lld, fsz %lld, fs %s file %s (mapped %d)"
-				    " last_page_in_range %lld upl_end_pg %lld\n",
+				    " pages_remaining %lld, fsz %lld, fs %s file %s"
+				    " (mapped %d bl_unmapped %d)"
+				    " last_page_in_range %lld upl_end_pg %lld"
+				    " pg_index %lld, page_past_end_of_range %d (done: %d)\n",
 				    __func__, __LINE__,
 				    start_of_range, end_of_range,
 				    f_start_of_upl, f_end_of_upl, pages_remaining,
-				    filesize, fsname, fname, mapped,
-				    last_page_in_range, upl_end_pg);
-
+				    filesize, fsname, fname, mapped, bl_unmapped,
+				    last_page_in_range, upl_end_pg,
+				    pg_index, page_past_end_of_range,
+				    page_past_end_of_range > upl_end_pg);
 			}
 
 			VNOPS_OSX_STAT_INCR(pageoutv2_dirty_pages_blustered, pages_in_range);
