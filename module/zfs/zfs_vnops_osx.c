@@ -3633,8 +3633,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		 * empty pages, and they are "donated" to the vm map, which
 		 * disposes of them at unmap time.
 		 */
-		int abort_tail = ubc_upl_abort_range(upl, start_of_tail, end_of_tail,
-		    UPL_ABORT_FREE_ON_EMPTY);
+#ifdef REALLY_ABORT_ABSENT
+		int abort_tail = ubc_upl_abort_range(upl, start_of_tail, end_of_tail, 0);
+#else
+		int abort_tail = KERN_SUCCESS;
+#endif
 		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
 		    " [%lld..%lld] fs %s file %s (abort_tail err %d)\n",
 		    __func__, __LINE__, upl_pages_dismissed,
@@ -3780,8 +3783,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 					mapped = B_FALSE;
 				}
 			}
-			const int abortret = ubc_upl_abort_range(upl, start_of_range, end_of_range,
-			    UPL_ABORT_FREE_ON_EMPTY);
+#ifdef REALLY_ABORT_ABSENT
+			const int abortret = ubc_upl_abort_range(upl, start_of_range, end_of_range, 0);
+#else
+			const int abortret = KERN_SUCCESS;
+#endif
 			if (abortret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d aborting UPL range [%lld, %lld] of UPL"
 				    " [%lld..%lld] fs %s file %s (mapped %d)"
