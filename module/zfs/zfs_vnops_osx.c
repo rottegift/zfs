@@ -3377,13 +3377,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 *
 	 * Eventually we have ordered: [1] rl [2] z_map_lock.
 	 */
-	boolean_t had_map_lock_at_entry = B_FALSE;
+	boolean_t mut_had_map_lock_at_entry = B_FALSE;
 	if (rw_write_held(&zp->z_map_lock)) {
-		dprintf("ZFS: %s:%d: dropping held-on-entry z_map_lock for fs %s file %s\n",
-		    __func__, __LINE__, fsname, fname);
-		rw_exit(&zp->z_map_lock);
-		had_map_lock_at_entry = B_TRUE;
+		printf("ZFS: %s:%d: z_map_lock held-on-entry for [%lld..%lld] (sz %ld)"
+		    " fs %s file %s\n",
+		    __func__, __LINE__,
+		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    ap->a_size,
+		    fsname, fname);
+		mut_had_map_lock_at_entry = B_TRUE;
 	}
+	const boolean_t had_map_lock_at_entry = mut_had_map_lock_at_entry;
 
 	/*
 	 * We need to lock whole pages, because we have to lock
@@ -3399,6 +3403,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	inc_z_in_pageout(zp, fsname, fname);
 
 	hrtime_t print_time = gethrtime() + SEC2NSEC(1);
+	const hrtime_t abort_time = gethrtime() + SEC2NSEC(10);
 	int secs = 0;
 
 	extern void IOSleep(unsigned milliseconds); // yields thread
@@ -3408,7 +3413,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
 
+	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
+
 	while(!rw_write_held(&zp->z_map_lock)){
+		ASSERT3S(had_map_lock_at_entry, ==, B_FALSE);
 		if (secs == 0)
 			secs = 1;
 		if (rw_tryenter(&zp->z_map_lock, RW_WRITER))
@@ -3417,17 +3425,40 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		if (cur_time > print_time) {
 			secs++;
 			printf("ZFS: %s:%d: looping for z_map_lock for %d sec"
-			    " (held by %s) fs %s file %s\n", __func__, __LINE__, secs,
+			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pageout %d)"
+			    " (syncer active? %d curthread? %d)\n",
+			    __func__, __LINE__, secs,
                             (zp->z_map_lock_holder != NULL)
                             ? zp->z_map_lock_holder
                             : "(NULL)",
-			    fsname, fname);
+			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			    ap->a_size,
+			    fsname, fname, zp->z_in_pageout,
+			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread);
 			print_time = cur_time + SEC2NSEC(1);
 			zfs_range_unlock(rl);
-			printf("ZFS: %s:%d range lock dropedit for [%lld, %ld] for fs %s file %s\n",
-			    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname);
-			IOSleep(1); // we hold no locks, so let work be done
+			printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
+			    " (z_in_pageout %d)\n",
+			    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname,
+			    zp->z_in_pageout);
+			IOSleep(10); // we hold no locks, so let work be done
 			rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
+		}
+		if (cur_time > abort_time) {
+			printf("ZFS: %s:%d: abandoning locking attempt after %d secs"
+			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pageout %d)"
+			    " (syncer active? %d curthread? %d)\n",
+			    __func__, __LINE__, secs,
+			    (zp->z_map_lock_holder != NULL)
+			    ? zp->z_map_lock_holder
+			    : "(NULL)",
+			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			    ap->a_size,
+			    fsname, fname, zp->z_in_pageout,
+			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread);
+			zfs_range_unlock(rl);
+			error = EDEADLK;
+			goto exit_abort;
 		}
 		IODelay(1);
 	}
