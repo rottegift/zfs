@@ -2205,7 +2205,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
-	ASSERT(vn_has_cached_data(vp));
 	if (!vn_has_cached_data(vp)) {
 		printf("ZFS: %s:%d: file without vn_has_cached_data(vp) (is_mapped %d) (file_sz %lld):"
 		    " fs %s file %s\n",
@@ -2365,12 +2364,12 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		len -= readlen;
 	}
 
-	(void) ubc_upl_unmap(upl); // return results aren't interesting
-
 	if (bytes_read > 0) {
 		uint64_t pgs = 1ULL + atop_64(bytes_read);
 		VNOPS_OSX_STAT_INCR(pagein_pages, pgs);
 	}
+
+	(void) ubc_upl_unmap(upl); // return results aren't interesting
 
 	if (!(flags & UPL_NOCOMMIT)) {
 		if (error) {
@@ -2393,6 +2392,13 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    " (uoff %d sz %ld) at off %lld file %s error was already %d\n",
 				    __func__, __LINE__, commitret, upl_offset, ap->a_size, off,
 				    zp->z_name_cache, error);
+			} else if (need_rl_unlock == B_FALSE
+			    || need_z_lock == B_FALSE
+			    || zp->z_in_pageout > 0) {
+				printf("ZFS: %s:%d: successfully committed (uploff %u sz %ld)"
+				    " at [%lld..%lld] fs %s file %s (no locks case)\n",
+				    __func__, __LINE__, upl_offset, ap->a_size,
+				    off, off+ap->a_size, fsname, fname);
 			}
 		}
 	}
@@ -3578,6 +3584,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 
 	int upl_pages_dismissed = 0;
+	boolean_t xxxbleat = B_FALSE;
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
 		if (upl_valid_page(pl, --page_index)) {
@@ -3645,6 +3652,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				if (upl_valid_page(pl, pg)) {
 					printf("ZFS: %s:%d: XXX phew valid page at %d\n",
 					    __func__, __LINE__, pg);
+					xxxbleat = B_TRUE;
 					break;
 				}
 				if (pg == 0) {
@@ -3652,6 +3660,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 					    " a valid page in UPL [%lld...%lld] fs %s file %s\n",
 					    __func__, __LINE__, f_start_of_upl, f_end_of_upl,
 					    fsname, fname);
+					extern void IOSleep(unsigned milliseconds);
+					IOSleep(10);
 					if (mapped) {
 						mapped = B_FALSE;
 						int umapret_err = ubc_upl_unmap(upl);
@@ -3750,13 +3760,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t last_page_in_range = pg_index + pages_in_range - 1;
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			dprintf("ZFS: %s:%d: aborting absent upl bytes [%lld..%lld] (%lld pages)"
+			if (xxxbleat) printf("ZFS: %s:%d: aborting absent upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
 			if (last_page_in_range == upl_end_pg) {
-				dprintf("ZFS: %s:%d: as aborting last UPL page, unmapping fs %s file %s\n",
+				if (xxxbleat) printf("ZFS: %s:%d: as aborting last UPL page, unmapping fs %s file %s\n",
 				    __func__, __LINE__, fsname, fname);
 				const int unmapret = ubc_upl_unmap(upl);
 				if (unmapret != KERN_SUCCESS) {
@@ -3814,13 +3824,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t last_page_in_range = pg_index + pages_in_range - 1;
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			dprintf("ZFS: %s:%d committing precious (present-but-not-dirty) upl bytes"
+			if (xxxbleat) printf("ZFS: %s:%d committing precious (present-but-not-dirty) upl bytes"
 			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
 			if (last_page_in_range == upl_end_pg) {
-                                dprintf("ZFS: %s:%d: as committing last UPL page, unmapping fs %s file %s\n",
+                                if (xxxbleat) printf("ZFS: %s:%d: as committing last UPL page, unmapping fs %s file %s\n",
                                     __func__, __LINE__, fsname, fname);
                                 const int unmapret = ubc_upl_unmap(upl);
                                 if (unmapret != KERN_SUCCESS) {
@@ -3885,7 +3895,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const off_t last_page_in_range = pg_index + pages_in_range - 1;
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			dprintf("ZFS: %s:%d bluster_pageout dirty upl bytes"
+			if (xxxbleat) printf("ZFS: %s:%d bluster_pageout dirty upl bytes"
 			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%lld pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
@@ -3915,7 +3925,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			/* post-bluster test if we should set mapped flag false */
 			if (last_page_in_range == upl_end_pg) {
 				ASSERT3S(bl_unmapped, ==, B_TRUE);
-                                dprintf("ZFS: %s:%d: as bluster_pageout handed last UPL page,"
+                                if (xxxbleat) printf("ZFS: %s:%d: as bluster_pageout handed last UPL page,"
 				    " it must have unmapped fs %s file %s\n",
                                     __func__, __LINE__, fsname, fname);
 				mapped = B_FALSE;
@@ -3950,6 +3960,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 					}
 				}
 				goto pageout_done;
+			} else if (xxxbleat) {
+				printf("ZFS: %s:%d: bluster_pageout OK for"
+				    " UPL range [%lld..%lld], for file range [%lld..%lld], "
+				    " pages_remaining %lld, fsz %lld, fs %s file %s (mapped %d)"
+				    " last_page_in_range %lld upl_end_pg %lld\n",
+				    __func__, __LINE__,
+				    start_of_range, end_of_range,
+				    f_start_of_upl, f_end_of_upl, pages_remaining,
+				    filesize, fsname, fname, mapped,
+				    last_page_in_range, upl_end_pg);
+
 			}
 
 			VNOPS_OSX_STAT_INCR(pageoutv2_dirty_pages_blustered, pages_in_range);
@@ -3978,7 +3999,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	dec_z_in_pageout(zp, fsname, fname);
 
 	if (a_flags & UPL_IOSYNC) {
-		dprintf("ZFS: %s:%d zil_commit file %s\n", __func__, __LINE__, zp->z_name_cache);
+		if (xxxbleat) printf("ZFS: %s:%d zil_commit file %s\n", __func__, __LINE__, zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
 	}
@@ -3986,6 +4007,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	if (error != 0) {
 		printf("ZFS: %s:%d: pageoutv2 ERROR %d [%lld..%lld] file %s filesystem %s\n",
 		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+	} else if (xxxbleat) {
+		printf("ZFS: %s:%d: pageoutv2 OK [%lld..%lld] file %s filesystem %s\n",
+		    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 	}
 
@@ -4012,6 +4037,11 @@ exit_abort:
 		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_error);
+	} else if (xxxbleat) {
+		printf("ZFS: %s:%d pageoutv2 OK, [%lld..%lld] file %s filesystem %s\n",
+		    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+
 	}
 	//VERIFY(ubc_create_upl(vp, off, len, &upl, &pl, flags) == 0);
 	//ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
