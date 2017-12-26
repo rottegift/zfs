@@ -3015,31 +3015,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	dprintf("ZFS: %s:%d: beginning DMU transaction on %s\n", __func__, __LINE__,
 	    zp->z_name_cache);
 
-	tx = dmu_tx_create(zfsvfs->z_os);
-	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-	zfs_sa_upgrade_txholds(tx, zp);
-	dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
-	error = dmu_tx_assign(tx, TXG_WAIT);
-	ASSERT3S(error, ==, 0);
-	if (error != 0) {
-		dmu_tx_abort(tx);
-		printf("ZFS: %s:%d: dmu_tx_assign error %d, aborting range [%u..%d] file %s fs %s\n",
-		    __func__, __LINE__, error, upl_offset, size, zp->z_name_cache,
-		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
-		if (unmap) {
-			ubc_upl_unmap(upl);
-			*caller_unmapped = B_TRUE;
-		}
-		if (is_clcommit) {
-			kern_return_t abort_ret = ubc_upl_abort_range(upl,
-			    upl_offset, size,
-			    UPL_ABORT_FREE_ON_EMPTY
-			    | UPL_ABORT_ERROR);
-			ASSERT3S(abort_ret, ==, KERN_SUCCESS);
-		}
-		return (error);
-	}
-
 	upl_page_info_t *pl = ubc_upl_pageinfo(upl);
 	const int64_t stpage = (int64_t)upl_offset / PAGE_SIZE_64;
 	const int64_t endpage = ((int64_t)(upl_offset + size) / PAGE_SIZE_64) - 1LL;
@@ -3075,22 +3050,47 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 				    | UPL_ABORT_ERROR);
 				ASSERT3S(abort_ret, ==, KERN_SUCCESS);
 			}
-			dmu_tx_commit(tx);
 			error = EFAULT;
 			return (error);
 		}
 	}
 	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
 
-	for (int i = endpage; i >= stpage; i--) {
-		dprintf("ZFS: %s:%d: page %d : '0x%x'\n", __func__, __LINE__, i,
-		    *pvaddr[i*PAGE_SIZE]);
+	void *safebuf = kmem_zalloc(write_size, KM_SLEEP);
+
+	bcopy(pvaddr[upl_offset], safebuf, write_size);
+
+	tx = dmu_tx_create(zfsvfs->z_os);
+	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
+	zfs_sa_upgrade_txholds(tx, zp);
+	dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
+	error = dmu_tx_assign(tx, TXG_WAIT);
+	ASSERT3S(error, ==, 0);
+	if (error != 0) {
+		dmu_tx_abort(tx);
+		printf("ZFS: %s:%d: dmu_tx_assign error %d, aborting range [%u..%d] file %s fs %s\n",
+		    __func__, __LINE__, error, upl_offset, size, zp->z_name_cache,
+		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+		if (unmap) {
+			ubc_upl_unmap(upl);
+			*caller_unmapped = B_TRUE;
+		}
+		if (is_clcommit) {
+			kern_return_t abort_ret = ubc_upl_abort_range(upl,
+			    upl_offset, size,
+			    UPL_ABORT_FREE_ON_EMPTY
+			    | UPL_ABORT_ERROR);
+			ASSERT3S(abort_ret, ==, KERN_SUCCESS);
+		}
+		return (error);
 	}
 
 	dprintf("ZFS: %s:%d: dmu_write %lld bytes (of %d) from pvaddr[%u] to offset %lld in file %s\n",
 	    __func__, __LINE__, write_size, size, upl_offset, f_offset, zp->z_name_cache);
 
-	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, write_size, pvaddr[upl_offset], tx);
+	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, write_size, safebuf, tx);
+
+	kmem_free(safebuf, write_size);
 
 	/* update SA and finish off transaction */
         if (error == 0) {
