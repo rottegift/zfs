@@ -113,6 +113,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_invalid_tail_err;
 	kstat_named_t pageoutv2_present_pages_aborted;
 	kstat_named_t pageoutv2_precious_pages_cleaned;
+	kstat_named_t pageoutv2_precious_pages_failed;
 	kstat_named_t pageoutv2_dirty_pages_blustered;
 	kstat_named_t pageoutv2_error;
 	kstat_named_t pageoutv1_pages;
@@ -141,6 +142,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_invalid_tail_err",        KSTAT_DATA_UINT64 },
 	{ "pageoutv2_present_pages_aborted",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_cleaned",  KSTAT_DATA_UINT64 },
+	{ "pageoutv2_precious_pages_failed",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_error",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
@@ -3859,20 +3861,48 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
 			if (commit_precious_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: ERROR %d committing UPL range [%lld, %lld] of UPL"
-                                    " [%lld..%lld] fs %s file %s (mapped %d)\n", __func__, __LINE__,
-				    commit_precious_ret,
-                                    start_of_range, end_of_range,
-				    f_start_of_upl, f_end_of_upl,
-				    fsname, fname, mapped);
-				error = commit_precious_ret;
-				if (mapped) {
+				/*
+				 * This is an error there is still a present page
+				 * at a higher page index in this UPL, but is OK
+				 * if the pages are at the end of the UPL and we
+				 * have received KERN_FAILURE (error 5) indicating
+				 * that the UPL range does not include these pages
+				 * (which is OK after unmapping).
+				 */
+				VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_failed, pages_in_range);
+				if (mapped || commit_precious_ret != KERN_FAILURE) {
+					printf("ZFS: %s:%d: ERROR %d committing (precious) UPL range"
+					    " [%lld, %lld] of UPL (0..%lld..%ld) at"
+					    " [%lld..%lld] fs %s file %s (mapped %d) exiting\n",
+					    __func__, __LINE__,
+					    commit_precious_ret,
+					    start_of_range, end_of_range,
+					    trimmed_upl_size, ap->a_size,
+					    f_start_of_upl, f_end_of_upl,
+					    fsname, fname, mapped);
+					error = commit_precious_ret;
 					mapped = B_FALSE;
-					int umapret_err = ubc_upl_unmap(upl);
+					const int umapret_err = ubc_upl_unmap(upl);
 					ASSERT3S(umapret_err, ==, KERN_SUCCESS);
+					const int fullabort_err = ubc_upl_abort(upl,
+					    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+					ASSERT3S(fullabort_err, ==, KERN_SUCCESS);
+					goto pageout_done;
+				} else {
+					xxxbleat = B_TRUE;
+					printf("ZFS: %s:%d: (precious) range at end of trimmed UPL"
+					    " could not be committed (result %d == 5 is OK,"
+					    " mapped %d == 0 is OK) range [%lld..%lld] of UPL range"
+					    " (0..%lld..%ld), at [%lld..%lld] fs %s file %s (done: %d)\n",
+					    __func__, __LINE__, commit_precious_ret,
+					    mapped, start_of_range, end_of_range,
+					    trimmed_upl_size, ap->a_size,
+					    f_start_of_upl, f_end_of_upl,
+					    fsname, fname,
+					    page_past_end_of_range > upl_end_pg);
+					pg_index = page_past_end_of_range;
+					continue;
 				}
-				ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
-				goto pageout_done;
 			} else {
 				printf("ZFS: %s:%d: successfully committed precious (mapped %d)"
 				    " UPL range [%lld..%lld] of file range [%lld..%lld] fs %s file %s"
