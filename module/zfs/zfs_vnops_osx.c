@@ -2172,8 +2172,23 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	if (upl == (upl_t)NULL)
 		panic("zfs_vnop_pagein: no upl!");
 
+	int ubc_map_retval = 0;
+	if ((ubc_map_retval = ubc_upl_map(upl, (vm_offset_t *)&vaddr)) != KERN_SUCCESS) {
+		ASSERT3S(ubc_map_retval, ==, KERN_SUCCESS);
+		printf("%s:%d error %d failed to ubc_upl_map for file %s\n", __func__, __LINE__,
+		    ubc_map_retval, zp->z_name_cache);
+		if (!(flags & UPL_NOCOMMIT)) {
+			int aret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
+				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+			ASSERT3S(aret, ==, KERN_SUCCESS);
+		}
+		ZFS_EXIT(zfsvfs);
+		return (ENOMEM);
+	}
+
 	if (len <= 0) {
 		printf("ZFS: %s:%d: invalid size %ld upl_off %d\n", __func__, __LINE__, len, upl_offset);
+		(void) ubc_upl_unmap(upl);
 		if (!(flags & UPL_NOCOMMIT)) {
 			int abort_unknown_ret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
 				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
@@ -2201,7 +2216,12 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	/* can't fault passed EOF */
 	if ((off < 0) || (off >= file_sz) ||
 		(len & PAGE_MASK) || (upl_offset & PAGE_MASK)) {
-		dprintf("passed EOF or size error\n");
+		if (flags & UPL_NOCOMMIT) {
+			printf("ZFS: %s:%d passed EOF or size error"
+			    " (off %lld, fsz %lld) fs %s file %s\n",
+			    __func__, __LINE__, off, file_sz, fsname, fname);
+		}
+		(void) ubc_upl_unmap(upl);
 		ZFS_EXIT(zfsvfs);
 		if (!(flags & UPL_NOCOMMIT)) {
 			printf("ZFS: %s:%d: aborting out-of-range UPL (off %lld file_sz %lld)"
@@ -2239,22 +2259,24 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	rl_t *rl;
 
 	if (zp->z_in_pageout > 0) {
-		printf("ZFS: %s:%d: already in pageout (number %d) skipping locking for"
-		    " [%lld..%lld] (size %ld uploff %u) fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout,
+		printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
+		    " skipping locking for"
+		    " [%lld..%lld] (size %ld uploff %u) fs %s file %s (nocommit? %d)\n",
+		    __func__, __LINE__, zp->z_in_pageout, rw_write_held(&zp->z_map_lock),
 		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
-		    fsname, fname);
+		    fsname, fname, flags & UPL_NOCOMMIT);
 		need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
+
 	} else if (rw_write_held(&zp->z_map_lock)) {
 		need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
 		printf("ZFS: %s:%d: lock held on entry for [%lld..%lld] (size %ld uploff %u) fs %s file %s,"
-		    " avoiding rangelocking\n",
+		    " avoiding rangelocking (nocommit? %d)\n",
 		    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
-		    fsname, fname);
+		    fsname, fname, flags & UPL_NOCOMMIT);
 	} else {
 		need_rl_unlock = B_TRUE;
 		need_z_lock = B_TRUE;
@@ -2303,21 +2325,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		VNOPS_OSX_STAT_INCR(pagein_want_lock, tries);
 	}
 
-	int ubc_map_retval = 0;
-	if ((ubc_map_retval = ubc_upl_map(upl, (vm_offset_t *)&vaddr)) != KERN_SUCCESS) {
-		ASSERT3S(ubc_map_retval, ==, KERN_SUCCESS);
-		printf("%s:%d error %d failed to ubc_upl_map for file %s\n", __func__, __LINE__,
-		    ubc_map_retval, zp->z_name_cache);
-		if (!(flags & UPL_NOCOMMIT)) {
-			int aret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
-				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
-			ASSERT3S(aret, ==, KERN_SUCCESS);
-		}
-		if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
-		if (need_rl_unlock) { zfs_range_unlock(rl); }
-		ZFS_EXIT(zfsvfs);
-		return (ENOMEM);
-	}
 
 	dprintf("vaddr %p with upl_off 0x%x\n", vaddr, upl_offset);
 	vaddr += upl_offset;
