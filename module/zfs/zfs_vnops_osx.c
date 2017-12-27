@@ -3222,6 +3222,10 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 	boolean_t do_zil_commit = B_FALSE;
 
+	if (vnode_isrecycled(vp)) {
+		return (0);
+	}
+
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
 
@@ -3230,9 +3234,6 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	/*
 	 * watch out for reentrancy!
 	 */
-
-	if (vnode_isrecycled(vp))
-		return (0);
 
 	if (flags & ZFS_UBC_FORCE_MSYNC)
 		flags &= ~(ZFS_UBC_FORCE_MSYNC);
@@ -3584,12 +3585,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		uint64_t new_blksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
 		if (zp->z_blksz < max_blksz) {
-			ASSERT(!ISP2(zp->z_blksz));
 			new_blksz = MIN(end_size,
 			    1 << highbit64(zp->z_blksz));
-			if (new_blksz == end_size) {
-				ASSERT(!ISP2(end_size));
-			}
 		} else {
 			new_blksz = MIN(end_size, max_blksz);
 		}
@@ -3601,7 +3598,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			new_blksz = new_new_blksz;
 		}
 		if (new_blksz > zp->z_blksz) {
-			printf("ZFS: %s:%d growing buffer to %llu (from %d) fs %s file %s\n",
+			dprintf("ZFS: %s:%d growing buffer to %llu (from %d) fs %s file %s\n",
 			    __func__, __LINE__, new_blksz, zp->z_blksz, fsname, fname);
 			dmu_tx_t *tx = dmu_tx_create(zfsvfs->z_os);
 			dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
@@ -3620,7 +3617,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	if (ubc_getsize(vp) < zp->z_size) {
-		printf("ZFS: %s:%d: increasing ubc size from %lld to z_size %lld for"
+		dprintf("ZFS: %s:%d: increasing ubc size from %lld to z_size %lld for"
 		    " fs %s file %s\n", __func__, __LINE__,
 		    ubc_getsize(vp), zp->z_size, fsname, fname);
 		int setsize_retval = ubc_setsize(vp, zp->z_size);
