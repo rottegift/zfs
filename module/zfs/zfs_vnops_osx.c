@@ -3243,9 +3243,9 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 		    __func__, __LINE__, zp->z_size, start, end, flags, zp->z_name_cache);
 	}
 
-	if (flags & UBC_SYNC &&
-	    is_file_clean(vp, end) == 0)
-		do_zil_commit = B_TRUE;
+	/* We don't have any work to do */
+	if (0 == is_file_clean(vp, end))
+		return (0);
 
 	ASSERT3P(zp->z_syncer_active, !=, curthread);
 
