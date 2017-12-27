@@ -118,6 +118,7 @@ extern int cluster_copy_upl_data(uio_t *, upl_t, int, int *);
 int zfs_vnop_force_formd_normalized_output = 0; /* disabled by default */
 
 typedef struct vnops_stats {
+	kstat_named_t zfs_vnops_z_syncer_active_wait;
 	kstat_named_t fill_holes_ubc_satisfied_all;
 	kstat_named_t fill_holes_rop_present_total_skip;
 	kstat_named_t fill_holes_rop_present_bytes_skipped;
@@ -155,6 +156,7 @@ typedef struct vnops_stats {
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
+	{ "zfs_vnops_z_syncer_active_wait",              KSTAT_DATA_UINT64 },
 	{ "fill_holes_ubc_satisfied_all",                KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_total_skip",           KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_bytes_skipped",        KSTAT_DATA_UINT64 },
@@ -604,7 +606,8 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	ASSERT3P(zp->z_syncer_active, !=, curthread);
 	mutex_enter(&zp->z_ubc_msync_lock);
 	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
-		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+	    VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+	    cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 	}
 	ASSERT3S(zp->z_syncer_active, ==, NULL);
 	zp->z_syncer_active = curthread;
@@ -684,6 +687,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	ASSERT3P(zp->z_syncer_active, !=, curthread);
 	mutex_enter(&zp->z_ubc_msync_lock);
 	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+	        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
 		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 	}
 	ASSERT3S(zp->z_syncer_active, ==, NULL);
@@ -886,6 +890,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
 		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 		}
 		ASSERT3S(zp->z_syncer_active, ==, NULL);
@@ -1256,8 +1261,10 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
-		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
+		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+		}
 		ASSERT3S(zp->z_syncer_active, ==, NULL);
 		zp->z_syncer_active = curthread;
 		mutex_exit(&zp->z_ubc_msync_lock);
@@ -1944,8 +1951,10 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 {
 
 	mutex_enter(&zp->z_ubc_msync_lock);
-	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
+	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+	        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
 		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+	}
 	ASSERT3S(zp->z_syncer_active, ==, NULL);
 	zp->z_syncer_active = curthread;
 	mutex_exit(&zp->z_ubc_msync_lock);
@@ -2112,8 +2121,10 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
-		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
+		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+		}
 		ASSERT3S(zp->z_syncer_active, ==, NULL);
 		zp->z_syncer_active = curthread;
 		mutex_exit(&zp->z_ubc_msync_lock);

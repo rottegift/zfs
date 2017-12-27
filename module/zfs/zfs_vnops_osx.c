@@ -1053,7 +1053,6 @@ dprintf("%s HFS_FSCTL_GET_JOURNAL_INFO\n", __func__);
 	return (error);
 }
 
-
 int
 zfs_vnop_read(struct vnop_read_args *ap)
 #if 0
