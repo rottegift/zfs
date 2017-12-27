@@ -2078,13 +2078,6 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		mutex_exit(&zp->z_ubc_msync_lock);
 		unset_syncer = B_TRUE;
 
-		if (spl_ubc_is_mapped(vp, NULL)) {
-			ASSERT3S(unset_syncer, ==, B_TRUE);
-		} else {
-			ASSERT3S(unset_syncer, ==, B_FALSE);
-		}
-
-
 		const off_t ubcsize = ubc_getsize(vp);
 		off_t target_postwrite_ubcsize;
 		boolean_t reset_ubcsize = B_FALSE;
