@@ -3253,8 +3253,8 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 		do_zil_commit = B_TRUE;
 #endif
 
-
 	ASSERT3P(zp->z_syncer_active, !=, curthread);
+	ASSERT3P(curthread, !=, NULL);
 
 	mutex_enter(&zp->z_ubc_msync_lock);
 
