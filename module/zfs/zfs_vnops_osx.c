@@ -1753,18 +1753,21 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	DECLARE_CRED_AND_CONTEXT(ap);
 	int err;
 
-	/*
-	 * Check if this znode has already been synced, freed, and recycled
-	 * by znode_pageout_func.
-	 *
-	 * XXX What is this? Substitute for Illumos vn_has_cached_data()?
-	 */
 	if (zp == NULL)
 		return (0);
 
 	zfsvfs = zp->z_zfsvfs;
 
 	if (!zfsvfs)
+		return (0);
+
+	/*
+	 * If vnode_create() puts us here, we deadlock in
+	 * memory_object_lock_request(). As vnode_isrecycled(vp) is a
+	 * snapshot indicating that the vnode is in the process of being
+	 * killed, we can use that to decide to just return 0.
+	 */
+	if (vnode_isrecycled(ap->a_vp))
 		return (0);
 
 	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
