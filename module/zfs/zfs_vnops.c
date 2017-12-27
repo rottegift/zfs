@@ -611,7 +611,6 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	mutex_exit(&zp->z_ubc_msync_lock);
 	unset_syncer = B_TRUE;
 
-
 	error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 0);
 
 	if (unset_syncer) {
@@ -680,7 +679,27 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	int upl_flags = UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT | UPL_PRECIOUS;
 
+	boolean_t unset_syncer = B_FALSE;
+
+	ASSERT3P(zp->z_syncer_active, !=, curthread);
+	mutex_enter(&zp->z_ubc_msync_lock);
+	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+	}
+	ASSERT3S(zp->z_syncer_active, ==, NULL);
+	zp->z_syncer_active = curthread;
+	mutex_exit(&zp->z_ubc_msync_lock);
+	unset_syncer = B_TRUE;
+
 	err = ubc_create_upl(vp, upl_start, upl_size, &upl, &pl, upl_flags);
+
+	if (unset_syncer) {
+		ASSERT3S(zp->z_syncer_active, ==, curthread);
+		mutex_enter(&zp->z_ubc_msync_lock);
+		zp->z_syncer_active = NULL;
+		cv_signal(&zp->z_ubc_msync_cv);
+		mutex_exit(&zp->z_ubc_msync_lock);
+	}
 
 	if (err != KERN_SUCCESS) {
 		printf("ZFS: %s:%d failed to create upl: err %d flags %d for file %s\n",
@@ -864,8 +883,25 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		int uplcflags = UPL_PRECIOUS | UPL_FILE_IO | UPL_SET_LITE;
 
+		ASSERT3P(zp->z_syncer_active, !=, curthread);
+		mutex_enter(&zp->z_ubc_msync_lock);
+		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+		}
+		ASSERT3S(zp->z_syncer_active, ==, NULL);
+		zp->z_syncer_active = curthread;
+		mutex_exit(&zp->z_ubc_msync_lock);
+		const boolean_t unset_syncer = B_TRUE;
+
 		err = ubc_create_upl(vp, cur_upl_file_offset, cur_upl_size, &upl, &pl, uplcflags);
 
+		if (unset_syncer) {
+			ASSERT3S(zp->z_syncer_active, ==, curthread);
+			mutex_enter(&zp->z_ubc_msync_lock);
+			zp->z_syncer_active = NULL;
+			cv_signal(&zp->z_ubc_msync_cv);
+			mutex_exit(&zp->z_ubc_msync_lock);
+		}
 
 		if (err != KERN_SUCCESS || (upl == NULL)) {
 			printf("ZFS: %s: failed to create upl: err %d (pass %d, curoff %lld,"
@@ -1907,6 +1943,14 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
     const off_t upl_f_off)
 {
 
+	mutex_enter(&zp->z_ubc_msync_lock);
+	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
+		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+	ASSERT3S(zp->z_syncer_active, ==, NULL);
+	zp->z_syncer_active = curthread;
+	mutex_exit(&zp->z_ubc_msync_lock);
+	const boolean_t unset_syncer = B_TRUE;
+
 	/* Modify the page: "leave pages busy
 	 * in the original object, if a page list
 	 * structure was specified." (vm_pageout.c)
@@ -1920,19 +1964,16 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	if (muplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld file %s\n",
 		    __func__, __LINE__, muplret, upl_f_off, zp->z_name_cache);
+		if (unset_syncer) {
+			ASSERT3S(zp->z_syncer_active, ==, curthread);
+			mutex_enter(&zp->z_ubc_msync_lock);
+			zp->z_syncer_active = NULL;
+			cv_signal(&zp->z_ubc_msync_cv);
+			mutex_exit(&zp->z_ubc_msync_lock);
+		}
 		return (muplret);
 	}
 	int ccupl_ioresid = recov_resid_int;
-
-	boolean_t unset_syncer = B_FALSE;
-
-	mutex_enter(&zp->z_ubc_msync_lock);
-	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
-		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-	ASSERT3S(zp->z_syncer_active, ==, NULL);
-	zp->z_syncer_active = curthread;
-	mutex_exit(&zp->z_ubc_msync_lock);
-	unset_syncer = B_TRUE;
 
 	int ccupl_retval = cluster_copy_upl_data(uio, mupl,
 	    recov_off_page_offset, &ccupl_ioresid);
