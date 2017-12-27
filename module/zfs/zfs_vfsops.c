@@ -215,7 +215,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    zp->z_name_cache);
 			return (VNODE_RETURNED);
 		}
-		if (zfsvfs && !zfsvfs->z_unmounted) {
+		if (zfsvfs && zfsvfs->z_unmounted) {
 			printf("ZFS: %s:%d: zfvfs is not mounted file %s\n", __func__, __LINE__,
 			    zp->z_name_cache);
 			return (VNODE_RETURNED);
