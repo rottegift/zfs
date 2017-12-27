@@ -1775,7 +1775,7 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 
 	if (vnode_isrecycled(ap->a_vp)
 	    || zp->z_no_fsync != B_FALSE
-	    || zp->z_in_pageout > 0
+	    || zp->z_in_pager_op > 0
 	    || zp->z_syncer_active != NULL)
 		goto zero;
 
@@ -2301,11 +2301,11 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	boolean_t need_z_lock;
 	rl_t *rl;
 
-	if (zp->z_in_pageout > 0) {
+	if (zp->z_in_pager_op > 0) {
 		printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
 		    " skipping locking for"
 		    " [%lld..%lld] (size %ld uploff %u) fs %s file %s (nocommit? %d)\n",
-		    __func__, __LINE__, zp->z_in_pageout, rw_write_held(&zp->z_map_lock),
+		    __func__, __LINE__, zp->z_in_pager_op, rw_write_held(&zp->z_map_lock),
 		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
 		    fsname, fname, flags & UPL_NOCOMMIT);
@@ -2438,7 +2438,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    zp->z_name_cache, error);
 			} else if (need_rl_unlock == B_FALSE
 			    || need_z_lock == B_FALSE
-			    || zp->z_in_pageout > 0) {
+			    || zp->z_in_pager_op > 0) {
 				printf("ZFS: %s:%d: successfully committed (uploff %u sz %ld)"
 				    " at [%lld..%lld] fs %s file %s (no locks case)\n",
 				    __func__, __LINE__, upl_offset, ap->a_size,
@@ -2478,32 +2478,36 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 }
 
 inline static void
-inc_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
+inc_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 {
-	if (zp->z_in_pageout != 0) {
-		printf("ZFS: %s:%d z_in_pageout already nonzero %d for"
+	if (zp->z_in_pager_op != 0) {
+		printf("ZFS: %s:%d z_in_pager_op already nonzero %d for"
 		    " fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+		    __func__, __LINE__, zp->z_in_pager_op, fsname, fname);
 	}
-        if (++zp->z_in_pageout != 1) {
-		printf("ZFS: %s:%d z_in_pageout expected inc to 1 is now %d"
+        if (++zp->z_in_pager_op != 1) {
+		printf("ZFS: %s:%d z_in_pager_op expected inc to 1 is now %d"
 		    " for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+		    __func__, __LINE__, zp->z_in_pager_op, fsname, fname);
+		while (zp->z_in_pager_op < 1)
+			zp->z_in_pager_op++;
 	}
 }
 
 inline static void
-dec_z_in_pageout(znode_t *zp, const char *fsname, const char *fname)
+dec_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 {
-	if (zp->z_in_pageout != 1) {
-		printf("ZFS: %s:%d: z_in_pageout expected to be 1 is %d"
+	if (zp->z_in_pager_op < 1) {
+		printf("ZFS: %s:%d: ERROR z_in_pager_op expected to be > 0, is %d"
 		    " for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
-	}
-	if (--zp->z_in_pageout != 0) {
-		printf("ZFS: %s:%d: z_in_pageout expected to be 0 after dec"
+		    __func__, __LINE__, zp->z_in_pager_op, fsname, fname);
+		zp->z_in_pager_op = 0;
+	} else  if (--zp->z_in_pager_op != 0) {
+		printf("ZFS: %s:%d: z_in_pager_op expected to be 0 after dec"
 		    " is now %d for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pageout, fsname, fname);
+		    __func__, __LINE__, zp->z_in_pager_op, fsname, fname);
+		while (zp->z_in_pager_op < 0)
+		        zp->z_in_pager_op++;
 	}
 }
 
@@ -2530,10 +2534,15 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		return (EINVAL);
 	}
 
-	/* complain if we are colliding with pageoutv2 or ubc_msync activity */
+	/*
+	 * complain if we are colliding with pageoutv2 or ubc_msync activity.
+	 *
+	 * diagnostic for now; we may have been called by someone who has already
+	 * incremented z_in_pager_op.
+	 */
 
 	if (zp && !rw_write_held(&zp->z_map_lock)) {
-		ASSERT0(zp->z_in_pageout);
+		ASSERT0(zp->z_in_pager_op);
 		ASSERT3P(zp->z_syncer_active, ==, NULL);
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 	}
@@ -2577,6 +2586,8 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	inc_z_in_pager_op(zp, fsname, fname);
 
 	ASSERT(vn_has_cached_data(ZTOV(zp)));
 	ASSERT(ubc_pages_resident(ZTOV(zp)));
@@ -2636,16 +2647,16 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	dprintf("ZFS: starting with size %lx\n", len);
 
 top:
+
 	if (take_rlock) {
-		if (zp->z_in_pageout > 0) {
-			printf("ZFS: %s:%d: nonzero z_in_pageout %d for fs %s file %s"
+		if (zp->z_in_pager_op > 0) {
+			printf("ZFS: %s:%d: nonzero z_in_pager_op %d for fs %s file %s"
 			    " overriding range_lock (off %lld, len %ld)\n",
-			    __func__, __LINE__, zp->z_in_pageout, fsname, fname,
+			    __func__, __LINE__, zp->z_in_pager_op, fsname, fname,
 			    off, len);
 			take_rlock = B_FALSE;
 		} else {
 			rl = zfs_range_lock(zp, off, len, RL_WRITER);
-			inc_z_in_pageout(zp, fsname, fname);
 		}
 	}
 	/*
@@ -2679,7 +2690,7 @@ top:
 		if (err == ERESTART) {
 			if (take_rlock) {
 				zfs_range_unlock(rl);
-				dec_z_in_pageout(zp, fsname, fname);
+				dec_z_in_pager_op(zp, fsname, fname);
 			}
 			dmu_tx_wait(tx);
 			dmu_tx_abort(tx);
@@ -2770,7 +2781,7 @@ top:
 out:
 	if (take_rlock) {
 		zfs_range_unlock(rl);
-		dec_z_in_pageout(zp, fsname, fname);
+		dec_z_in_pager_op(zp, fsname, fname);
 	}
 	if (flags & UPL_IOSYNC)
 		zil_commit(zfsvfs->z_log, zp->z_id);
@@ -2794,6 +2805,7 @@ out:
 		}
 	}
 exit:
+	dec_z_in_pager_op(zp, fsname, fname);
 	if (err) printf("ZFS: %s:%d err %d\n", __func__, __LINE__, err);
 	ZFS_EXIT(zfsvfs);
 	return (err);
@@ -3315,7 +3327,7 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	 * melting the system.
 	 */
 
-	while (zp->z_in_pageout > 0) {
+	while (zp->z_in_pager_op > 0) {
 		VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_sleeps);
 		void IOSleep(unsigned milliseconds);
 		IOSleep(1);
@@ -3412,25 +3424,26 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 	if (zp && zp->z_sa_hdl &&
 	    (rw_write_held(&zp->z_map_lock) ||
-		(zp->z_syncer_active == curthread && zp->z_in_pageout <= 0))) {
+		(zp->z_syncer_active == curthread && zp->z_in_pager_op <= 0))) {
 		/* no collision, or we are re-entering, but whine about underflow */
-		ASSERT0(zp->z_in_pageout);
+		ASSERT0(zp->z_in_pager_op);
 
 	} else {
-		ASSERT0(zp->z_in_pageout);
+		ASSERT0(zp->z_in_pager_op);
 		if (zp->z_syncer_active != curthread)
 			ASSERT3P(zp->z_syncer_active, ==, NULL);
 		else
-			printf("ZFS: %s:%d: I am active syncer but zp->z_in_pageout is %d\n",
-			    __func__, __LINE__, zp->z_in_pageout);
+			printf("ZFS: %s:%d: I am active syncer but zp->z_in_pager_op is %d\n",
+			    __func__, __LINE__, zp->z_in_pager_op);
 
 		/* spin. */
-		while (zp && zp->z_in_pageout > 0) {
+		while (zp && zp->z_in_pager_op > 0) {
 			extern void IOSleep(unsigned milliseconds);
 			IOSleep(1);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_spin_sleeps);
 		}
 	}
+	inc_z_in_pager_op(zp, fsname, fname);
 
 	/* Short-circuit ZFS_ENTER_NOERROR */
 	if (!zp || !zp->z_zfsvfs || !zp->z_sa_hdl) {
@@ -3515,7 +3528,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	const off_t rllen = round_page_64(a_size);
 
 	rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
-	inc_z_in_pageout(zp, fsname, fname);
 
 	hrtime_t print_time = gethrtime() + SEC2NSEC(1);
 	const hrtime_t abort_time = gethrtime() + SEC2NSEC(10);
@@ -3540,7 +3552,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		if (cur_time > print_time) {
 			secs++;
 			printf("ZFS: %s:%d: looping for z_map_lock for %d sec"
-			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pageout %d)"
+			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pager_op %d)"
 			    " (syncer active? %d curthread? %d)\n",
 			    __func__, __LINE__, secs,
                             (zp->z_map_lock_holder != NULL)
@@ -3548,20 +3560,20 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
                             : "(NULL)",
 			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			    ap->a_size,
-			    fsname, fname, zp->z_in_pageout,
+			    fsname, fname, zp->z_in_pager_op,
 			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread);
 			print_time = cur_time + SEC2NSEC(1);
 			zfs_range_unlock(rl);
 			printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
-			    " (z_in_pageout %d)\n",
+			    " (z_in_pager_op %d)\n",
 			    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname,
-			    zp->z_in_pageout);
+			    zp->z_in_pager_op);
 			IOSleep(10); // we hold no locks, so let work be done
 			rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
 		}
 		if (cur_time > abort_time) {
 			printf("ZFS: %s:%d: abandoning locking attempt after %d secs"
-			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pageout %d)"
+			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pager_op %d)"
 			    " (syncer active? %d curthread? %d)\n",
 			    __func__, __LINE__, secs,
 			    (zp->z_map_lock_holder != NULL)
@@ -3569,7 +3581,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    : "(NULL)",
 			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			    ap->a_size,
-			    fsname, fname, zp->z_in_pageout,
+			    fsname, fname, zp->z_in_pager_op,
 			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread);
 			zfs_range_unlock(rl);
 			error = EDEADLK;
@@ -4207,7 +4219,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	zfs_range_unlock(rl);
-	dec_z_in_pageout(zp, fsname, fname);
+	dec_z_in_pager_op(zp, fsname, fname);
 
 	if (a_flags & UPL_IOSYNC) {
 		if (xxxbleat) printf("ZFS: %s:%d zil_commit file %s\n", __func__, __LINE__, zp->z_name_cache);
@@ -4239,7 +4251,7 @@ pageout_done:
 	}
 
 	zfs_range_unlock(rl);
-	dec_z_in_pageout(zp, fsname, fname);
+	dec_z_in_pager_op(zp, fsname, fname);
 
 exit_abort:
 

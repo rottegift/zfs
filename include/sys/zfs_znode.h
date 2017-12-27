@@ -238,7 +238,10 @@ typedef struct znode {
 
 	_Atomic hrtime_t        z_mr_sync;      /* most recent sync */
 	_Atomic int8_t  z_no_fsync;             /* it is unsafe to fsync when this is true */
-	_Atomic int16_t z_in_pageout;           /* How many pageouts are there in progress */
+
+	_Atomic int32_t z_in_pager_op;           /* Are we doing something that will hit
+						  * memory_object_lock_request ?
+						  */
 
 	list_node_t	z_link_reclaim_node;	/* all reclaim znodes in fs link */
 	uint32_t        z_vid;                  /* OSX vnode_vid */

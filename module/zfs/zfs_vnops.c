@@ -1414,6 +1414,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	/*
 	 * Lock the range against changes.
 	 */
+	zp->z_in_pager_op++;
 	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)), round_page_64(uio_resid(uio)), RL_READER);
 
 	/*
@@ -1471,6 +1472,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	ASSERT3U(initial_u_size, ==, ubc_getsize(vp));
 out:
 	zfs_range_unlock(rl);
+	z_in_pager_op--;
 
 	ZFS_ACCESSTIME_STAMP(zfsvfs, zp);
 	ZFS_EXIT(zfsvfs);
@@ -5103,7 +5105,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	if (vnode_isrecycled(vp)
 	    || zp->z_no_fsync != B_FALSE
-	    || zp->z_in_pageout > 0
+	    || zp->z_in_pager_op > 0
 	    || zp->z_syncer_active != NULL) {
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		VNOPS_STAT_BUMP(zfs_fsync_skipped);
