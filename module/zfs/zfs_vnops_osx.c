@@ -3413,6 +3413,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		return zfs_vnop_pageout(ap);
 	}
 
+	/* Short-circuit ZFS_ENTER_NOERROR */
+	if (!zp || !zp->z_zfsvfs || !zp->z_sa_hdl) {
+		printf("ZFS: vnop_pageout: null zp or zfsvfs\n");
+		return (ENXIO);
+	}
+
 	/*
 	 * Spin lock against other pageout users; we do not want to take
 	 * an ioref here if someone else (other than us) is paging out
@@ -3443,12 +3449,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			VNOPS_OSX_STAT_BUMP(pageoutv2_spin_sleeps);
 		}
 	}
-	inc_z_in_pager_op(zp, fsname, fname);
-
-	/* Short-circuit ZFS_ENTER_NOERROR */
-	if (!zp || !zp->z_zfsvfs || !zp->z_sa_hdl) {
-		printf("ZFS: vnop_pageout: null zp or zfsvfs\n");
-		return (ENXIO);
+	if (zp) {
+		char *fname = zp->z_name_cache;
+		char *fsname = NULL;
+		if (zp->z_zfsvfs && zp->z_zfsvfs->z_vfs) {
+			fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+		}
+		if (fsname == NULL)
+			fsname = "(NULL)";
+		inc_z_in_pager_op(zp, fsname, fname);
 	}
 
 	zfsvfs = zp->z_zfsvfs;
@@ -3457,7 +3466,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		   "blksz 0x%x, z_size 0x%llx\n", ap->a_f_offset, a_size,
 			a_pl_offset, zp->z_blksz,
 			zp->z_size);
-
 
 	/* Start the pageout request */
 	/*
@@ -4899,7 +4907,6 @@ zfs_vnop_getxattr(struct vnop_getxattr_args *ap)
 		goto out;
 	}
 #endif
-
 
 	if (zfsvfs->z_use_sa && zp->z_is_sa) {
 		uint64_t size = uio_resid(uio);

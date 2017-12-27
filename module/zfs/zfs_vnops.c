@@ -1472,7 +1472,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	ASSERT3U(initial_u_size, ==, ubc_getsize(vp));
 out:
 	zfs_range_unlock(rl);
-	z_in_pager_op--;
+	zp->z_in_pager_op--;
 
 	ZFS_ACCESSTIME_STAMP(zfsvfs, zp);
 	ZFS_EXIT(zfsvfs);

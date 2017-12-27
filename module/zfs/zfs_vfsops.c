@@ -199,6 +199,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 	int err = 0;
 	boolean_t disclaim = B_FALSE;
 	int disclaim_err = 0;
+	boolean_t claim = B_FALSE;
 
 	if (vnode_isreg(vp) &&
 	    ubc_pages_resident(vp) &&
@@ -267,7 +268,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* give up range_lock, since pageoutv2 may need it */
 		zfs_range_unlock(rl);
 		/* do the msync */
-		int msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
+		int msync_retval = 0;
+		if (zp->z_in_pager_op == 0) {
+			claim = B_TRUE;
+			msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
+		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
 		/* error checking, unlocking, and returning */
@@ -302,7 +307,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			return (VNODE_CLAIMED);
 		}
 	}
-	if (err != 0 && disclaim == B_FALSE) {
+	if (claim == B_TRUE || (err != 0 && disclaim == B_FALSE)) {
 		printf("ZFS: %s:%d: VNODE_CLAIMED (err %d)(disclaim %d) for file %s\n",
 		    __func__, __LINE__, err, disclaim, VTOZ(vp)->z_name_cache);
 		return (VNODE_CLAIMED);
