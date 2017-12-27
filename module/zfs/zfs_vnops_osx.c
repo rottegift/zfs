@@ -3237,26 +3237,20 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	if (flags & ZFS_UBC_FORCE_MSYNC)
 		flags &= ~(ZFS_UBC_FORCE_MSYNC);
 
-	/*
-	 * If the file's clean, ubc_msync might not descend into pageoutv2,
-	 * so we should do a zil_commit
-	 */
-
 	if (ubc_getsize(vp) == 0 && zp->z_size != 0) {
 		printf("ZFS: %s:%d: called with zero ubcsize; z_size %lld, start %lld, end %lld,"
 		    "flags %d, file %s\n",
 		    __func__, __LINE__, zp->z_size, start, end, flags, zp->z_name_cache);
 	}
 
-#ifdef DONTSYNCCLEAN
-	/* We don't have any work to do */
-	if (0 == is_file_clean(vp, end))
-		return (0);
-#else
+	/*
+	 * If the file's clean, ubc_msync might not descend into pageoutv2,
+	 * so we should do a zil_commit
+	 */
+
 	if (flags & UBC_SYNC &&
 	    is_file_clean(vp, end) == 0)
 		do_zil_commit = B_TRUE;
-#endif
 
 	ASSERT3P(zp->z_syncer_active, !=, curthread);
 	ASSERT3P(curthread, !=, NULL);
@@ -3300,6 +3294,7 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	} else {
 		printf("ZFS: %s:%d: ubc_msync skipped because vnode_isrecycled went true file %s\n",
 		       __func__, __LINE__, zp->z_name_cache);
+		do_zil_commit = B_FALSE;
 	}
 	mutex_enter(&zp->z_ubc_msync_lock);
 
@@ -3318,7 +3313,7 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 		    __func__, __LINE__, elapsed_seconds, zp->z_name_cache);
 	}
 
-	if (do_zil_commit && zfsvfs->z_log)
+	if (do_zil_commit && zfsvfs->z_log && !vnode_isrecycled(vp))
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
 	if (retval == 0)
