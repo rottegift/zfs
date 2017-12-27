@@ -262,10 +262,14 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			flags |= UBC_SYNC;
 		/* See if we are colldiing with other ZPL activity, hang here rather than below */
 		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		/* give up range_lock, since pageoutv2 may need it */
 		zfs_range_unlock(rl);
 		/* do the msync */
 		int msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
+		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		ASSERT3S(tries, <=, 2);
 		/* error checking, unlocking, and returning */
 		if (msync_retval != 0 &&
 		    !(msync_retval == EINVAL && resid_off == ubcsize)) {
