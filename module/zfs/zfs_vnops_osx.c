@@ -1768,8 +1768,15 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	 * memory_object_lock_request(). As vnode_isrecycled(vp) is a
 	 * snapshot indicating that the vnode is in the process of being
 	 * killed, we can use that to decide to just return 0.
+	 *
+	 * We should also not descend to zfs_ubc_msync if there is any
+	 * syncer active, of if the file is already in pageout/pageoutv2.
 	 */
-	if (vnode_isrecycled(ap->a_vp))
+
+	if (vnode_isrecycled(ap->a_vp)
+	    || zp->z_no_fsync != B_FALSE
+	    || zp->z_in_pageout > 0
+	    || zp->z_syncer_active != NULL)
 		goto zero;
 
 	/*
@@ -4611,7 +4618,6 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	 * This will release as much as it can, based on reclaim_reentry,
 	 * if we are from fastpath, we do not call free here, as zfs_remove
 	 * calls zfs_znode_delete() directly.
-	 * zfs_zinactive() will leave earlier if z_reclaim_reentry is true.
 	 */
 	if (fastpath == B_FALSE) {
 		rw_enter(&zfsvfs->z_teardown_inactive_lock, RW_READER);
@@ -6693,10 +6699,12 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 	 */
 
 	/* So pageout can know if it is called recursively, add this thread to list*/
+	zp->z_no_fsync = B_TRUE;
 	while (vnode_create(VNCREATE_FLAVOR, VCREATESIZE, &vfsp, &vp) != 0) {
 		kpreempt(KPREEMPT_SYNC);
 	}
 	atomic_inc_64(&vnop_num_vnodes);
+	zp->z_no_fsync = B_FALSE;
 
 	dprintf("Assigned zp %p with vp %p\n", zp, vp);
 

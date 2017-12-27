@@ -214,7 +214,6 @@ typedef struct znode {
 	uint64_t	z_pflags;	/* pflags (cached) */
 	uint64_t	z_uid;		/* uid fuid (cached) */
 	uint64_t	z_gid;		/* gid fuid (cached) */
-	uint32_t	z_sync_cnt;	/* synchronous open count */
 	mode_t		z_mode;		/* mode (cached) */
 	kmutex_t	z_acl_lock;	/* acl data lock */
 	zfs_acl_t	*z_acl_cached;	/* cached acl */
@@ -228,6 +227,7 @@ typedef struct znode {
 	boolean_t	z_is_zvol;	/* are we used by the zvol */
 	boolean_t	z_is_ctldir;	/* are we .zfs entry */
 #ifdef __APPLE__
+	uint32_t	z_sync_cnt;	/* synchronous open count */
 	_Atomic uint8_t	z_mod_while_mapped;	/* while mapped, did we have a page dirtied? */
 	krwlock_t       z_map_lock;             /* page map lock */
 	const char      *z_map_lock_holder;     /* function that holds the rw_lock */
@@ -237,7 +237,7 @@ typedef struct znode {
 	kthread_t       *z_syncer_active;       /* is a thread in ubc_msync now? is *this* thread? */
 
 	_Atomic hrtime_t        z_mr_sync;      /* most recent sync */
-
+	_Atomic int8_t  z_no_fsync;             /* it is unsafe to fsync when this is true */
 	_Atomic int16_t z_in_pageout;           /* How many pageouts are there in progress */
 
 	list_node_t	z_link_reclaim_node;	/* all reclaim znodes in fs link */
@@ -254,12 +254,7 @@ typedef struct znode {
 	boolean_t   z_finder_hardlink;  /* set high if it ever had a hardlink hash */
 
 	boolean_t   z_fastpath;
-	boolean_t   z_reclaim_reentry;  /* vnode_create()->vnop_reclaim() */
 	boolean_t   z_drain;            /* for unlinked_drain */
-#endif
-
-#ifdef ZFS_DEBUG
-	list_t		z_stalker;	/*vnode life tracker */
 #endif
 
 	boolean_t	z_is_stale;	/* are we stale due to rollback? */

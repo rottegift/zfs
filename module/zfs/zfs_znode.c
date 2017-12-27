@@ -193,6 +193,7 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 
 	zp->z_map_lock_holder = NULL;
 	zp->z_mr_sync = (hrtime_t)0;
+	zp->z_no_fsync = B_FALSE;
 	return (0);
 }
 
@@ -237,6 +238,8 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 
 	ASSERT3P(zp->z_map_lock_holder, ==, NULL);
 	ASSERT3S(zp->z_sync_cnt, ==, 0);
+	ASSERT3S(zp->z_mr_sync, >, 0);
+	ASSERT3S(zp->z_no_fsync, ==, B_FALSE);
 }
 
 #ifdef sun
@@ -265,7 +268,19 @@ zfs_znode_move_impl(znode_t *ozp, znode_t *nzp)
 	nzp->z_seq = ozp->z_seq;
 	nzp->z_mapcnt = ozp->z_mapcnt;
 	nzp->z_gen = ozp->z_gen;
+
+	/* Apple stuff */
 	nzp->z_sync_cnt = ozp->z_sync_cnt;
+	nzp->z_mr_sync = ozp->z_mr_sync;
+	ASSERT3P(ozp->z_map_lock_holder, ==, NULL);
+	nzp->z_map_lock_holder = ozp->z_map_lock_holder;
+	nzp->z_no_fsync = ozp->z_no_fsync;
+	ASSERT0(ozp->z_in_pageout);
+	nzp->z_in_pageout = ozp->z_in_pageout;
+	nzp->z_mod_while_mapped = ozp->z_mod_while_mapped;
+	ASSERT3P(ozp->z_syncer_active, ==, NULL);
+	nzp->z_syncer_active = ozp->z_syncer_active;
+
 	nzp->z_is_sa = ozp->z_is_sa;
 	nzp->z_sa_hdl = ozp->z_sa_hdl;
 	bcopy(ozp->z_atime, nzp->z_atime, sizeof (uint64_t) * 2);
@@ -1347,12 +1362,9 @@ again:
 		return ((EINVAL));
 	}
 
-
-
 	hdl = dmu_buf_get_user(db);
 	if (hdl != NULL) {
 		zp = sa_get_userdata(hdl);
-
 
 		/*
 		 * Since "SA" does immediate eviction we
@@ -1362,6 +1374,9 @@ again:
 		ASSERT3P(zp, !=, NULL);
 
 		mutex_enter(&zp->z_lock);
+
+		/* tell zfs_vnop_fsync not to do anything */
+		zp->z_no_fsync = B_TRUE;
 
 		/*
 		 * Since zp may disappear after we unlock below,
@@ -1382,6 +1397,7 @@ again:
 		 * in order to support the sync of open-unlinked files
 		 */
 		if (!(flags & ZGET_FLAG_UNLINKED) && zp->z_unlinked) {
+			zp->z_no_fsync = B_FALSE;
 			mutex_exit(&zp->z_lock);
 			sa_buf_rele(db, NULL);
 			ZFS_OBJ_HOLD_EXIT(zfsvfs, obj_num);
@@ -1393,6 +1409,7 @@ again:
 		ZFS_OBJ_HOLD_EXIT(zfsvfs, obj_num);
 
 		if ((flags & ZGET_FLAG_WITHOUT_VNODE_GET)) {
+			zp->z_no_fsync = B_FALSE;
 			/* Do not increase vnode iocount */
 			*zpp = zp;
 			return 0;
@@ -1411,6 +1428,7 @@ again:
 		 * ends up sleeping in msleep() but vnode_get() does not.
 		 */
 		if (!vp || (err=vnode_getwithvid(vp, vid) != 0)) {
+			ASSERT3S(zp->z_no_fsync, ==, B_TRUE);
 			//if ((err = vnode_get(vp)) != 0) {
 			dprintf("ZFS: vnode_get() returned %d\n", err);
 			kpreempt(KPREEMPT_SYNC);
@@ -1436,6 +1454,8 @@ again:
 
 		*zpp = zp;
 		getnewvnode_drop_reserve();
+		ASSERT3S(zp->z_no_fsync, ==, B_TRUE);
+		zp->z_no_fsync = B_FALSE;
 		return (0);
 	} // if vnode != NULL
 

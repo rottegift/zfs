@@ -133,7 +133,6 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_write_cluster_copy_error;
 	kstat_named_t zfs_write_cluster_copy_short_write;
 	kstat_named_t zfs_write_helper_iters;
-	kstat_named_t zfs_write_msync;
 	kstat_named_t zfs_write_arcbuf_assign;
 	kstat_named_t zfs_write_arcbuf_assign_bytes;
 	kstat_named_t zfs_write_uio_dbufs;
@@ -149,9 +148,9 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
 	kstat_named_t zfs_fsync_zil_commit_reg_vn;
 	kstat_named_t zfs_fsync_ubc_msync;
-	kstat_named_t zfs_fsync_non_isreg;
 	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t zfs_fsync_disabled;
+	kstat_named_t zfs_fsync_skipped;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -170,7 +169,6 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_write_sync_cluster_copy_error",           KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_short_write",          KSTAT_DATA_UINT64 },
 	{ "zfs_write_helper_iters",                      KSTAT_DATA_UINT64 },
-	{ "zfs_write_msync",                             KSTAT_DATA_UINT64 },
 	{ "zfs_write_arcbuf_assign",                     KSTAT_DATA_UINT64 },
 	{ "zfs_write_arcbuf_assign_bytes",               KSTAT_DATA_UINT64 },
 	{ "zfs_write_uio_dbufs",                         KSTAT_DATA_UINT64 },
@@ -186,9 +184,9 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit_reg_vn",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_non_isreg",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
+	{ "zfs_fsync_skipped",                           KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -3297,7 +3295,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 				ubc_msync_err = zfs_ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flag);
 				z_map_drop_lock(zp, &need_release, &need_upgrade);
 				ASSERT3S(tries, <=, 2);
-				VNOPS_STAT_BUMP(zfs_write_msync);
 				if (ubc_msync_err != 0 &&
 				    !(ubc_msync_err == EINVAL && resid_off == ubcsize)) {
 					/* we can get back spurious EINVALs here even though the full
@@ -5085,6 +5082,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	if (zp->z_pflags & ZFS_IMMUTABLE) {
+		VNOPS_STAT_BUMP(zfs_fsync_disabled);
 		ZFS_EXIT(zfsvfs);
 		return (EPERM);
 	}
@@ -5093,7 +5091,22 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		dprintf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
 		    zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
-		VNOPS_STAT_BUMP(zfs_fsync_non_isreg);
+		ZFS_EXIT(zfsvfs);
+		return (0);
+	}
+
+	/*
+	 * We should not descend to zfs_ubc_msync if we are recycled,
+	 * or if the z_no_fsync flag is set, or if there is any syncer
+	 * active on the node.
+	 */
+
+	if (vnode_isrecycled(vp)
+	    || zp->z_no_fsync != B_FALSE
+	    || zp->z_in_pageout > 0
+	    || zp->z_syncer_active != NULL) {
+		ASSERT3P(zp->z_syncer_active, !=, curthread);
+		VNOPS_STAT_BUMP(zfs_fsync_skipped);
 		ZFS_EXIT(zfsvfs);
 		return (0);
 	}
