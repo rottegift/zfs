@@ -3231,6 +3231,9 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	 * watch out for reentrancy!
 	 */
 
+	if (vnode_isrecycled(vp))
+		return (0);
+
 	if (flags & ZFS_UBC_FORCE_MSYNC)
 		flags &= ~(ZFS_UBC_FORCE_MSYNC);
 
@@ -3291,8 +3294,13 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	/* we are good to go */
 
-	int retval = ubc_msync(vp, start, end, resid, flags);
-
+	int retval = 0;
+	if (vnode_isrecycled(vp) == 0) {
+		retval = ubc_msync(vp, start, end, resid, flags);
+	} else {
+		printf("ZFS: %s:%d: ubc_msync skipped because vnode_isrecycled went true file %s\n",
+		       __func__, __LINE__, zp->z_name_cache);
+	}
 	mutex_enter(&zp->z_ubc_msync_lock);
 
 	ASSERT3S(zp->z_syncer_active, ==, curthread);
