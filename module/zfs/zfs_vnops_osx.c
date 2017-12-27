@@ -3543,7 +3543,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	/* extend file if necessary, but not if we have re-entered */
-	if (had_map_lock_at_entry == B_TRUE) {
+	if (had_map_lock_at_entry != B_TRUE) {
 		extern int zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl);
 		error = zfs_write_maybe_extend_file(zp, ap->a_f_offset, ap->a_size, rl);
 
