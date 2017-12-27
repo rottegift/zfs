@@ -1415,7 +1415,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 * Lock the range against changes.
 	 */
 	zp->z_in_pager_op++;
-	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)), round_page_64(uio_resid(uio)), RL_READER);
+	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)), round_page_64(uio_resid(uio)), RL_WRITER);
 
 	/*
 	 * If we are reading past end-of-file we can skip
