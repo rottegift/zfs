@@ -100,10 +100,13 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
 	kstat_named_t reclaim_mapped;
+	kstat_named_t zfs_ubc_msync_cv_waits;
+	kstat_named_t zfs_ubc_msync_sleeps;
 	kstat_named_t bluster_pageout_calls;
 	kstat_named_t bluster_pageout_dmu_bytes;
 	kstat_named_t bluster_pageout_pages;
 	kstat_named_t pageoutv2_calls;
+	kstat_named_t pageoutv2_spin_sleeps;
 	kstat_named_t pageoutv2_msync;
 	kstat_named_t pageoutv2_pageout;
 	kstat_named_t pageoutv2_want_lock;
@@ -129,10 +132,13 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
 	{ "reclaim_mapped",                    KSTAT_DATA_UINT64 },
+	{ "zfs_ubc_msync_cv_waits",            KSTAT_DATA_UINT64 },
+	{ "zfs_ubc_msync_sleeps",              KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_dmu_bytes",         KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_spin_sleeps",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_msync",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_pageout",                 KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
@@ -2488,6 +2494,15 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		return (EINVAL);
 	}
 
+	/* complain if we are colliding with pageoutv2 or ubc_msync activity */
+
+	if (zp && !rw_write_held(&zp->z_map_lock)) {
+		ASSERT0(zp->z_in_pageout);
+		ASSERT3P(zp->z_syncer_active, ==, NULL);
+		ASSERT3P(zp->z_syncer_active, !=, curthread);
+	}
+
+	/* take the map */
 	caddr_t va;
 
 	if (ubc_upl_map(upl, (vm_offset_t *)&va) != KERN_SUCCESS) {
@@ -3238,6 +3253,7 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
+		VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_cv_waits);
 		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 	}
 
@@ -3245,6 +3261,26 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	zp->z_syncer_active = curthread;
 
 	mutex_exit(&zp->z_ubc_msync_lock);
+
+	/*
+	 * We now have to spin if we have to avoid colliding with
+	 * pageout activity leading to a deadlock in
+	 * memory_object_lock_request for this file. This spin should
+	 * never happen due to z_map_locking, so this is diagnostic.
+	 * Our wait may last milliseconds, for instance if the pageout
+	 * causes a synchronous pagein, and is also a synchronous
+	 * pageout. It may also last a very very long time, like
+	 * spindump analysis lengths, so spin around IOSleep to avoid
+	 * melting the system.
+	 */
+
+	while (zp->z_in_pageout > 0) {
+		VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_sleeps);
+		void IOSleep(unsigned milliseconds);
+		IOSleep(1);
+	}
+
+	/* we are good to go */
 
 	int retval = ubc_msync(vp, start, end, resid, flags);
 
@@ -3318,6 +3354,38 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		return zfs_vnop_pageout(ap);
 	}
 
+	/*
+	 * Spin lock against other pageout users; we do not want to take
+	 * an ioref here if someone else (other than us) is paging out
+	 * to this file.
+	 *
+	 * There are multiple paths to this point, and if we go into
+	 * ZFS_ENTER_NOERROR and have to wait, we can cause other
+	 * threads to block on vfs activities.
+	 */
+	if (zp && zp->z_sa_hdl &&
+	    (rw_write_held(&zp->z_map_lock) ||
+		(zp->z_syncer_active == curthread && zp->z_in_pageout <= 0))) {
+		/* no collision, or we are re-entering, but whine about underflow */
+		ASSERT0(zp->z_in_pageout);
+
+	} else {
+		ASSERT0(zp->z_in_pageout);
+		if (zp->z_syncer_active != curthread)
+			ASSERT3P(zp->z_syncer_active, ==, NULL);
+		else
+			printf("ZFS: %s:%d: I am active syncer but zp->z_in_pageout is %d\n",
+			    __func__, __LINE__, zp->z_in_pageout);
+
+		/* spin. */
+		while (zp && zp->z_in_pageout > 0) {
+			extern void IOSleep(unsigned milliseconds);
+			IOSleep(1);
+			VNOPS_OSX_STAT_BUMP(pageoutv2_spin_sleeps);
+		}
+	}
+
+	/* Short-circuit ZFS_ENTER_NOERROR */
 	if (!zp || !zp->z_zfsvfs || !zp->z_sa_hdl) {
 		printf("ZFS: vnop_pageout: null zp or zfsvfs\n");
 		return (ENXIO);
