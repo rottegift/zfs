@@ -1711,8 +1711,11 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	if (do_sync) {
 		msync_flags |= UBC_SYNC;
 	}
-
+	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 	error = zfs_ubc_msync(vp, woff, end_range, &msync_resid, msync_flags);
+	z_map_drop_lock(zp, &need_release, &need_upgrade);
+	ASSERT3S(tries, <=, 2);
 
 	if (error != 0) {
 		printf("ZFS: %s:%d: ubc_msync error %d msync_resid %lld"
@@ -1835,8 +1838,12 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				msync_flags = UBC_PUSHDIRTY | UBC_SYNC;
 			if (sync)
 				msync_flags |= UBC_SYNC;
+			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			zfs_range_unlock(rlock);
 			int retval = zfs_ubc_msync(vp, aoff, aend, &resid_off, msync_flags);
+			z_map_drop_lock(zp, &need_release, &need_upgrade);
+			ASSERT3S(tries, <=, 2);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0) {
 				ASSERT3S(resid_off, ==, aend);
