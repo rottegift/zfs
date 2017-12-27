@@ -3453,7 +3453,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 	boolean_t mut_had_map_lock_at_entry = B_FALSE;
 	if (rw_write_held(&zp->z_map_lock)) {
-		printf("ZFS: %s:%d: z_map_lock held-on-entry for [%lld..%lld] (sz %ld)"
+		dprintf("ZFS: %s:%d: z_map_lock held-on-entry for [%lld..%lld] (sz %ld)"
 		    " fs %s file %s\n",
 		    __func__, __LINE__,
 		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
@@ -3542,7 +3542,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	zp->z_map_lock_holder = __func__;
 
 	if (secs == 0) {
-		printf("ZFS: %s:%d: lock was already held for fs %s file %s\n",
+		dprintf("ZFS: %s:%d: lock was already held for fs %s file %s\n",
 		    __func__, __LINE__, fsname, fname);
 	} else {
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, secs);
@@ -3570,10 +3570,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	off_t woff = ap->a_f_offset;
 	off_t end_size = MAX(zp->z_size, woff + a_size);
 
-	if (rl->r_len == UINT64_MAX ||
-	    (end_size > zp->z_blksz &&
-		((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
-		    !dmu_write_is_safe(zp, woff, end_size)))) {
+	if (!had_map_lock_at_entry &&
+	    (rl->r_len == UINT64_MAX ||
+		(end_size > zp->z_blksz &&
+		    ((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
+			!dmu_write_is_safe(zp, woff, end_size))))) {
 
 		/* This shouldn't happen */
 		ASSERT3S(had_map_lock_at_entry, !=, B_TRUE);
