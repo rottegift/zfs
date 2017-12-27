@@ -3570,14 +3570,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	off_t woff = ap->a_f_offset;
 	off_t end_size = MAX(zp->z_size, woff + a_size);
 
-	if (!had_map_lock_at_entry &&
-	    (rl->r_len == UINT64_MAX ||
-		(end_size > zp->z_blksz &&
-		    ((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
-			!dmu_write_is_safe(zp, woff, end_size))))) {
-
-		/* This shouldn't happen */
-		ASSERT3S(had_map_lock_at_entry, !=, B_TRUE);
+	if (rl->r_len == UINT64_MAX ||
+	    (end_size > zp->z_blksz &&
+	     ((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
+	      !dmu_write_is_safe(zp, woff, end_size)))) {
 
 		uint64_t new_blksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
