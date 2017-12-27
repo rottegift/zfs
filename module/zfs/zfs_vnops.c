@@ -151,7 +151,6 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_ubc_msync;
 	kstat_named_t zfs_fsync_non_isreg;
 	kstat_named_t zfs_fsync_want_lock;
-	kstat_named_t zfs_ubc_msync_error;
 	kstat_named_t zfs_fsync_disabled;
 } vnops_stats_t;
 
@@ -189,7 +188,6 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_non_isreg",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
-	{ "zfs_ubc_msync_error",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
 };
 
@@ -5144,7 +5142,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	if (retval != 0) {
 		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
 		    __func__, __LINE__, retval, zp->z_size, zp->z_name_cache);
-		VNOPS_STAT_BUMP(zfs_ubc_msync_error);
 	}
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
