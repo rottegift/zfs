@@ -5076,7 +5076,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		do_zil_commit = B_TRUE;
 	}
 
-	/* 
+	/*
 	 * Get the locks in order RL->z_map_lock
 	 *
 	 * Drop the RL so that things below ubc_msync don't collide with
@@ -5089,7 +5089,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 	VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 	zfs_range_unlock(rl); // pageout may need to range lock
-		
+
 	off_t resid_off = 0;
 	int flags = UBC_PUSHALL | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
 	int retval = zfs_ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flags);
@@ -5100,7 +5100,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
-	
+
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 
 
