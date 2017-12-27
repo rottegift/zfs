@@ -206,8 +206,32 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		boolean_t caught_syncer = B_FALSE;
 		znode_t *zp = VTOZ(vp);
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
-		ZFS_ENTER(zfsvfs);
-		ZFS_VERIFY_ZP(zp);
+		if (!zp) {
+			printf("ZFS: %s:%d: ZTOV(vp) is NULL!\n", __func__, __LINE__);
+			return (VNODE_RETURNED);
+		}
+		if (!zp->z_sa_hdl) {
+			printf("ZFS: %s:%d: vp has no z_sa_hdl! file %s\n", __func__, __LINE__,
+			    zp->z_name_cache);
+			return (VNODE_RETURNED);
+		}
+		if (zfsvfs && !zfsvfs->z_unmounted) {
+			printf("ZFS: %s:%d: zfvfs is not mounted file %s\n", __func__, __LINE__,
+			    zp->z_name_cache);
+			return (VNODE_RETURNED);
+		}
+		if (zp->z_in_pageout > 0) {
+			printf("ZFS: %s:%d: z_in_pageout %d > 0 for file %s\n", __func__, __LINE__,
+			    zp->z_in_pageout, zp->z_name_cache);
+			return (VNODE_CLAIMED);
+		}
+		if (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+			printf("ZFS: %s:%d: another thread has z_syncer_active for file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			return (VNODE_CLAIMED);
+		}
+		ZFS_ENTER_NOERROR(zfsvfs);
+		ASSERT3P(zp->z_sa_hdl, !=, NULL);
 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
 		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
 		    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
@@ -229,7 +253,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			return (VNODE_RETURNED);
  		}
 		/* take a range lock */
-		/* take z_map_lock */
 		off_t resid_off = 0;
 		off_t ubcsize = ubc_getsize(vp);
 		int flags = UBC_PUSHDIRTY;
@@ -237,8 +260,9 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			flags = UBC_PUSHDIRTY | UBC_SYNC;
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;
-		/* give up range_lock, since pageoutv2 may need it */
+		/* See if we are colldiing with other ZPL activity, hang here rather than below */
 		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		/* give up range_lock, since pageoutv2 may need it */
 		zfs_range_unlock(rl);
 		/* do the msync */
 		int msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
