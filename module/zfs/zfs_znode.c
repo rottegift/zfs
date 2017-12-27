@@ -238,7 +238,6 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 
 	ASSERT3P(zp->z_map_lock_holder, ==, NULL);
 	ASSERT3S(zp->z_sync_cnt, ==, 0);
-	ASSERT3S(zp->z_mr_sync, >, 0);
 	ASSERT3S(zp->z_no_fsync, ==, B_FALSE);
 }
 
