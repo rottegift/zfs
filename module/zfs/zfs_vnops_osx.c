@@ -2480,7 +2480,11 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 inline static void
 inc_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 {
-
+	ASSERT3P(zp, !=, NULL);
+	if (!zp) {
+		printf("ZFS: error %s:%d: zp is null!\n", __func__, __LINE__);
+		return;
+	}
 	if (zp->z_in_pager_op != 0) {
 		printf("ZFS: %s:%d z_in_pager_op already nonzero %d for"
 		    " fs %128s file %128s\n",
@@ -2502,6 +2506,11 @@ inc_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 inline static void
 dec_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 {
+	ASSERT3P(zp, !=, NULL);
+	if (!zp) {
+		printf("ZFS: error %s:%d: zp is null!\n", __func__, __LINE__);
+		return;
+	}
 	if (zp->z_in_pager_op < 1) {
 		printf("ZFS: %s:%d: ERROR z_in_pager_op expected to be > 0, is %d"
 		    " for fs %s file %s\n",
@@ -3512,15 +3521,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 	}
 	if (zp && zp->z_sa_hdl) {
-		char *here_fname = zp->z_name_cache;
-		char const *here_fsname = NULL;
-		static const char nulstr[] = "(NULL)";
 		if (zp && zp->z_sa_hdl && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted && zp->z_zfsvfs->z_vfs) {
-			here_fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+			inc_z_in_pager_op(zp,
+			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
+			    zp->z_name_cache);
+		} else {
+			inc_z_in_pager_op(zp, "(no filesystem)", "(no name)");
 		}
-		if (here_fsname == NULL)
-			here_fsname = nulstr;
-		inc_z_in_pager_op(zp, here_fsname, here_fname);
 	}
 
 	zfsvfs = zp->z_zfsvfs;
@@ -3536,7 +3543,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * upl_abort. So use the non-error version.
 	 */
 	ZFS_ENTER_NOERROR(zfsvfs);
+
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
+
 	if (zfsvfs->z_unmounted) {
 		printf("ZFS: vnop_pageoutv2: abort on z_unmounted\n");
 		error = EIO;
