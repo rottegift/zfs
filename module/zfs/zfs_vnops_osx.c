@@ -3515,7 +3515,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		char *here_fname = zp->z_name_cache;
 		char const *here_fsname = NULL;
 		static const char nulstr[] = "(NULL)";
-		if (zp && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted && zp->z_zfsvfs->z_vfs) {
+		if (zp && zp->z_sa_hdl && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted && zp->z_zfsvfs->z_vfs) {
 			here_fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 		}
 		if (here_fsname == NULL)
