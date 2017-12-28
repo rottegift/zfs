@@ -3479,12 +3479,16 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT0(zp->z_in_pager_op);
 
 	} else {
-		ASSERT0(zp->z_in_pager_op);
-		if (zp->z_syncer_active != curthread)
+		if (zp) { ASSERT0(zp->z_in_pager_op); }
+
+		if (zp && zp->z_syncer_active != curthread)
 			ASSERT3P(zp->z_syncer_active, ==, NULL);
-		else
+		else if (zp)
 			printf("ZFS: %s:%d: I am active syncer but zp->z_in_pager_op is %d\n",
 			    __func__, __LINE__, zp->z_in_pager_op);
+		else
+			printf("ZFS: %s:%d: I am active syncer, but zp is NULL\n",
+			    __func__, __LINE__);
 
 		/* spin. */
 		while (zp && zp->z_in_pager_op > 0) {
