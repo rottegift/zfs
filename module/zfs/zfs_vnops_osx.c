@@ -3277,6 +3277,17 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	const hrtime_t entry_time = gethrtime();
 
+	ASSERT(rw_write_held(&zp->z_map_lock));
+	boolean_t rw_lock_held_on_entry = rw_write_held(&zp->z_map_lock);
+	const char me[] = "zfs_ubc_msync called without lock";
+	char const * caller = me;
+	if (rw_lock_held_on_entry) {
+		ASSERT3P(zp->z_map_lock_holder, !=, NULL);
+		caller = zp->z_map_lock_holder;
+		if (caller == NULL)
+			caller = "zfs_ubc_msync called with NULL holder";
+	}
+
 	/*
 	 * watch out for reentrancy!
 	 */
@@ -3307,9 +3318,41 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_cv_waits);
+
+		if (rw_lock_held_on_entry) {
+			rw_exit(&zp->z_map_lock);
+		}
+		ASSERT(!rw_lock_held(&zp->z_map_lock));
+
+		cv_signal(&zp->z_ubc_msync_cv); /* wake someone else up */
 		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+
+		/* reacquire z_map_lock if necessary */
+		if (rw_lock_held_on_entry) {
+			const hrtime_t start_time = gethrtime();
+			hrtime_t bleat_at = start_time + SEC2NSEC(1);
+			for ( ; ; ) {
+				if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+					zp->z_map_lock_holder = caller;
+					break;
+				}
+				hrtime_t now = gethrtime();
+				if (now > bleat_at) {
+					bleat_at = now + SEC2NSEC(5);
+					const hrtime_t ns_since = now - start_time;
+					const uint32_t secs = NSEC2SEC(ns_since);
+					printf("ZFS: %s:%d: %d seconds of trying to obtain"
+					    " z_map_lock for file %s (holder %s) (my caller %s)\n",
+					    __func__, __LINE__, secs, zp->z_name_cache,
+					    zp->z_map_lock_holder, caller);
+				}
+				void IOSleep(unsigned milliseconds);
+				IOSleep(1);
+			}
+		}
 	}
 
+	if (rw_lock_held_on_entry) { ASSERT(rw_write_held(&zp->z_map_lock)); }
 	ASSERT3P(zp->z_syncer_active, ==, NULL);
 	zp->z_syncer_active = curthread;
 
@@ -3327,7 +3370,7 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 	 * melting the system.
 	 */
 
-	while (zp->z_in_pager_op > 0) {
+	while (zp->z_in_pager_op > 0 && !rw_write_held(&zp->z_map_lock)) {
 		VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_sleeps);
 		void IOSleep(unsigned milliseconds);
 		IOSleep(1);
