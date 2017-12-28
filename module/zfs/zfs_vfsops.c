@@ -270,8 +270,10 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* do the msync */
 		int msync_retval = 0;
 		if (zp->z_in_pager_op == 0) {
-			claim = B_TRUE;
+			claim = B_FALSE;
 			msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
+		} else {
+			claim = B_TRUE;
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
