@@ -2480,15 +2480,20 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 inline static void
 inc_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 {
+
 	if (zp->z_in_pager_op != 0) {
 		printf("ZFS: %s:%d z_in_pager_op already nonzero %d for"
-		    " fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pager_op, fsname, fname);
+		    " fs %128s file %128s\n",
+		    __func__, __LINE__, zp->z_in_pager_op,
+		    (fsname == NULL) ? "(no dataset name)" : fsname,
+		    (fname == NULL) ? "(no file name)" : fname);
 	}
         if (++zp->z_in_pager_op != 1) {
 		printf("ZFS: %s:%d z_in_pager_op expected inc to 1 is now %d"
-		    " for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pager_op, fsname, fname);
+		    " for fs %128s file %128s\n",
+		    __func__, __LINE__, zp->z_in_pager_op,
+		    (fsname == NULL) ? "(no dataset name)" : fsname,
+		    (fsname == NULL) ? "(no filefname)" : fname);
 		while (zp->z_in_pager_op < 1)
 			zp->z_in_pager_op++;
 	}
@@ -2500,12 +2505,16 @@ dec_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 	if (zp->z_in_pager_op < 1) {
 		printf("ZFS: %s:%d: ERROR z_in_pager_op expected to be > 0, is %d"
 		    " for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pager_op, fsname, fname);
+		    __func__, __LINE__, zp->z_in_pager_op,
+		    (fsname == NULL) ? "(no dataset name)" : fsname,
+		    (fname == NULL) ? "(no file name)" : fname);
 		zp->z_in_pager_op = 0;
 	} else  if (--zp->z_in_pager_op != 0) {
 		printf("ZFS: %s:%d: z_in_pager_op expected to be 0 after dec"
-		    " is now %d for fs %s file %s\n",
-		    __func__, __LINE__, zp->z_in_pager_op, fsname, fname);
+		    " is now %d for fs %128s file %128s\n",
+		    __func__, __LINE__, zp->z_in_pager_op,
+		    (fsname == NULL) ? "(no dataset name)" : fsname,
+		    (fname == NULL) ? "(no file name)" : fname);
 		while (zp->z_in_pager_op < 0)
 		        zp->z_in_pager_op++;
 	}
@@ -3477,27 +3486,32 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		(zp->z_syncer_active == curthread && zp->z_in_pager_op <= 0))) {
 		/* no collision, or we are re-entering, but whine about underflow */
 		ASSERT0(zp->z_in_pager_op);
-
 	} else {
-		if (zp) { ASSERT0(zp->z_in_pager_op); }
+		if (zp) {
+			ASSERT3P(zp->z_sa_hdl, !=, NULL);
+			ASSERT0(zp->z_in_pager_op);
+		}
 
-		if (zp && zp->z_syncer_active != curthread)
+		if (zp && zp->z_sa_hdl && zp->z_syncer_active != curthread)
 			ASSERT3P(zp->z_syncer_active, ==, NULL);
-		else if (zp)
+		else if (zp && zp->z_sa_hdl)
 			printf("ZFS: %s:%d: I am active syncer but zp->z_in_pager_op is %d\n",
 			    __func__, __LINE__, zp->z_in_pager_op);
 		else
-			printf("ZFS: %s:%d: I am active syncer, but zp is NULL\n",
+			printf("ZFS: %s:%d: zp or z_sa_hdl is NULL checking for contention\n",
 			    __func__, __LINE__);
 
 		/* spin. */
-		while (zp && zp->z_in_pager_op > 0) {
+		while (zp && zp->z_sa_hdl
+		    && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted
+		    && zp->z_in_pager_op > 0
+		    && !rw_write_held(&zp->z_map_lock)) {
 			extern void IOSleep(unsigned milliseconds);
 			IOSleep(1);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_spin_sleeps);
 		}
 	}
-	if (zp) {
+	if (zp && zp->z_sa_hdl) {
 		char *here_fname = zp->z_name_cache;
 		char const *here_fsname = NULL;
 		static const char nulstr[] = "(NULL)";
