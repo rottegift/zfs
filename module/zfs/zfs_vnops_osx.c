@@ -2486,14 +2486,14 @@ inc_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 		return;
 	}
 	if (zp->z_in_pager_op != 0) {
-		printf("ZFS: %s:%d z_in_pager_op already nonzero %d for"
+		dprintf("ZFS: %s:%d z_in_pager_op already nonzero %d for"
 		    " fs %128s file %128s\n",
 		    __func__, __LINE__, zp->z_in_pager_op,
 		    (fsname == NULL) ? "(no dataset name)" : fsname,
 		    (fname == NULL) ? "(no file name)" : fname);
 	}
         if (++zp->z_in_pager_op != 1) {
-		printf("ZFS: %s:%d z_in_pager_op expected inc to 1 is now %d"
+		dprintf("ZFS: %s:%d z_in_pager_op expected inc to 1 is now %d"
 		    " for fs %128s file %128s\n",
 		    __func__, __LINE__, zp->z_in_pager_op,
 		    (fsname == NULL) ? "(no dataset name)" : fsname,
@@ -2508,18 +2508,18 @@ dec_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 {
 	ASSERT3P(zp, !=, NULL);
 	if (!zp) {
-		printf("ZFS: error %s:%d: zp is null!\n", __func__, __LINE__);
+		dprintf("ZFS: error %s:%d: zp is null!\n", __func__, __LINE__);
 		return;
 	}
 	if (zp->z_in_pager_op < 1) {
-		printf("ZFS: %s:%d: ERROR z_in_pager_op expected to be > 0, is %d"
+		dprintf("ZFS: %s:%d: ERROR z_in_pager_op expected to be > 0, is %d"
 		    " for fs %s file %s\n",
 		    __func__, __LINE__, zp->z_in_pager_op,
 		    (fsname == NULL) ? "(no dataset name)" : fsname,
 		    (fname == NULL) ? "(no file name)" : fname);
 		zp->z_in_pager_op = 0;
 	} else  if (--zp->z_in_pager_op != 0) {
-		printf("ZFS: %s:%d: z_in_pager_op expected to be 0 after dec"
+		dprintf("ZFS: %s:%d: z_in_pager_op expected to be 0 after dec"
 		    " is now %d for fs %128s file %128s\n",
 		    __func__, __LINE__, zp->z_in_pager_op,
 		    (fsname == NULL) ? "(no dataset name)" : fsname,
