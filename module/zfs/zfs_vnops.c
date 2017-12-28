@@ -1670,6 +1670,33 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 
 	rl_t *rl = NULL;
 
+	/*
+	 * Spin without holding locks if anyone is in the pager for this file
+	 */
+	ASSERT(!rw_write_held(&zp->z_map_lock));
+
+	if(zp->z_in_pager_op > 0) {
+		const hrtime_t start_time = gethrtime();
+		hrtime_t bleat_at = start_time + SEC2NSEC(1);
+		while (zp->z_in_pager_op > 0) {
+			hrtime_t now = gethrtime();
+			if (now > bleat_at) {
+				bleat_at = now + SEC2NSEC(5);
+				const hrtime_t ns_since = now - start_time;
+				const uint32_t secs = NSEC2SEC(ns_since);
+				printf("ZFS: %s:%d: %d seconds of waiting for"
+				    " zp_in_pager_op to go to zero, is now %d"
+				    " for [%lld..%lld] resid %ld file %s (range_lock %d)\n",
+				    __func__, __LINE__, secs,
+				    zp->z_in_pager_op,
+				    woff, end_range, start_resid, zp->z_name_cache,
+				    range_lock);
+			}
+			void IOSleep(unsigned milliseconds);
+			IOSleep(1);
+		}
+	}
+
 	if (range_lock) {
 		/*
 		 * wait until the range_lock in zfs_write is dropped,
