@@ -2650,6 +2650,7 @@ top:
 
 	if (take_rlock) {
 		if (zp->z_in_pager_op > 0) {
+			// XXX
 			printf("ZFS: %s:%d: nonzero z_in_pager_op %d for fs %s file %s"
 			    " overriding range_lock (off %lld, len %ld)\n",
 			    __func__, __LINE__, zp->z_in_pager_op, fsname, fname,

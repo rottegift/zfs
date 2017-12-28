@@ -2115,6 +2115,10 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 	VNOPS_STAT_INCR(update_pages_want_lock, tries);
 
+	/* N.B.: our caller incremented zp->z_in_pager_op, so we must decrement now */
+
+	zp->z_in_pager_op--;
+
 	/* break the work into reasonable sized chunks */
 	const off_t chunk_size = (off_t)SPA_MAXBLOCKSIZE;
 	const int proj_chunks = howmany(start_resid, chunk_size);
@@ -2721,6 +2725,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	 * pageoutv2, which takes an RL and then the z_map_lock.
 	 */
 
+	zp->z_in_pager_op++; // release this after acquiring z_map_lock or if exiting early
+
 	/* if we are appending, bump woff to the end of file */
 	if (ioflag & FAPPEND) {
 		const off_t old_woff = woff;
@@ -2744,12 +2750,15 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	if (woff >= limit) {
 		zfs_range_unlock(rl);
+		zp->z_in_pager_op--;
 		ZFS_EXIT(zfsvfs);
 		return ((EFBIG));
 	}
 
+	/* on error, zfs_write_maybe_extend_file does zfs_range_unlock */
         error = zfs_write_maybe_extend_file(zp, woff, start_resid, rl);
 	if (error) {
+		zp->z_in_pager_op--;
 		ZFS_EXIT(zfsvfs);
 		printf("ZFS: %s:%d: (extend fail) returning error %d\n", __func__, __LINE__, error);
 		return (error);
@@ -2770,6 +2779,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			rl, start_resid, start_off, start_size,
 			woff, error));
 	}
+
+	zp->z_in_pager_op--; // XXX - but this branch is never taken, right?
 
 	/*
 	 * If we are called with the old_style flag true, or if we are
@@ -2831,6 +2842,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	if (woff >= limit) {
 		zfs_range_unlock(rl);
+		zp->z_in_pager_op--;
 		ZFS_EXIT(zfsvfs);
 		return ((EFBIG));
 	}
