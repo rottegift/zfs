@@ -3498,14 +3498,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 	}
 	if (zp) {
-		char *fname = zp->z_name_cache;
-		char *fsname = NULL;
-		if (zp->z_zfsvfs && zp->z_zfsvfs->z_vfs) {
-			fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+		char *here_fname = zp->z_name_cache;
+		char const *here_fsname = NULL;
+		static const char nulstr[] = "(NULL)";
+		if (zp && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted && zp->z_zfsvfs->z_vfs) {
+			here_fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 		}
-		if (fsname == NULL)
-			fsname = "(NULL)";
-		inc_z_in_pager_op(zp, fsname, fname);
+		if (here_fsname == NULL)
+			here_fsname = nulstr;
+		inc_z_in_pager_op(zp, here_fsname, here_fname);
 	}
 
 	zfsvfs = zp->z_zfsvfs;
