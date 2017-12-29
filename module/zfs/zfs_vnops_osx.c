@@ -2830,10 +2830,17 @@ out:
 			tsd_set(rl_key, NULL);
 		}
 		zfs_range_unlock(rl);
+		rl = NULL;
 		dec_z_in_pager_op(zp, fsname, fname);
 	}
-	if (flags & UPL_IOSYNC)
+	if (rl == NULL && tsd_get(rl_key) == NULL && flags & UPL_IOSYNC)
 		zil_commit(zfsvfs->z_log, zp->z_id);
+	else if (flags & UPL_IOSYNC)
+		printf("ZFS: %s:%d: zil_commit skipped because range lock may be held "
+		       " [%lld..%lld] fs %s fname %s (rl NULL? %d) (tsd rl null? %d)\n",
+		       __func__, __LINE__,
+		       off, off+len, fsname, fname,
+		       rl == NULL, tsd_get(rl_key) == NULL);
 
 	if (!(flags & UPL_NOCOMMIT)) {
 		if (err) {
@@ -4400,14 +4407,22 @@ already_acquired_locks:
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
 
-	if (drop_rl)
+	if (drop_rl) {
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		zfs_range_unlock(rl);
+		rl = NULL;
+	}
 	dec_z_in_pager_op(zp, fsname, fname);
 
-	if (a_flags & UPL_IOSYNC) {
+	if (a_flags & UPL_IOSYNC && rl == NULL && tsd_get(rl_key) == NULL) {
 		if (xxxbleat) printf("ZFS: %s:%d zil_commit file %s\n", __func__, __LINE__, zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
+	} else if (a_flags & UPL_IOSYNC) {
+		printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
+		       " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)\n",
+		       __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
+		       rl == NULL, tsd_get(rl_key) == NULL);
 	}
 
 	if (error != 0) {

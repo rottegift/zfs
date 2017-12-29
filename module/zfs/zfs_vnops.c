@@ -1703,6 +1703,8 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 		    __func__, __LINE__, error, msync_resid,
 		    woff, start_resid, end_range,
 		    ubcsize, msync_flags, zp->z_name_cache);
+	} else if (do_sync) {
+	  zil_commit(zfsvfs->z_log, zp->z_id);
 	}
 
 	ZFS_EXIT(zfsvfs);
