@@ -3617,9 +3617,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (rl == NULL) {
 		if (had_map_lock_at_entry) {
+			VERIFY(rw_write_held(&zp->z_map_lock));
 			printf("ZFS: %s:%d: dropping z_map_lock as could not get range lock,"
-			    " [%lld..%lld], fsname %s file %s\n", __func__, __LINE__,
-			    rloff, rllen, fsname, fname);
+			    " [%lld..%lld], fsname %s file %s (called from %s)\n", __func__, __LINE__,
+			    rloff, rllen, fsname, fname, zp->z_map_lock_holder);
+			zp->z_map_lock_holder = NULL;
 			rw_exit(&zp->z_map_lock);
 		}
 	}
@@ -3635,18 +3637,27 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
 
-	while(!rw_write_held(&zp->z_map_lock)){
-		ASSERT3S(had_map_lock_at_entry, ==, B_FALSE);
+	for(int ctr = 0; !rw_write_held(&zp->z_map_lock); ctr++){
+		VERIFY3P(rl, ==, NULL);
 		if (secs == 0)
 			secs = 1;
-		if (rw_tryenter(&zp->z_map_lock, RW_WRITER))
+		if ((rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER))
+		    && rw_tryenter(&zp->z_map_lock, RW_WRITER))
 			break;
+		if (rl != NULL) {
+			/*
+			 * as we have the range lock we can now safely wait on the
+			 * z_map_lock
+			 */
+			z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+			break;
+		}
 		hrtime_t cur_time = gethrtime();
 		if (cur_time > print_time) {
 			secs++;
 			printf("ZFS: %s:%d: looping for z_map_lock for %d sec"
 			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pager_op %d)"
-			    " (syncer active? %d curthread? %d)\n",
+			    " (syncer active? %d curthread? %d) ctr %d (rl? %d)\n",
 			    __func__, __LINE__, secs,
                             (zp->z_map_lock_holder != NULL)
                             ? zp->z_map_lock_holder
@@ -3654,7 +3665,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			    ap->a_size,
 			    fsname, fname, zp->z_in_pager_op,
-			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread);
+			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread,
+			    ctr, rl == NULL);
 			print_time = cur_time + SEC2NSEC(1);
 			if (rl)
 				zfs_range_unlock(rl);
@@ -3664,7 +3676,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    zp->z_in_pager_op);
 			IOSleep(10); // we hold no locks, so let work be done
 			/* as we hold no locks, we can stay in the cv_wait in the non try version */
-			rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
 		}
 		if (cur_time > abort_time) {
 			printf("ZFS: %s:%d: abandoning locking attempt after %d secs"
@@ -3684,6 +3695,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			goto exit_abort;
 		}
 		IODelay(1);
+		if ((ctr % 1024) == 0)
+			kpreempt(KPREEMPT_SYNC);
 	}
 
 	VERIFY3P(rl, !=, NULL);
