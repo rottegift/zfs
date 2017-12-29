@@ -2194,7 +2194,11 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
+			const off_t prev_rl_off = rl->rl_off;
+			const len_t prev_rl_len = rl->rl_len;
+			zfs_range_unlock(rl);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+			rl = zfs_range_lock(zp, prev_rl_off, prev_rl_len);
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			VNOPS_STAT_INCR(zfs_write_isreg_want_lock, tries);
 		}
