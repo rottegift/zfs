@@ -63,6 +63,12 @@ typedef struct rl {
  */
 rl_t *zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type);
 
+/*
+ * Same as above, but returns NULL rather than waiting, if the range cannot
+ * be locked immediately.
+ */
+rl_t *zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type);
+
 /* Unlock range and destroy range lock structure. */
 void zfs_range_unlock(rl_t *rl);
 

@@ -100,8 +100,8 @@
 /*
  * Check if a write lock can be grabbed, or wait and recheck until available.
  */
-static void
-zfs_range_lock_writer(znode_t *zp, rl_t *new)
+static boolean_t
+zfs_range_lock_writer(znode_t *zp, rl_t *new, boolean_t try)
 {
 	avl_tree_t *tree = &zp->z_range_avl;
 	rl_t *rl;
@@ -149,7 +149,7 @@ zfs_range_lock_writer(znode_t *zp, rl_t *new)
 		if (avl_numnodes(tree) == 0) {
 			new->r_type = RL_WRITER; /* convert to writer */
 			avl_add(tree, new);
-			return;
+			return (B_TRUE);
 		}
 
 		/*
@@ -169,12 +169,16 @@ zfs_range_lock_writer(znode_t *zp, rl_t *new)
 
 		new->r_type = RL_WRITER; /* convert possible RL_APPEND */
 		avl_insert(tree, new, where);
-		return;
+		return (B_TRUE);
 wait:
 		if (!rl->r_write_wanted) {
 			cv_init(&rl->r_wr_cv, NULL, CV_DEFAULT, NULL);
 			rl->r_write_wanted = B_TRUE;
 		}
+
+		if (try == B_TRUE)
+			return (B_FALSE);
+
 		cv_wait(&rl->r_wr_cv, &zp->z_range_lock);
 
 		/* reset to original */
@@ -352,8 +356,8 @@ zfs_range_add_reader(avl_tree_t *tree, rl_t *new, rl_t *prev, avl_index_t where)
 /*
  * Check if a reader lock can be grabbed, or wait and recheck until available.
  */
-static void
-zfs_range_lock_reader(znode_t *zp, rl_t *new)
+static boolean_t
+zfs_range_lock_reader(znode_t *zp, rl_t *new, boolean_t try)
 {
 	avl_tree_t *tree = &zp->z_range_avl;
 	rl_t *prev, *next;
@@ -378,6 +382,8 @@ retry:
 				cv_init(&prev->r_rd_cv, NULL, CV_DEFAULT, NULL);
 				prev->r_read_wanted = B_TRUE;
 			}
+			if (try)
+				return (B_FALSE);
 			cv_wait(&prev->r_rd_cv, &zp->z_range_lock);
 			goto retry;
 		}
@@ -401,6 +407,8 @@ retry:
 				cv_init(&next->r_rd_cv, NULL, CV_DEFAULT, NULL);
 				next->r_read_wanted = B_TRUE;
 			}
+			if (try)
+				return (B_FALSE);
 			cv_wait(&next->r_rd_cv, &zp->z_range_lock);
 			goto retry;
 		}
@@ -413,7 +421,10 @@ got_lock:
 	 * Add the read lock, which may involve splitting existing
 	 * locks and bumping ref counts (r_cnt).
 	 */
+
 	zfs_range_add_reader(tree, new, prev, where);
+
+	return (B_TRUE);
 }
 
 /*
@@ -448,13 +459,14 @@ zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type)
 		 */
 		if (avl_numnodes(&zp->z_range_avl) == 0)
 			avl_add(&zp->z_range_avl, new);
-		else
-			zfs_range_lock_reader(zp, new);
+	        else
+			VERIFY(zfs_range_lock_reader(zp, new, B_FALSE));
 	} else
-		zfs_range_lock_writer(zp, new); /* RL_WRITER or RL_APPEND */
+		VERIFY(zfs_range_lock_writer(zp, new, B_FALSE)); /* RL_WRITER or RL_APPEND */
 	mutex_exit(&zp->z_range_lock);
 	return (new);
 }
+
 
 static void
 zfs_range_free(void *arg)
@@ -468,6 +480,57 @@ zfs_range_free(void *arg)
 		cv_destroy(&rl->r_rd_cv);
 
 	kmem_free(rl, sizeof (rl_t));
+}
+
+/*
+ * returns either with the range lock held and rl_t pointing to a new object,
+ * or NULL having destroyed acquired resources.
+ */
+rl_t *
+zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type)
+{
+	rl_t *new;
+
+	boolean_t acquired_lock;
+
+	ASSERT(type == RL_READER || type == RL_WRITER || type == RL_APPEND);
+
+	new = kmem_alloc(sizeof (rl_t), KM_SLEEP);
+	new->r_zp = zp;
+	new->r_off = off;
+	if (len + off < off)	/* overflow */
+		len = UINT64_MAX - off;
+	new->r_len = len;
+	new->r_cnt = 1; /* assume it's going to be in the tree */
+	new->r_type = type;
+	new->r_proxy = B_FALSE;
+	new->r_write_wanted = B_FALSE;
+	new->r_read_wanted = B_FALSE;
+
+	mutex_enter(&zp->z_range_lock);
+	if (type == RL_READER) {
+		/*
+		 * First check for the usual case of no locks
+		 */
+		if (avl_numnodes(&zp->z_range_avl) == 0) {
+			avl_add(&zp->z_range_avl, new);
+			acquired_lock = B_TRUE;
+		} else {
+			acquired_lock = zfs_range_lock_reader(zp, new, B_TRUE);
+		}
+	} else
+		acquired_lock = zfs_range_lock_writer(zp, new, B_TRUE); /* RL_WRITER or RL_APPEND */
+
+	mutex_exit(&zp->z_range_lock);
+
+	/* return appropriate result */
+
+	if (acquired_lock) {
+		return (new);
+	} else {
+		zfs_range_free(new);
+		return (NULL);
+	}
 }
 
 /*
