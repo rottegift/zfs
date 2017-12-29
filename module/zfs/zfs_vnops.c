@@ -5298,7 +5298,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-	zfs_range_unlock(rl); // pageout may need to range lock
+	zfs_range_unlock(rl);
 	tsd_set(rl_key, NULL);
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);

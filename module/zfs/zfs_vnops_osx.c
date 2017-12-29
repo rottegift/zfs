@@ -3456,7 +3456,8 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 		    __func__, __LINE__, elapsed_seconds, zp->z_name_cache);
 	}
 
-	if (do_zil_commit && zfsvfs->z_log && !vnode_isrecycled(vp))
+	if (rl == NULL && tsd_get(rl_key) == NULL
+	    && do_zil_commit && zfsvfs->z_log && !vnode_isrecycled(vp))
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
 	if (retval == 0)
