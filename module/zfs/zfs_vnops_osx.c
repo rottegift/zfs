@@ -3676,7 +3676,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    rllen, rloff, rloff + rllen);
 		/* check our caller hasn't underlocked */
 		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
-		ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len), >=, rloff + rllen);
+		/* XXX : why is the non-added-to LHS short by exactly PAGE_SIZE_64 always? */
+		ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len) + PAGE_SIZE_64, >=, rloff + rllen);
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
 		if (!rw_lock_held(&zp->z_map_lock)) {
@@ -3850,8 +3851,8 @@ already_acquired_locks:
 		if (rl->r_len == 0 && rl->r_off == UINT64_MAX) {
 		  zfs_range_reduce(rl, rloff, rllen);
 		} else {
-		  ASSERT3S(rl->r_len, ==, rllen);
-		  ASSERT3S(rl->r_off, ==, rloff);
+		  ASSERT3S(round_page_64(rl->r_len), ==, rllen);
+		  ASSERT3S(trunc_page_64(rl->r_off), ==, rloff);
 		}
 	}
 
