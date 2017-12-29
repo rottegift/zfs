@@ -1416,7 +1416,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	zp->z_in_pager_op++;
 	ASSERT3S(uio_resid(uio), >, 0);
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
-	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)), round_page_64(uio_resid(uio) - 1), RL_WRITER);
+	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)), round_page_64(uio_resid(uio)), RL_WRITER);
 	tsd_set(rl_key, rl);
 
 	/*
@@ -2802,7 +2802,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	} else {
 		ASSERT3S(start_resid, >, 0);
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(start_resid - 1), RL_WRITER);
+		rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(start_resid), RL_WRITER);
 		tsd_set(rl_key, rl);
 	}
 
