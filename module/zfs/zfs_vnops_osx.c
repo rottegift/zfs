@@ -1945,6 +1945,7 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 
 			for (i = 0; i < INT32_MAX; i++) {
+				ASSERT3P(tsd_get(rl_key), ==, NULL);
 				rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 				if (i > 10000) {
 					printf("ZFS: %s:%d: DEADLOCK AVOIDANCE i=%d\n",
@@ -2324,7 +2325,20 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	} else {
 		need_rl_unlock = B_TRUE;
 		need_z_lock = B_TRUE;
-		rl = zfs_range_lock(zp, off, len, RL_READER);
+		if (tsd_get(rl_key) != NULL) {
+			rl = tsd_get(rl_key);
+			printf("ZFS: %s:%d: recovered rl from TSD (type %d) (len %lld)[%lld..%lld],"
+			    " (write wanted? %d) (read wanted %d), (filesize %lld), fs %s, fn %s"
+			    " desired range (len %ld) [%lld..%lld]\n",  __func__, __LINE__,
+			    rl->r_type, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
+			    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
+			    len, off, off + len);
+			ASSERT3S(rl->r_off, <=, off);
+			ASSERT3S(rl->r_off + rl->r_len, >=, off + len);
+			need_rl_unlock = B_FALSE;
+		} else {
+			rl = zfs_range_lock(zp, off, len, RL_READER);
+		}
 	}
 
 	boolean_t need_release = B_FALSE;
@@ -2334,7 +2348,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		int secs = 0;
 		extern void IOSleep(unsigned milliseconds); // yields thread
 		extern void IODelay(unsigned microseconds); // x86_64 rep nop
-		ASSERT3S(need_rl_unlock, ==, B_TRUE);
 		uint64_t tries = 0;
 		while(!rw_write_held(&zp->z_map_lock)){
 			tries++;
@@ -2342,14 +2355,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				secs = 1;
 			if (rw_tryenter(&zp->z_map_lock, RW_WRITER))
 				break;
-			// couldn't get it, maybe drop the range lock
-			if (rl->r_write_wanted || rl->r_read_wanted) {
-				printf("ZFS: %s:%d range lock contended, dropping it for [%lld, %ld] for file %s\n",
-				    __func__, __LINE__, ap->a_f_offset, ap->a_size, zp->z_name_cache);
-				zfs_range_unlock(rl);
-				IOSleep(1); // we hold no locks, so let work be done
-				rl = zfs_range_lock(zp, off, len, RL_READER);
-			}
 			hrtime_t cur_time = gethrtime();
 			if (cur_time > print_time) {
 				secs++;
@@ -2463,7 +2468,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		error = EFAULT;
 
 	if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
-	if (need_rl_unlock) { zfs_range_unlock(rl); }
+	if (need_rl_unlock) { ASSERT3P(tsd_get(rl_key), ==, NULL);  zfs_range_unlock(rl); }
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 	ZFS_EXIT(zfsvfs);
 	if (error) {
@@ -2673,10 +2678,10 @@ top:
 		if (tsd_get(rl_key) != NULL) {
 			ASSERT0(zp->z_in_pager_op);
 			rl = tsd_get(rl_key);
-			printf("ZFS: %s:%d: recovered rl from TSD (len %lld)[%lld, %lld],"
+			printf("ZFS: %s:%d: recovered rl from TSD (type %d)(len %lld)[%lld..%lld],"
 			    " (write wanted? %d)(read wanted? %d), (filesize %lld), fs %s, fn %s"
 			    " desired range (len %ld) [%lld..%lld]\n", __func__, __LINE__,
-			    rl->r_len, rl->r_off, rl->r_off + rl->r_len,
+			    rl->r_type, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
 			    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
 			    len, off, off + len);
 			ASSERT3S(rl->r_off, <=, off);
@@ -3647,12 +3652,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (tsd_get(rl_key) != NULL) {
 		rl = tsd_get(rl_key);
-		printf("ZFS: %s:%d: recovered rl from TSD, (len %lld)[%lld, %lld],"
+		printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
 		    " (write wanted? %d) (read wanted? %d), (filesize %lld), fs %s fn %s"
 		    " (lock held at entry? %d),"
 		    " desired range (len %lld) [%lld..%lld]\n",
 		    __func__, __LINE__,
-		    rl->r_len, rl->r_off, rl->r_len + rl->r_off,
+		    rl->r_type, rl->r_len, rl->r_off, rl->r_len + rl->r_off,
 		    rl->r_write_wanted,  rl->r_read_wanted, zp->z_size, fsname, fname,
 		    had_map_lock_at_entry,
 		    rllen, rloff, rloff + rllen);
@@ -3708,6 +3713,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		VERIFY3P(rl, ==, NULL);
 		if (secs == 0)
 			secs = 1;
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		if ((rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER))
 		    && rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
 			break;
