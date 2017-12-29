@@ -3304,8 +3304,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
  * (ultimate goal: total FIFO
  */
 
-
-
 int
 zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int flags)
 {
@@ -3321,7 +3319,9 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
 
-	tsd_set(rl_key, rl);
+	ASSERT3P(tsd_get(rl_key), ==, rl);
+	if (tsd_get(rl_key) == NULL)
+		tsd_set(rl_key, rl);
 
 	const hrtime_t entry_time = gethrtime();
 
@@ -3457,7 +3457,7 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	if (retval == 0)
 		zp->z_mr_sync = exit_time;
 
-	tsd_set(rl_key, NULL);
+	ASSERT3P(tsd_get(rl_key), ==, rl);
 
 	ZFS_EXIT(zfsvfs);
 
