@@ -3494,7 +3494,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	    (rw_write_held(&zp->z_map_lock) ||
 		(zp->z_syncer_active == curthread && zp->z_in_pager_op <= 0))) {
 		/* no collision, or we are re-entering, but whine about underflow */
-		ASSERT0(zp->z_in_pager_op);
+		if (zp->z_in_pager_op != 0)
+			printf("ZFS: %s:%d expected 0 in_pager_op see %d (me? %d) (lock held? %d)\n",
+			    __func__, __LINE__, zp->z_in_pager_op,
+			    (zp->z_syncer_active == curthread), rw_write_held(&zp->z_map_lock));
 	} else {
 		if (zp) {
 			ASSERT3P(zp->z_sa_hdl, !=, NULL);
@@ -3610,6 +3613,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	extern void IOSleep(unsigned milliseconds); // yields thread
 	extern void IODelay(unsigned microseconds); // x86_64 rep nop
 
+	boolean_t need_release = B_FALSE;
+	boolean_t need_upgrade = B_FALSE;
 
 	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
 
@@ -3624,21 +3629,19 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			zp->z_map_lock_holder = NULL;
 			rw_exit(&zp->z_map_lock);
 		}
-	}
-
-	boolean_t need_release = B_FALSE;
-	boolean_t need_upgrade = B_FALSE;
-
-	if (rl == NULL) {
 		VERIFY(!rw_write_held(&zp->z_map_lock));
-	} else {
+	} else if (!rw_lock_held(&zp->z_map_lock)){
 		/* as we have the range lock, it is safe for us to wait on the z_map_lock */
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
+	} else {
+		VERIFY3P(rl, !=, NULL);
+		VERIFY(rw_lock_held(&zp->z_map_lock));
 	}
 
+	EQUIV(rl != NULL, rw_write_held(&zp->z_map_lock));
+
 	hrtime_t print_time = gethrtime() + SEC2NSEC(1);
-	const hrtime_t abort_time = gethrtime() + SEC2NSEC(10);
 	int secs = 0;
 
 	for(int ctr = 0; !rw_write_held(&zp->z_map_lock); ctr++){
@@ -3672,7 +3675,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    ap->a_size,
 			    fsname, fname, zp->z_in_pager_op,
 			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread,
-			    ctr, rl == NULL);
+			    ctr, rl != NULL);
 			print_time = cur_time + SEC2NSEC(1);
 			if (rl)
 				zfs_range_unlock(rl);
@@ -3682,23 +3685,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    zp->z_in_pager_op);
 			IOSleep(10); // we hold no locks, so let work be done
 			/* as we hold no locks, we can stay in the cv_wait in the non try version */
-		}
-		if (cur_time > abort_time) {
-			printf("ZFS: %s:%d: abandoning locking attempt after %d secs"
-			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pager_op %d)"
-			    " (syncer active? %d curthread? %d)\n",
-			    __func__, __LINE__, secs,
-			    (zp->z_map_lock_holder != NULL)
-			    ? zp->z_map_lock_holder
-			    : "(NULL)",
-			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
-			    ap->a_size,
-			    fsname, fname, zp->z_in_pager_op,
-			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread);
-			if (rl)
-				zfs_range_unlock(rl);
-			error = EDEADLK;
-			goto exit_abort;
 		}
 		IODelay(1);
 		if ((ctr % 1024) == 0 && ctr > 0) {
@@ -4332,6 +4318,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 
 	if (had_map_lock_at_entry == B_FALSE) {
+		ASSERT(rw_write_held(&zp->z_map_lock));
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
@@ -4364,6 +4351,7 @@ pageout_done:
 
 	ASSERT3S(mapped, ==, B_FALSE);
 	if (had_map_lock_at_entry == B_FALSE) {
+		ASSERT(rw_write_held(&zp->z_map_lock));
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
