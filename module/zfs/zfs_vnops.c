@@ -2727,6 +2727,23 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	zp->z_in_pager_op++; // release this after acquiring z_map_lock or if exiting early
 
+	/* We can only grab the range lock if there isn't a syncer active */
+
+	boolean_t unset_syncer = B_FALSE;
+
+	ASSERT3P(zp->z_syncer_active, !=, curthread);
+	mutex_enter(&zp->z_ubc_msync_lock);
+	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
+	        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+	}
+	ASSERT3S(zp->z_syncer_active, ==, NULL);
+	zp->z_syncer_active = curthread;
+	mutex_exit(&zp->z_ubc_msync_lock);
+	unset_syncer = B_TRUE;
+
+	/* Now grab range locks */
+
 	/* if we are appending, bump woff to the end of file */
 	if (ioflag & FAPPEND) {
 		const off_t old_woff = woff;
@@ -2747,6 +2764,13 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		rl = zfs_range_lock(zp, woff, start_resid, RL_WRITER);
 	}
 
+	if (unset_syncer) {
+		ASSERT3S(zp->z_syncer_active, ==, curthread);
+		mutex_enter(&zp->z_ubc_msync_lock);
+		zp->z_syncer_active = NULL;
+		cv_signal(&zp->z_ubc_msync_cv);
+		mutex_exit(&zp->z_ubc_msync_lock);
+	}
 
 	if (woff >= limit) {
 		zfs_range_unlock(rl);
@@ -2779,6 +2803,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			rl, start_resid, start_off, start_size,
 			woff, error));
 	}
+
+//////////// old style write follows for non-regular files (never taken, right? )/////////////
 
 	zp->z_in_pager_op--; // XXX - but this branch is never taken, right?
 
