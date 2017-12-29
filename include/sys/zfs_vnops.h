@@ -203,7 +203,7 @@ extern void   getnewvnode_drop_reserve( void );
 extern int    zfs_vfsops_init(void);
 extern int    zfs_vfsops_fini(void);
 
-extern uint_t zfs_rl_key;
+extern uint_t rl_key;
 
 /* zfs_vnops_osx_lib calls */
 extern int    zfs_ioflags( int ap_ioflag );

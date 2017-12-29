@@ -262,7 +262,9 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;
 		/* See if we are colldiing with other ZPL activity, hang here rather than below */
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		tsd_set(rl_key, rl);
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		/* do the msync */
@@ -274,6 +276,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			claim = B_TRUE;
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
 		zfs_range_unlock(rl);
 		ASSERT3S(tries, <=, 2);
 		/* error checking, unlocking, and returning */
