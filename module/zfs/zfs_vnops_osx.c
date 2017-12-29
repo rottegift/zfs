@@ -2339,7 +2339,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 			    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
 			    len, off, off + len);
 			ASSERT3S(trunc_page_64(rl->r_off), <=, off);
-			ASSERT3S(round_page_64(rl->r_off + rl->r_len), >=, off + len);
+			ASSERT3S(trunc_page_64(rl->r_off)+ round_page_64(rl->r_len), >=, off + len);
 			need_rl_unlock = B_FALSE;
 		} else {
 			rl = zfs_range_lock(zp, off, len, RL_READER);
@@ -2690,7 +2690,7 @@ top:
 			    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
 			    len, off, off + len);
 			ASSERT3S(trunc_page_64(rl->r_off), <=, off);
-			ASSERT3S(round_page_64(rl->r_off + rl->r_len), >=, off + len);
+			ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len), >=, off + len);
 			ASSERT(rw_write_held(&zp->z_map_lock));
 		} else {
 			ASSERT0(zp->z_in_pager_op);
@@ -3676,7 +3676,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    rllen, rloff, rloff + rllen);
 		/* check our caller hasn't underlocked */
 		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
-		ASSERT3S(round_page_64(rl->r_off + rl->r_len), >=, rloff + rllen);
+		ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len), >=, rloff + rllen);
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
 		if (!rw_lock_held(&zp->z_map_lock)) {
@@ -3847,7 +3847,12 @@ already_acquired_locks:
 			zfs_grow_blocksize(zp, new_blksz, tx);
 			dmu_tx_commit(tx);
 		}
-		zfs_range_reduce(rl, rloff, rllen);
+		if (rl->r_len == 0 && rl->r_off == UINT64_MAX) {
+		  zfs_range_reduce(rl, rloff, rllen);
+		} else {
+		  ASSERT3S(rl->r_len, ==, rllen);
+		  ASSERT3S(rl->r_off, ==, rloff);
+		}
 	}
 
 	if (ubc_getsize(vp) < zp->z_size) {
