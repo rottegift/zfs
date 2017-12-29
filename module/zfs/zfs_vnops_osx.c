@@ -2338,8 +2338,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 			    rl->r_type, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
 			    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
 			    len, off, off + len);
-			ASSERT3S(rl->r_off, <=, off);
-			ASSERT3S(rl->r_off + rl->r_len, >=, off + len);
+			ASSERT3S(trunc_page_64(rl->r_off), <=, off);
+			ASSERT3S(round_page_64(rl->r_off + rl->r_len), >=, off + len);
 			need_rl_unlock = B_FALSE;
 		} else {
 			rl = zfs_range_lock(zp, off, len, RL_READER);
@@ -2689,8 +2689,8 @@ top:
 			    rl->r_type, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
 			    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
 			    len, off, off + len);
-			ASSERT3S(rl->r_off, <=, off);
-			ASSERT3S(rl->r_off + rl->r_len, >=, off + len);
+			ASSERT3S(trunc_page_64(rl->r_off), <=, off);
+			ASSERT3S(round_page_64(rl->r_off + rl->r_len), >=, off + len);
 			ASSERT(rw_write_held(&zp->z_map_lock));
 		} else {
 			ASSERT0(zp->z_in_pager_op);
@@ -3657,7 +3657,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (tsd_get(rl_key) != NULL) {
 		rl = tsd_get(rl_key);
-		printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
+		dprintf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
 		    " (write wanted? %d) (read wanted? %d), (filesize %lld), fs %s fn %s"
 		    " (lock held at entry? %d),"
 		    " desired range (len %lld) [%lld..%lld]\n",
@@ -3667,8 +3667,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    had_map_lock_at_entry,
 		    rllen, rloff, rloff + rllen);
 		/* check our caller hasn't underlocked */
-		ASSERT3S(rl->r_off, <=, rloff);
-		ASSERT3S(rl->r_off + rl->r_len, >=, rloff + rllen);
+		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
+		ASSERT3S(round_page_64(rl->r_off + rl->r_len), >=, rloff + rllen);
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
 		if (!rw_lock_held(&zp->z_map_lock)) {
@@ -3684,7 +3684,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	extern void IOSleep(unsigned milliseconds); // yields thread
 	extern void IODelay(unsigned microseconds); // x86_64 rep nop
-
 
 	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
 
