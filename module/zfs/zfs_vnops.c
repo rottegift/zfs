@@ -2796,7 +2796,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		uio_setoffset(uio, woff);
 	} else {
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl = zfs_range_lock(zp, woff, start_resid, RL_WRITER);
+		rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(start_resid), RL_WRITER);
 		tsd_set(rl_key, rl);
 	}
 
@@ -3453,9 +3453,9 @@ zfs_get_done(zgd_t *zgd, int error)
 	if (zgd->zgd_db)
 		dmu_buf_rele(zgd->zgd_db, zgd);
 
-	ASSERT3P(tsd_get(rl_key), ==, zgd->zgd_rl);
+	//ASSERT3P(tsd_get(rl_key), ==, zgd->zgd_rl);
 	zfs_range_unlock(zgd->zgd_rl);
-	tsd_set(rl_key, NULL);
+	//tsd_set(rl_key, NULL);
 
 	/*
 	 * Release the vnode asynchronously as we currently have the
@@ -3523,8 +3523,8 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 	zgd->zgd_zilog = zfsvfs->z_log;
 	zgd->zgd_private = zp;
 	zgd->zgd_rl = rl;
-	ASSERT3P(tsd_get(rl_key), ==, NULL);
-	tsd_set(rl_key, rl);
+	//ASSERT3P(tsd_get(rl_key), ==, NULL);
+	//tsd_set(rl_key, rl);
 
 	/*
 	 * Write records come in two flavors: immediate and indirect.
