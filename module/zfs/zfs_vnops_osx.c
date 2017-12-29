@@ -3677,8 +3677,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    rllen, rloff, rloff + rllen);
 		/* check our caller hasn't underlocked */
 		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
-		ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len), >=, rloff + rllen);
-		ASSERT3S(round_page_64(rl->r_len), >=, rllen);
+		const off_t rlsize = rloff + rllen;
+		const off_t rlsize_or_fsize = MIN(rlsize, zp->z_size);
+		const off_t rllen_not_past_eof = rlsize_or_fsize - rloff;
+		ASSERT3S(round_page_64(rl->r_len), >=, rllen_not_past_eof);
+		ASSERT3S(MIN(trunc_page_64(rl->r_off) + round_page_64(rl->r_len), zp->z_size),
+			 >=, MIN(zp->z_size, rlsize));
 
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
@@ -3853,8 +3857,11 @@ already_acquired_locks:
 		if (rl->r_len == 0 && rl->r_off == UINT64_MAX) {
 		  zfs_range_reduce(rl, rloff, rllen);
 		} else {
-		  ASSERT3S(round_page_64(rl->r_len), ==, rllen);
-		  ASSERT3S(trunc_page_64(rl->r_off), ==, rloff);
+		  const off_t rlsize = rloff + rllen;
+		  const off_t rlsize_or_fsize = MIN(rlsize, zp->z_size);
+		  const off_t rlsize_not_past_eof = rlsize_or_fsize - rloff;
+		  ASSERT3S(round_page_64(rl->r_len), >=, rlsize_not_past_eof);
+		  ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
 		}
 	}
 
