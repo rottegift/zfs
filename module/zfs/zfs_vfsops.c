@@ -265,17 +265,16 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		/* give up range_lock, since pageoutv2 may need it */
-		zfs_range_unlock(rl);
 		/* do the msync */
 		int msync_retval = 0;
 		if (zp->z_in_pager_op == 0) {
 			claim = B_FALSE;
-			msync_retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, flags);
+			msync_retval = zfs_ubc_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
 		} else {
 			claim = B_TRUE;
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		zfs_range_unlock(rl);
 		ASSERT3S(tries, <=, 2);
 		/* error checking, unlocking, and returning */
 		if (msync_retval != 0 &&

@@ -190,7 +190,8 @@ extern int    zfs_setsecattr(vnode_t *vp, vsecattr_t *vsecp, int flag,
                              cred_t *cr, caller_context_t *ct);
 
 /* zfs_vnops_osx.c calls */
-extern int    zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags);
+typedef struct rl rl_t; // forward
+extern int    zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int flags);
 extern int    zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 				offset_t off, size_t size, int flags, boolean_t take_rlock,
 				boolean_t inactivate, boolean_t clear_flags);
@@ -201,6 +202,8 @@ extern void   getnewvnode_reserve( int num );
 extern void   getnewvnode_drop_reserve( void );
 extern int    zfs_vfsops_init(void);
 extern int    zfs_vfsops_fini(void);
+
+extern uint_t zfs_rl_key;
 
 /* zfs_vnops_osx_lib calls */
 extern int    zfs_ioflags( int ap_ioflag );
@@ -253,7 +256,7 @@ extern void aces_from_acl(ace_t *aces, int *nentries, struct kauth_acl *k_acl,
 extern void nfsacl_set_wellknown(int wkg, guid_t *guid);
 extern int  zfs_addacl_trivial(znode_t *zp, ace_t *aces, int *nentries,
 							   int seen_type);
-extern int ubc_invalidate_range(vnode_t *vp, off_t start_byte, off_t end_byte);
+extern int ubc_invalidate_range(znode_t *zp, rl_t *rl, off_t start_byte, off_t end_byte);
 extern int ubc_fill_holes_in_range(vnode_t *vp, off_t    start_byte, off_t end_byte, boolean_t will_mod);
 extern int ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte);
 extern int dmu_write_wait_safe(znode_t *zp, off_t start_range, off_t end_range);

@@ -93,6 +93,7 @@
 
 #include <sys/znode_z_map_lock.h>
 
+uint_t rl_key;
 extern const size_t MAX_UPL_SIZE_BYTES;
 
 typedef struct vnops_osx_stats {
@@ -3279,11 +3280,13 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
  * (ultimate goal: total FIFO
  */
 
+
+
 int
-zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
+zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int flags)
 {
 
-	znode_t *zp = VTOZ(vp);
+	vnode_t *vp = ZTOV(zp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 	boolean_t do_zil_commit = B_FALSE;
 
@@ -3293,6 +3296,8 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
+
+	tsd_set(rl_key, rl);
 
 	const hrtime_t entry_time = gethrtime();
 
@@ -3427,6 +3432,8 @@ zfs_ubc_msync(vnode_t *vp, off_t start, off_t end, off_t *resid, int flags)
 
 	if (retval == 0)
 		zp->z_mr_sync = exit_time;
+
+	tsd_set(rl_key, NULL);
 
 	ZFS_EXIT(zfsvfs);
 
@@ -3610,11 +3617,45 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	const off_t rloff = trunc_page_64(ap->a_f_offset);
 	const off_t rllen = round_page_64(a_size);
 
+	boolean_t need_release = B_FALSE;
+	boolean_t need_upgrade = B_FALSE;
+
+	/*
+	 * Check to see if we have a range lock
+	 */
+
+	boolean_t drop_rl = B_TRUE;
+
+	if (tsd_get(rl_key) != NULL) {
+		rl = tsd_get(rl_key);
+		printf("ZFS: %s:%d: recovered rl from TSD, (len %lld)[%lld, %lld],"
+		    " (write wanted? %d) (read wanted? %d), (filesize %lld), fs %s fn %s"
+		    " (lock held at entry? %d),"
+		    " desired range (len %lld) [%lld..%lld]\n",
+		    __func__, __LINE__,
+		    rl->r_len, rl->r_off, rl->r_len + rl->r_off,
+		    rl->r_write_wanted,  rl->r_read_wanted, zp->z_size, fsname, fname,
+		    had_map_lock_at_entry,
+		    rllen, rloff, rloff + rllen);
+		/* check our caller hasn't underlocked */
+		ASSERT3S(rl->r_off, <=, rloff);
+		ASSERT3S(rl->r_off + rl->r_len, >=, rloff + rllen);
+		/* check our caller hasn't dropped z_map_lock */
+		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
+		if (!rw_lock_held(&zp->z_map_lock)) {
+			ASSERT3S(had_map_lock_at_entry, ==, B_FALSE);
+			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+			VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
+		}
+		ASSERT(rw_lock_held(&zp->z_map_lock));
+		/* let our caller drop the range_lock */
+		drop_rl = B_FALSE;
+		goto already_acquired_locks;
+	}
+
 	extern void IOSleep(unsigned milliseconds); // yields thread
 	extern void IODelay(unsigned microseconds); // x86_64 rep nop
 
-	boolean_t need_release = B_FALSE;
-	boolean_t need_upgrade = B_FALSE;
 
 	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
 
@@ -3695,8 +3736,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	VERIFY3P(rl, !=, NULL);
 	VERIFY(rw_write_held(&zp->z_map_lock));
-	need_release = B_TRUE;
 	zp->z_map_lock_holder = __func__;
+	need_release = B_TRUE;
 
 	if (secs == 0) {
 		dprintf("ZFS: %s:%d: lock was already held for fs %s file %s\n",
@@ -3704,6 +3745,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	} else {
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, secs);
 	}
+
+already_acquired_locks:
+
+	VERIFY3P(rl, !=, NULL);
+	VERIFY(rw_write_held(&zp->z_map_lock));
 
 	/* extend file if necessary, but not if we have re-entered */
 	if (had_map_lock_at_entry != B_TRUE) {
@@ -4323,7 +4369,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
 
-	zfs_range_unlock(rl);
+	if (drop_rl)
+		zfs_range_unlock(rl);
 	dec_z_in_pager_op(zp, fsname, fname);
 
 	if (a_flags & UPL_IOSYNC) {
@@ -4356,7 +4403,8 @@ pageout_done:
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
 
-	zfs_range_unlock(rl);
+	if (drop_rl)
+		zfs_range_unlock(rl);
 	dec_z_in_pager_op(zp, fsname, fname);
 
 exit_abort:
@@ -4690,7 +4738,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		int msync_flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
-		retval = zfs_ubc_msync(vp, (off_t)0, ubcsize, &resid_off, msync_flags);
+		retval = zfs_ubc_msync(zp, NULL, (off_t)0, ubcsize, &resid_off, msync_flags);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
 		ASSERT3S(retval, ==, 0);
@@ -6859,6 +6907,8 @@ zfs_vfsops_init(void)
 {
 	struct vfs_fsentry vfe;
 
+	tsd_create(&rl_key, NULL);
+
 	zfs_init();
 
 	/* Start thread to notify Finder of changes */
@@ -6902,6 +6952,8 @@ zfs_vfsops_fini(void)
 	zfs_stop_notify_thread();
 
 	zfs_fini();
+
+	tsd_destroy(&rl_key);
 
 	return (vfs_fsremove(zfs_vfsconf));
 }

@@ -460,9 +460,8 @@ zfs_holey(struct vnode *vp, int cmd, loff_t *off)
 #endif /* SEEK_HOLE && SEEK_DATA */
 
 static
-int ubc_invalidate_range_impl(vnode_t *vp, off_t start, off_t end)
+int ubc_invalidate_range_impl(znode_t *zp, rl_t *rl, off_t start, off_t end)
 {
-	znode_t *zp = VTOZ(vp);
 
 	off_t size = end - start;
 	int retval_msync = 0;
@@ -471,7 +470,7 @@ int ubc_invalidate_range_impl(vnode_t *vp, off_t start, off_t end)
 
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-	retval_msync = zfs_ubc_msync(vp, start, end, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
+	retval_msync = zfs_ubc_msync(zp, rl, start, end, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3S(tries, <=, 2);
 
@@ -492,7 +491,7 @@ int ubc_invalidate_range_impl(vnode_t *vp, off_t start, off_t end)
 }
 
 int
-ubc_invalidate_range(vnode_t *vp, off_t start_byte, off_t end_byte)
+ubc_invalidate_range(znode_t *zp, rl_t *rl, off_t start_byte, off_t end_byte)
 {
 	/*
 	 * these roundings are done by ubc_msync_internal, but are
@@ -504,7 +503,7 @@ ubc_invalidate_range(vnode_t *vp, off_t start_byte, off_t end_byte)
 	ASSERT3U(start, <=, start_byte);
 	ASSERT3U(end, >=, end_byte);
 
-	return(ubc_invalidate_range_impl(vp, start, end));
+	return(ubc_invalidate_range_impl(zp, rl, start, end));
 }
 
 /*
@@ -1398,7 +1397,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 			int flags = UBC_PUSHDIRTY | UBC_SYNC;
 			if (spl_ubc_is_mapped(vp, NULL))
 				flags = UBC_PUSHDIRTY | UBC_SYNC;
-			int retval = zfs_ubc_msync(vp, 0, ubcsize, &resid_off, flags);
+			int retval = zfs_ubc_msync(zp, NULL, 0, ubcsize, &resid_off, flags);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3S(tries, <=, 2);
 			ASSERT3S(retval, ==, 0);
@@ -1685,13 +1684,11 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 		msync_flags |= UBC_SYNC;
 	}
 
-	/* we have to drop the range lock for zfs_ubc_msync */
-
-	zfs_range_unlock(rl);
-
-	error = zfs_ubc_msync(vp, woff, end_range, &msync_resid, msync_flags);
+	error = zfs_ubc_msync(zp, rl, woff, end_range, &msync_resid, msync_flags);
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
+
+	zfs_range_unlock(rl);
 
 	if (error != 0) {
 		printf("ZFS: %s:%d: ubc_msync error %d msync_resid %lld"
@@ -1899,9 +1896,9 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				msync_flags |= UBC_SYNC;
 			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-			zfs_range_unlock(rlock);
-			int retval = zfs_ubc_msync(vp, aoff, aend, &resid_off, msync_flags);
+			int retval = zfs_ubc_msync(zp, rlock, aoff, aend, &resid_off, msync_flags);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
+			zfs_range_unlock(rlock);
 			ASSERT3S(tries, <=, 2);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0) {
@@ -3375,7 +3372,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			off_t ubcsize = ubc_getsize(vp);
 			int clean_before = is_file_clean(vp, ubcsize);
 			if (clean_before != 0) {
-				ASSERT3U(ubcsize, >, 0);
+ 				ASSERT3U(ubcsize, >, 0);
 				int flag = UBC_PUSHDIRTY;
 				if (spl_ubc_is_mapped(vp, NULL))
 					flag = UBC_PUSHDIRTY | UBC_SYNC;
@@ -3383,7 +3380,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 					flag |= UBC_SYNC;
 				boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 				uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-				ubc_msync_err = zfs_ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flag);
+				ubc_msync_err = zfs_ubc_msync(zp, NULL, 0, ubc_getsize(vp), &resid_off, flag);
 				z_map_drop_lock(zp, &need_release, &need_upgrade);
 				ASSERT3S(tries, <=, 2);
 				if (ubc_msync_err != 0 &&
@@ -4187,7 +4184,7 @@ top:
 		// we should report and invalidate any
 		dprintf("ZFS: %s:%d: may_delete_now but ubc_pages_resident is true (z_drain %d) file %s\n",
 		    __func__, __LINE__, zp->z_drain, zp->z_name_cache);
-		int inval_err = ubc_invalidate_range(vp, 0, ubc_getsize(vp));
+		int inval_err = ubc_invalidate_range(zp, NULL, 0, ubc_getsize(vp));
 		ASSERT3S(inval_err, ==, 0);
 		ASSERT0(is_file_clean(vp, ubc_getsize(vp))); // is_file_clean is 0 if clean
 		ASSERT0(vnode_isinuse(vp, 0));
@@ -5238,17 +5235,17 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	boolean_t need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 	VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
-	zfs_range_unlock(rl); // pageout may need to range lock
 
 	off_t resid_off = 0;
 	int flags = UBC_PUSHALL | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
-	int retval = zfs_ubc_msync(vp, 0, ubc_getsize(vp), &resid_off, flags);
+	int retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, flags);
 	if (retval != 0) {
 		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
 		    __func__, __LINE__, retval, zp->z_size, zp->z_name_cache);
 	}
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
+	zfs_range_unlock(rl); // pageout may need to range lock
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 
