@@ -3607,20 +3607,33 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	const off_t rloff = trunc_page_64(ap->a_f_offset);
 	const off_t rllen = round_page_64(a_size);
 
-	rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
+	extern void IOSleep(unsigned milliseconds); // yields thread
+	extern void IODelay(unsigned microseconds); // x86_64 rep nop
+
+
+	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
+
+	rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER);
+
+	if (rl == NULL) {
+		if (had_map_lock_at_entry) {
+			printf("ZFS: %s:%d: dropping z_map_lock as could not get range lock,"
+			    " [%lld..%lld], fsname %s file %s\n", __func__, __LINE__,
+			    rloff, rllen, fsname, fname);
+			rw_exit(&zp->z_map_lock);
+		}
+	}
+
+	if (rl == NULL) {
+		VERIFY(!rw_write_held(&zp->z_map_lock));
+	}
 
 	hrtime_t print_time = gethrtime() + SEC2NSEC(1);
 	const hrtime_t abort_time = gethrtime() + SEC2NSEC(10);
 	int secs = 0;
 
-	extern void IOSleep(unsigned milliseconds); // yields thread
-	extern void IODelay(unsigned microseconds); // x86_64 rep nop
-
-
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
-
-	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
 
 	while(!rw_write_held(&zp->z_map_lock)){
 		ASSERT3S(had_map_lock_at_entry, ==, B_FALSE);
@@ -3643,12 +3656,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    fsname, fname, zp->z_in_pager_op,
 			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread);
 			print_time = cur_time + SEC2NSEC(1);
-			zfs_range_unlock(rl);
+			if (rl)
+				zfs_range_unlock(rl);
 			printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
 			    " (z_in_pager_op %d)\n",
 			    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname,
 			    zp->z_in_pager_op);
 			IOSleep(10); // we hold no locks, so let work be done
+			/* as we hold no locks, we can stay in the cv_wait in the non try version */
 			rl = zfs_range_lock(zp, rloff, rllen, RL_WRITER);
 		}
 		if (cur_time > abort_time) {
@@ -3663,14 +3678,16 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    ap->a_size,
 			    fsname, fname, zp->z_in_pager_op,
 			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread);
-			zfs_range_unlock(rl);
+			if (rl)
+				zfs_range_unlock(rl);
 			error = EDEADLK;
 			goto exit_abort;
 		}
 		IODelay(1);
 	}
 
-	ASSERT(rw_write_held(&zp->z_map_lock));
+	VERIFY3P(rl, !=, NULL);
+	VERIFY(rw_write_held(&zp->z_map_lock));
 	need_release = B_TRUE;
 	zp->z_map_lock_holder = __func__;
 
