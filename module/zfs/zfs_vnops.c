@@ -139,7 +139,7 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_write_uio_dbuf_bytes;
 	kstat_named_t zfs_zero_length_write;
 	kstat_named_t update_pages;
-	kstat_named_t update_pages_want_lock;
+	kstat_named_t zfs_write_isreg_want_lock;
 	kstat_named_t update_pages_lock_timeout;
 	kstat_named_t zfs_read_calls;
 	kstat_named_t zfs_read_clean_on_read;
@@ -175,7 +175,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_write_uio_dbuf_bytes",                    KSTAT_DATA_UINT64 },
 	{ "zfs_zero_length_write",                       KSTAT_DATA_UINT64 },
 	{ "update_pages",                                KSTAT_DATA_UINT64 },
-	{ "update_pages_want_lock",                      KSTAT_DATA_UINT64 },
+	{ "zfs_write_isreg_want_lock",                   KSTAT_DATA_UINT64 },
 	{ "update_pages_lock_timeout",                   KSTAT_DATA_UINT64 },
 	{ "zfs_read_calls",                              KSTAT_DATA_UINT64 },
 	{ "zfs_read_clean_on_read",                      KSTAT_DATA_UINT64 },
@@ -573,7 +573,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	if (mapped > 0 && !rw_write_held(&zp->z_map_lock)) {
 		ASSERT(!MUTEX_HELD(&zp->z_lock));
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		VNOPS_STAT_INCR(update_pages_want_lock, tries);
+		VNOPS_STAT_INCR(zfs_write_isreg_want_lock, tries);
 	} else if (mapped > 0) {
 		ASSERT(!MUTEX_HELD(&zp->z_lock));
 		printf("ZFS: %s: already holds z_map_lock\n", __func__);
@@ -2113,7 +2113,7 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-	VNOPS_STAT_INCR(update_pages_want_lock, tries);
+	VNOPS_STAT_INCR(zfs_write_isreg_want_lock, tries);
 
 	/* N.B.: our caller incremented zp->z_in_pager_op, so we must decrement now */
 
@@ -2193,7 +2193,10 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		mutex_enter(&zp->z_ubc_msync_lock);
 		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+			VNOPS_STAT_INCR(zfs_write_isreg_want_lock, tries);
 		}
 		ASSERT3S(zp->z_syncer_active, ==, NULL);
 		zp->z_syncer_active = curthread;

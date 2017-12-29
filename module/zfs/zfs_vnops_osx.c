@@ -3677,12 +3677,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread,
 			    ctr, rl != NULL);
 			print_time = cur_time + SEC2NSEC(1);
-			if (rl)
+			if (rl) {
 				zfs_range_unlock(rl);
-			printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
-			    " (z_in_pager_op %d)\n",
-			    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname,
-			    zp->z_in_pager_op);
+				printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
+				    " (z_in_pager_op %d)\n",
+				    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname,
+				    zp->z_in_pager_op);
+			}
 			IOSleep(10); // we hold no locks, so let work be done
 			/* as we hold no locks, we can stay in the cv_wait in the non try version */
 		}
