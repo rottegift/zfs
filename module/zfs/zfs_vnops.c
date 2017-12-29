@@ -1841,7 +1841,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 
 	ASSERT3S(start_resid, >, 0);
 	const off_t aoff = trunc_page_64(woff);
-	const off_t alen = round_page_64(start_resid - 1);
+	const off_t alen = round_page_64(start_resid);
 
 	/*
 	 * if this file is NOT now mmapped and there are dirty pages,
@@ -2003,7 +2003,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		if (newblksz > zp->z_blksz)
 			zfs_grow_blocksize(zp, newblksz, tx);
 
-		zfs_range_reduce(rl, woff, start_resid);
+		zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid));
 
 		/*
 		 * uint64_t pre = zp->z_size;
@@ -2115,8 +2115,8 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		B_FALSE, B_FALSE, B_FALSE));
 }
 
-static inline
-int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int ioflag,
+static inline int
+zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int ioflag,
     rl_t *rl, const ssize_t start_resid, const off_t start_off, const off_t start_size,
     off_t woff, int error)
 {
