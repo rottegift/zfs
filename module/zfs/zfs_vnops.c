@@ -2193,7 +2193,12 @@ int zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int 
 		mutex_enter(&zp->z_ubc_msync_lock);
 		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
+			mutex_exit(&zp->z_ubc_msync_lock);
+			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+			ASSERT3U(tries, <, 10);
+			mutex_enter(&zp->z_ubc_msync_lock);
 		}
 		ASSERT3S(zp->z_syncer_active, ==, NULL);
 		zp->z_syncer_active = curthread;
