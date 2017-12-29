@@ -1414,8 +1414,9 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 * Lock the range against changes.
 	 */
 	zp->z_in_pager_op++;
+	ASSERT3S(uio_resid(uio), >, 0);
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
-	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)), round_page_64(uio_resid(uio)), RL_WRITER);
+	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)), round_page_64(uio_resid(uio) - 1), RL_WRITER);
 	tsd_set(rl_key, rl);
 
 	/*
@@ -1783,9 +1784,11 @@ zfs_write_sync_range(void *arg)
 
 	/* next acquire the range lock */
 
+	ASSERT3S(end_range, >, woff);
+	ASSERT3S(end_range - woff, >, woff);
 	ASSERT3S(range_lock, ==, B_TRUE);
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
-	rl_t *rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(end_range), RL_WRITER);
+	rl_t *rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(end_range - woff), RL_WRITER);
 	tsd_set(rl_key, rl);
 
         if (safety_check) {
@@ -1838,7 +1841,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 
 	ASSERT3S(start_resid, >, 0);
 	const off_t aoff = trunc_page_64(woff);
-	const off_t alen = round_page_64(start_resid);
+	const off_t alen = round_page_64(start_resid - 1);
 
 	/*
 	 * if this file is NOT now mmapped and there are dirty pages,
@@ -2797,8 +2800,9 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		ASSERT3S(woff, ==, ubc_getsize(vp));
 		uio_setoffset(uio, woff);
 	} else {
+		ASSERT3S(start_resid, >, 0);
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(start_resid), RL_WRITER);
+		rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(start_resid - 1), RL_WRITER);
 		tsd_set(rl_key, rl);
 	}
 

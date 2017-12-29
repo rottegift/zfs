@@ -3652,7 +3652,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 
 	const off_t rloff = trunc_page_64(ap->a_f_offset);
-	const off_t rllen = round_page_64(a_size);
+	ASSERT3S(a_size, >, 0);
+	const off_t rllen = round_page_64(a_size - 1);
 
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
@@ -3676,8 +3677,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		    rllen, rloff, rloff + rllen);
 		/* check our caller hasn't underlocked */
 		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
-		/* XXX : why is the non-added-to LHS short by exactly PAGE_SIZE_64 always? */
-		ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len) + PAGE_SIZE_64, >=, rloff + rllen);
+		ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len), >=, rloff + rllen);
+		ASSERT3S(round_page_64(rl->r_len), >=, rllen);
+
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
 		if (!rw_lock_held(&zp->z_map_lock)) {
