@@ -3626,30 +3626,36 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 	}
 
+	boolean_t need_release = B_FALSE;
+	boolean_t need_upgrade = B_FALSE;
+
 	if (rl == NULL) {
 		VERIFY(!rw_write_held(&zp->z_map_lock));
+	} else {
+		/* as we have the range lock, it is safe for us to wait on the z_map_lock */
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
 	}
 
 	hrtime_t print_time = gethrtime() + SEC2NSEC(1);
 	const hrtime_t abort_time = gethrtime() + SEC2NSEC(10);
 	int secs = 0;
 
-	boolean_t need_release = B_FALSE;
-	boolean_t need_upgrade = B_FALSE;
-
 	for(int ctr = 0; !rw_write_held(&zp->z_map_lock); ctr++){
 		VERIFY3P(rl, ==, NULL);
 		if (secs == 0)
 			secs = 1;
 		if ((rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER))
-		    && rw_tryenter(&zp->z_map_lock, RW_WRITER))
+		    && rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
 			break;
+		}
 		if (rl != NULL) {
 			/*
 			 * as we have the range lock we can now safely wait on the
 			 * z_map_lock
 			 */
-			z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+			VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
 			break;
 		}
 		hrtime_t cur_time = gethrtime();
@@ -3695,8 +3701,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			goto exit_abort;
 		}
 		IODelay(1);
-		if ((ctr % 1024) == 0)
+		if ((ctr % 1024) == 0 && ctr > 0) {
 			kpreempt(KPREEMPT_SYNC);
+			VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, 1024);
+		}
 	}
 
 	VERIFY3P(rl, !=, NULL);
