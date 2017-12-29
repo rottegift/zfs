@@ -3523,6 +3523,8 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 	zgd->zgd_zilog = zfsvfs->z_log;
 	zgd->zgd_private = zp;
 	zgd->zgd_rl = rl;
+	ASSERT3P(tsd_get(rl_key), ==, NULL);
+	tsd_set(rl_key, rl);
 
 	/*
 	 * Write records come in two flavors: immediate and indirect.
