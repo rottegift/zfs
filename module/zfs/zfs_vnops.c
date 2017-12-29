@@ -1416,7 +1416,12 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	zp->z_in_pager_op++;
 	ASSERT3S(uio_resid(uio), >, 0);
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
-	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)), round_page_64(uio_resid(uio)), RL_WRITER);
+	/*
+	 * we have to overlock here to make sure that we aren't underlocked
+	 * in pageoutv2
+	 */
+	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)),
+			    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_WRITER);
 	tsd_set(rl_key, rl);
 
 	/*
@@ -1782,13 +1787,17 @@ zfs_write_sync_range(void *arg)
                 }
         }
 
-	/* next acquire the range lock */
+	/*
+	 * next acquire the range lock.  make sure we overlock slightly to avoid
+	 * underlocking in pageoutv2
+	 */
 
 	ASSERT3S(end_range, >, woff);
 	ASSERT3S(end_range - woff, >, woff);
 	ASSERT3S(range_lock, ==, B_TRUE);
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
-	rl_t *rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(end_range - woff), RL_WRITER);
+	rl_t *rl = zfs_range_lock(zp, trunc_page_64(woff),
+				  round_page_64(end_range - woff + PAGE_SIZE_64), RL_WRITER);
 	tsd_set(rl_key, rl);
 
         if (safety_check) {
@@ -1840,8 +1849,9 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	int error = 0;
 
 	ASSERT3S(start_resid, >, 0);
+	/* overlock so that we don't underlock beneath ubc_msync */
 	const off_t aoff = trunc_page_64(woff);
-	const off_t alen = round_page_64(start_resid);
+	const off_t alen = round_page_64(start_resid + PAGE_SIZE_64);
 
 	/*
 	 * if this file is NOT now mmapped and there are dirty pages,
@@ -2785,7 +2795,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	if (ioflag & FAPPEND) {
 		const off_t old_woff = woff;
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl = zfs_range_lock(zp, 0, n, RL_APPEND);
+		rl = zfs_range_lock(zp, 0, round_page_64(n + PAGE_SIZE_64), RL_APPEND);
 		tsd_set(rl_key, rl);
 		woff = rl->r_off;
 		if (rl->r_len == UINT64_MAX) {
@@ -2802,7 +2812,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	} else {
 		ASSERT3S(start_resid, >, 0);
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl = zfs_range_lock(zp, trunc_page_64(woff), round_page_64(start_resid), RL_WRITER);
+		rl = zfs_range_lock(zp, trunc_page_64(woff),
+				    round_page_64(start_resid + PAGE_SIZE_64), RL_WRITER);
 		tsd_set(rl_key, rl);
 	}
 
@@ -2883,7 +2894,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		 * semantics.  We reset the write offset once we have the lock.
 		 */
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl = zfs_range_lock(zp, 0, n, RL_APPEND);
+		rl = zfs_range_lock(zp, 0, round_size_64(n + PAGE_SIZE_64), RL_APPEND);
 		tsd_set(rl_key, rl);
 		woff = rl->r_off;
 		if (rl->r_len == UINT64_MAX) {
@@ -2910,7 +2921,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		 * so that we can re-write the block safely.
 		 */
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl = zfs_range_lock(zp, woff, n,  RL_WRITER);
+		rl = zfs_range_lock(zp, woff, round_size_64(n + PAGE_SIZE_64),  RL_WRITER);
 		tsd_set(rl_key, rl);
 	}
 
