@@ -1629,6 +1629,7 @@ zfs_rezget(znode_t *zp)
 		 * interfering with other users of the
 		 * file size (notably update_pages, mappedread
 		 */
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		rl_t *rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 		int setsize_retval = 0;
 		boolean_t did_setsize = B_FALSE;
@@ -1903,6 +1904,7 @@ zfs_extend(znode_t *zp, uint64_t end)
 	/*
 	 * We will change zp_size, lock the whole file.
 	 */
+	ASSERT3P(tsd_get(rl_key), ==, NULL);
 	rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 
 	/*
@@ -2023,6 +2025,7 @@ zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
 
 #define round_page_64(x) (((uint64_t)(x) + PAGE_MASK_64) & ~((uint64_t)PAGE_MASK_64))
 #define trunc_page_64(x) ((uint64_t)(x) & ~((uint64_t)PAGE_MASK_64))
+	ASSERT3P(tsd_get(rl_key), ==, NULL);
 	rl = zfs_range_lock(zp, trunc_page_64(off), round_page_64(len), RL_WRITER);
 
 	/*
@@ -2141,6 +2144,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	/*
 	 * We will change zp_size, lock the whole file.
 	 */
+	ASSERT3P(tsd_get(rl_key), ==, NULL);
 	rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 
 	/*

@@ -1947,12 +1947,15 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			for (i = 0; i < INT32_MAX; i++) {
 				ASSERT3P(tsd_get(rl_key), ==, NULL);
 				rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+				tsd_set(rl_key, rl);
 				if (i > 10000) {
 					printf("ZFS: %s:%d: DEADLOCK AVOIDANCE i=%d\n",
 					    __func__, __LINE__, i);
 				}
 				if (!rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+					ASSERT3P(tsd_get(rl_key), ==, rl);
 					zfs_range_unlock(rl);
+					tsd_set(rl_key, NULL);
 					extern void IOSleep(unsigned milliseconds);
 					IOSleep(1);
 				} else {
@@ -1973,7 +1976,9 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			VATTR_SET_SUPPORTED(vap, va_data_size);
+			ASSERT3P(tsd_get(rl_key), ==, rl);
 			zfs_range_unlock(rl);
+			tsd_set(rl_key, NULL);
 			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 		}
 		if (VATTR_IS_ACTIVE(vap, va_mode))
@@ -3743,12 +3748,13 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread,
 			    ctr, rl != NULL);
 			print_time = cur_time + SEC2NSEC(1);
-			if (rl)
+			if (rl) {
 				zfs_range_unlock(rl);
-			printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
-			    " (z_in_pager_op %d)\n",
-			    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname,
-			    zp->z_in_pager_op);
+				printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
+				    " (z_in_pager_op %d)\n",
+				    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname,
+				    zp->z_in_pager_op);
+			}
 			IOSleep(10); // we hold no locks, so let work be done
 			/* as we hold no locks, we can stay in the cv_wait in the non try version */
 		}

@@ -278,6 +278,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		zfs_range_unlock(rl);
+		tsd_set(rl_key, NULL);
 		ASSERT3S(tries, <=, 2);
 		/* error checking, unlocking, and returning */
 		if (msync_retval != 0 &&
