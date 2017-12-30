@@ -3323,6 +3323,7 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	vnode_t *vp = ZTOV(zp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 	boolean_t do_zil_commit = B_FALSE;
+	boolean_t release_my_rl = B_FALSE;
 
 	if (vnode_isrecycled(vp)) {
 		return (0);
@@ -3345,6 +3346,17 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 		}
 		ASSERT3S(rl->r_off, <=, start);
 		ASSERT3S(rl->r_off + rl->r_len, >=, end);
+	} else {
+		ASSERT3S(start, <, end);
+		ASSERT3S(tsd_get(rl_key), ==, NULL);
+		if ((rl = zfs_try_range_lock(zp, start, end, RL_WRITER)) == NULL) {
+			printf("ZFS: %s:%d: acquiring RL (len %lld) [%lld..%lld] (filesize %lld) file %s\n",
+			    __func__, __LINE__, end - start, start, end, zp->z_size, zp->z_name_cache);
+			rl = zfs_range_lock(zp, start, end, RL_WRITER);
+		}
+		ASSERT3S(rl, !=, NULL);
+		tsd_set(rl_key, rl);
+		release_my_rl = B_TRUE;
 	}
 
 	const hrtime_t entry_time = gethrtime();
@@ -3474,6 +3486,12 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	if (elapsed_seconds > 1) {
 		printf("ZFS: %s:%d: long ubc_msync, %d seconds, file %s\n",
 		    __func__, __LINE__, elapsed_seconds, zp->z_name_cache);
+	}
+
+	if (release_my_rl == B_TRUE) {
+		ASSERT3S(tsd_get(rl_key), ==, rl);
+		zfs_range_unlock(rl);
+		tsd_set(rl_key, NULL);
 	}
 
 	if (rl == NULL && tsd_get(rl_key) == NULL
