@@ -3441,12 +3441,13 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	 * spindump analysis lengths, so spin around IOSleep to avoid
 	 * melting the system.
 	 */
-
+#if 0
 	while (zp->z_in_pager_op > 0 && !rw_write_held(&zp->z_map_lock)) {
 		VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_sleeps);
 		void IOSleep(unsigned milliseconds);
 		IOSleep(1);
 	}
+#endif
 
 	/* we are good to go */
 
