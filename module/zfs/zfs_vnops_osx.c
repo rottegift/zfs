@@ -3335,6 +3335,18 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	if (tsd_get(rl_key) == NULL)
 		tsd_set(rl_key, rl);
 
+	if (rl) {
+		if (rl->r_zp != zp) {
+			printf("ZFS: %s:%d: rl->r_zp and zp mismatched! fn zp %s fn r_zp %s\n",
+			       __func__, __LINE__, zp->z_name_cache,
+			       (rl != NULL && rl->r_zp != NULL)
+			       ? rl->r_zp->z_name_cache
+			       : "(null rl or r_zp)");
+		}
+		ASSERT3S(rl->r_off, ==, start);
+		ASSERT3S(rl->r_off + rl->r_len, ==, end);
+	}
+
 	const hrtime_t entry_time = gethrtime();
 
 	ASSERT(rw_write_held(&zp->z_map_lock));
