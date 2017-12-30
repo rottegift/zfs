@@ -2936,42 +2936,6 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	return (retval);
 }
 
-#if 0
-static int
-copy_upl_to_mem(upl_t upl, upl_page_info_t *pl,
-    int upl_offset, int bytes_to_copy, void *mem)
-{
-
-	int error;
-	uio_t uio;
-
-	ASSERT3S(upl_offset, >, 0);
-	ASSERT3S(upl_offset, <=, MAX_UPL_SIZE_BYTES - round_page(bytes_to_copy));
-
-	int page_index_start, page_index_end, it;
-	page_index_start = upl_offset / PAGE_SIZE;
-	page_index_end = howmany(upl_offset + bytes_to_copy, PAGE_SIZE);
-	for (i = page_index_start; i < page_index_end; i++) {
-		ASSERT(upl_valid_page(pl, i));
-	}
-
-	uio = uio_create(1, 0, UIO_SYSSPACE, UIO_READ);
-	uio_addiov(uio, CAST_USER_ADDR_T(mem), bytes_to_copy);
-	error = cluster_copy_upl_data(uio, upl, upl_offset, &bytes_to_copy);
-	ASSERT3S(error, ==, 0);
-	ASSERT3S(bytes_to_copy, ==, 0);
-	uio_free(uio);
-	return (error);
-}
-
-static int
-copy_avoiding_ubc_upl_map(upl_t upl, upl_page_info_t *upl,
-    int upl_offset, int bytes_to_copy)
-{
-	/* where do we get the memory from?  abd? */
-}
-#endif
-
 static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const upl_offset_t upl_offset, const off_t f_offset, const int size,
@@ -3346,7 +3310,7 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 		}
 		ASSERT3S(rl->r_off, <=, start);
 		ASSERT3S(rl->r_off + rl->r_len, >=, end);
-	} else {
+	} else if (tsd_get(rl_key) == NULL) {
 		ASSERT3S(start, <, end);
 		ASSERT3S(tsd_get(rl_key), ==, NULL);
 		if ((rl = zfs_try_range_lock(zp, start, end, RL_WRITER)) == NULL) {

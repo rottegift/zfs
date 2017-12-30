@@ -610,7 +610,15 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	mutex_exit(&zp->z_ubc_msync_lock);
 	unset_syncer = B_TRUE;
 
-	error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 0);
+	int vnode_get_error = vnode_get(vp);
+	ASSERT0(vnode_get_error);
+	if (!vnode_get_error) {
+		/* here we do the magic */
+		error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 0);
+		vnode_put(vp);
+	}
+	if (error == 0 && vnode_get_error != 0)
+		error = vnode_get_error;
 
 	if (unset_syncer) {
 		ASSERT3S(zp->z_syncer_active, ==, curthread);
@@ -1269,7 +1277,15 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 		mutex_exit(&zp->z_ubc_msync_lock);
 		unset_syncer = B_TRUE;
 
-		err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+		int vnode_get_error = vnode_get(vp);
+		ASSERT0(vnode_get_error);
+		if (vnode_get_error == 0) {
+			/* here we do the magic */
+			err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+			vnode_put(vp);
+		}
+		if (err == 0 && vnode_get_error != 0)
+			err = vnode_get_error;
 
 		if (unset_syncer) {
 			ASSERT3P(zp->z_syncer_active, ==, curthread);
@@ -2089,8 +2105,15 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	}
 	int ccupl_ioresid = recov_resid_int;
 
-	int ccupl_retval = cluster_copy_upl_data(uio, mupl,
-	    recov_off_page_offset, &ccupl_ioresid);
+	int vnode_get_error = vnode_get(vp);
+	ASSERT0(vnode_get_error);
+	int ccupl_retval = vnode_get_error;
+	if (!vnode_get_error) {
+		/* do the magic */
+		ccupl_retval = cluster_copy_upl_data(uio, mupl,
+		    recov_off_page_offset, &ccupl_ioresid);
+		vnode_put(vp);
+	}
 
 	if (unset_syncer) {
 		ASSERT3S(zp->z_syncer_active, ==, curthread);
@@ -2270,7 +2293,15 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			}
 		}
 
-		error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+		int vnode_get_error = vnode_get(vp);
+		ASSERT0(vnode_get_error);
+		if (!vnode_get_error) {
+			/* here we do the magic */
+			error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+			vnode_put(vp);
+		}
+		if (error == 0 && vnode_get_error != 0)
+			error = vnode_get_error;
 
 		if (reset_ubcsize) {
 			ASSERT(spl_ubc_is_mapped(vp, NULL));
