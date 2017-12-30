@@ -602,6 +602,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	mutex_enter(&zp->z_ubc_msync_lock);
 	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 	    VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+	    cv_signal(&zp->z_ubc_msync_cv);
 	    cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 	}
 	ASSERT3S(zp->z_syncer_active, ==, NULL);
@@ -683,6 +684,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	mutex_enter(&zp->z_ubc_msync_lock);
 	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 	        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+		cv_signal(&zp->z_ubc_msync_cv);
 		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 	}
 	ASSERT3S(zp->z_syncer_active, ==, NULL);
@@ -886,6 +888,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		mutex_enter(&zp->z_ubc_msync_lock);
 		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+			cv_signal(&zp->z_ubc_msync_cv);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 		}
 		ASSERT3S(zp->z_syncer_active, ==, NULL);
@@ -1258,6 +1261,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 		mutex_enter(&zp->z_ubc_msync_lock);
 		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+			cv_signal(&zp->z_ubc_msync_cv);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 		}
 		ASSERT3S(zp->z_syncer_active, ==, NULL);
@@ -1420,7 +1424,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 * in pageoutv2
 	 */
 	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)),
-			    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_WRITER);
+			    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_READER);
 	tsd_set(rl_key, rl);
 
 	/*
@@ -2053,6 +2057,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	mutex_enter(&zp->z_ubc_msync_lock);
 	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 	        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
+		cv_signal(&zp->z_ubc_msync_cv);
 		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 	}
 	ASSERT3S(zp->z_syncer_active, ==, NULL);
@@ -2224,6 +2229,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 		        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
+			cv_signal(&zp->z_ubc_msync_cv);
 			cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
 			mutex_exit(&zp->z_ubc_msync_lock);
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
@@ -2766,21 +2772,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	 * pageoutv2, which takes an RL and then the z_map_lock.
 	 */
 
-	/* We can only grab the range lock if there isn't a syncer active */
-
-	boolean_t unset_syncer = B_FALSE;
-
-	ASSERT3P(zp->z_syncer_active, !=, curthread);
-	mutex_enter(&zp->z_ubc_msync_lock);
-	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
-	        VNOPS_STAT_BUMP(zfs_vnops_z_syncer_active_wait);
-		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-	}
-	ASSERT3S(zp->z_syncer_active, ==, NULL);
-	zp->z_syncer_active = curthread;
-	mutex_exit(&zp->z_ubc_msync_lock);
-	unset_syncer = B_TRUE;
-
 	/* Now grab range locks */
 
 	/* if we are appending, bump woff to the end of file */
@@ -2807,14 +2798,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		rl = zfs_range_lock(zp, trunc_page_64(woff),
 				    round_page_64(start_resid + PAGE_SIZE_64), RL_WRITER);
 		tsd_set(rl_key, rl);
-	}
-
-	if (unset_syncer) {
-		ASSERT3S(zp->z_syncer_active, ==, curthread);
-		mutex_enter(&zp->z_ubc_msync_lock);
-		zp->z_syncer_active = NULL;
-		cv_signal(&zp->z_ubc_msync_cv);
-		mutex_exit(&zp->z_ubc_msync_lock);
 	}
 
 	if (woff >= limit) {

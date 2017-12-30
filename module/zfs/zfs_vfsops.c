@@ -229,6 +229,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		if (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
 			printf("ZFS: %s:%d: another thread has z_syncer_active for file %s\n",
 			    __func__, __LINE__, zp->z_name_cache);
+			cv_broadcast(&zp->z_ubc_msync_cv);
 			return (VNODE_CLAIMED);
 		}
 		ZFS_ENTER_NOERROR(zfsvfs);
