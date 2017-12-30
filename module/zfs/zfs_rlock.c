@@ -128,7 +128,7 @@ zfs_range_lock_writer(znode_t *zp, rl_t *new, boolean_t try)
 			 * This is done under z_range_lock to avoid races.
 			 */
 			if (new->r_type == RL_APPEND)
-				new->r_off = trunc_page_64(zp->z_size);
+				new->r_off = zp->z_size;
 
 			/*
 			 * If we need to grow the block size then grab the whole
