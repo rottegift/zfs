@@ -3344,7 +3344,7 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 			       : "(null rl or r_zp)");
 		}
 		ASSERT3S(rl->r_off, ==, start);
-		ASSERT3S(rl->r_off + rl->r_len, ==, end);
+		ASSERT3S(rl->r_off + rl->r_len, ==, round_page_64(end));
 	}
 
 	const hrtime_t entry_time = gethrtime();
@@ -3684,18 +3684,52 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 __func__, __LINE__, zp->z_name_cache,
 			 (rl->r_zp != NULL) ? rl->r_zp->z_name_cache : "(no r_zp)");
 		}
-		if (rl->r_len < rllen || rl->r_off > rloff) {
-			printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
-			       " (write wanted? %d) (read wanted? %d), (filesize %lld, foff %lld, a_size %ld),"
-			       " fs %s fn %s"
-			       " (lock held at entry? %d),"
-			       " desired range (len %lld) [%lld..%lld]\n",
+		if (ap->a_f_offset + ap->a_size < rl->r_off) {
+			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
+			       " TSD RL [%lld..%lld], fs %s file %s\n",
+			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
+			rl = zfs_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
+		} else if (ap->a_f_offset > rl->r_off + rl->r_len) {
+			printf("ZFS: %s:%d: locking [%lld..%lld] entirely above"
+			       " TSD RL [%lld..%lld], fs %s file %s\n",
+			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
+			rl = zfs_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
+		} else if (ap->a_f_offset < rl->r_off
+			   && ap->a_f_offset + ap->a_size < rl->r_off + rl->r_len) {
+			const off_t newlen = rl->r_off - ap->a_f_offset - 1;
+			printf("ZFS: %s:%d: locking [%lld..%lld] partially below"
+			       " TSD RL [%lld..%lld], fs %s file %s\n",
+			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + newlen,
+			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
+			rl = zfs_range_lock(zp, ap->a_f_offset, newlen, RL_WRITER);
+		} else if (ap->a_f_offset + ap->a_size > rl->r_off  + rl->r_len) {
+			const off_t aprangeend = ap->a_f_offset + ap->a_size;
+			const off_t rlrangeend = rl->r_off + rl->r_len;
+			ASSERT3S(rlrangeend, <, aprangeend);
+			const off_t newlen = aprangeend - rlrangeend;
+			printf("ZFS: %s:%d: locking [%lld..%lld] partially above"
+			       " TSD RL [%lld..%lld], fs %s file %s\n",
 			       __func__, __LINE__,
-			       rl->r_type, rl->r_len, rl->r_off, rl->r_len + rl->r_off,
-			       rl->r_write_wanted,  rl->r_read_wanted, zp->z_size, ap->a_f_offset, ap->a_size,
-			       fsname, fname,
-			       had_map_lock_at_entry,
-			       rllen, rloff, rloff + rllen);
+			       rl->r_off + rl->r_len + 1, rl->r_off + rl->r_len + newlen,
+			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
+			rl = zfs_range_lock(zp, rl->r_off + rl->r_len + 1, newlen, RL_WRITER);
+		} else if (rl->r_off != ap->a_f_offset || rl->r_len != ap->a_size) {
+			printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
+				" (write wanted? %d) (read wanted? %d),"
+				" (filesize %lld, foff %lld, a_size %ld),"
+				" fs %s fn %s"
+				" (lock held at entry? %d),"
+				" desired range (len %lld) [%lld..%lld]\n",
+				__func__, __LINE__,
+				rl->r_type, rl->r_len, rl->r_off, rl->r_len + rl->r_off,
+				rl->r_write_wanted,  rl->r_read_wanted, zp->z_size, ap->a_f_offset, ap->a_size,
+				fsname, fname,
+				had_map_lock_at_entry,
+				rllen, rloff, rloff + rllen);
+		} else {
+			printf("ZFS: %s:%d: success!\n", __func__, __LINE__);
 		}
 		/* check our caller hasn't underlocked */
 		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
