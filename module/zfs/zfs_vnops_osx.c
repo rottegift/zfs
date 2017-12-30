@@ -3666,22 +3666,24 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (tsd_get(rl_key) != NULL) {
 		rl = tsd_get(rl_key);
-		printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
-		    " (write wanted? %d) (read wanted? %d), (filesize %lld), fs %s fn %s"
-		    " (lock held at entry? %d),"
-		    " desired range (len %lld) [%lld..%lld]\n",
-		    __func__, __LINE__,
-		    rl->r_type, rl->r_len, rl->r_off, rl->r_len + rl->r_off,
-		    rl->r_write_wanted,  rl->r_read_wanted, zp->z_size, fsname, fname,
-		    had_map_lock_at_entry,
-		    rllen, rloff, rloff + rllen);
+		if (rl->r_len < rllen || rl->r_off > rloff) {
+			printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
+			       " (write wanted? %d) (read wanted? %d), (filesize %lld), fs %s fn %s"
+			       " (lock held at entry? %d),"
+			       " desired range (len %lld) [%lld..%lld]\n",
+			       __func__, __LINE__,
+			       rl->r_type, rl->r_len, rl->r_off, rl->r_len + rl->r_off,
+			       rl->r_write_wanted,  rl->r_read_wanted, zp->z_size, fsname, fname,
+			       had_map_lock_at_entry,
+			       rllen, rloff, rloff + rllen);
+		}
 		/* check our caller hasn't underlocked */
 		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
 		const off_t rlsize = rloff + rllen;
 		const off_t rlsize_or_fsize = MIN(rlsize, zp->z_size);
 		const off_t rllen_not_past_eof = rlsize_or_fsize - rloff;
 		ASSERT3S(round_page_64(rl->r_len) + PAGE_SIZE_64, >=, rllen_not_past_eof);
-		ASSERT3S(MIN(trunc_page_64(rl->r_off) + round_page_64(rl->r_len) + PAGE_SIZE_64y, zp->z_size),
+		ASSERT3S(MIN(trunc_page_64(rl->r_off) + round_page_64(rl->r_len) + PAGE_SIZE_64, zp->z_size),
 			 >=, MIN(zp->z_size, rlsize));
 
 		/* check our caller hasn't dropped z_map_lock */
