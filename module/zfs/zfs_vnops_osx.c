@@ -3678,6 +3678,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	boolean_t xxxbleat = B_FALSE;
 
 	if (tsd_get(rl_key) != NULL) {
+		off_t fsize = zp->z_size;
 		rl = tsd_get(rl_key);
 		if (rl->r_zp != zp) {
 		  printf("ZFS: %s:%d: recovered rl from TSD has"
@@ -3688,17 +3689,17 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		drop_rl = B_FALSE;
 		if (ap->a_f_offset + ap->a_size < rl->r_off) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
-			       " TSD RL [%lld..%lld], fs %s file %s\n",
+			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
+			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
 			drop_rl = B_TRUE;
 			xxxbleat = B_TRUE;
 		} else if (ap->a_f_offset > rl->r_off + rl->r_len) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely above"
-			       " TSD RL [%lld..%lld], fs %s file %s\n",
+			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
+			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
 			drop_rl = B_TRUE;
 			xxxbleat = B_TRUE;
@@ -3706,9 +3707,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			   && ap->a_f_offset + ap->a_size < rl->r_off + rl->r_len) {
 			const off_t newlen = rl->r_off - ap->a_f_offset - 1;
 			printf("ZFS: %s:%d: locking [%lld..%lld] partially below"
-			       " TSD RL [%lld..%lld], fs %s file %s\n",
+			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + newlen,
-			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
+			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, newlen, RL_WRITER);
 			drop_rl = B_TRUE;
 			xxxbleat = B_TRUE;
@@ -3718,10 +3719,10 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			ASSERT3S(rlrangeend, <, aprangeend);
 			const off_t newlen = aprangeend - rlrangeend;
 			printf("ZFS: %s:%d: locking [%lld..%lld] partially above"
-			       " TSD RL [%lld..%lld], fs %s file %s\n",
+			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__,
 			       rl->r_off + rl->r_len + 1, rl->r_off + rl->r_len + newlen,
-			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
+			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, rl->r_off + rl->r_len + 1, newlen, RL_WRITER);
 			drop_rl = B_TRUE;
 			xxxbleat = B_TRUE;
@@ -3747,6 +3748,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		if (rl == NULL && tsd_get(rl_key) != NULL) {
 		  ASSERT3S(drop_rl, ==, B_TRUE);
 		  drop_rl = B_FALSE;
+		  rl = tsd_get(rl_key); // just try without locking, see what happens
 		  printf("ZFS: %s:%d: failed to get new RL\n", __func__, __LINE__);
 		}
 		/* Check our caller hasn't underlocked */
