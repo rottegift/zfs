@@ -3456,6 +3456,7 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 		ASSERT3S(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, NULL);
 		zfs_range_unlock(rl);
+		rl = NULL;
 	}
 
 	if (rl == NULL && tsd_get(rl_key) == NULL
