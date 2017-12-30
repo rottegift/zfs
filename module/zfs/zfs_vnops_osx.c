@@ -3719,22 +3719,40 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			dprintf("ZFS: %s:%d: subrange success!\n", __func__, __LINE__);
 			drop_rl = B_FALSE;
 			ASSERT3S(xxxbleat, ==, B_FALSE);
-		} else if (ap->a_f_offset + ap->a_size < rl->r_off) {
+		} else if (trunc_page_64(rl->r_off) <= trunc_page_64(ap->a_f_offset)
+		    && rl->r_off + rl->r_len >= ap->a_f_offset + ap->a_size) {
+			/*
+			 * The ranges share the same starting and ending
+			 * pages, and the end of the RL range is GE the
+			 * end of the AP range.  Strictly speaking, this
+			 * is an improper subrange, since a subpage gap
+			 * is left without being represented in some
+			 * struct rl.  However, any attempt to lock in
+			 * that subpage gap will block in zfs_range_lock
+			 * (and NULL from the try variant), so we should
+			 * avoid doing so here.
+			 */
+			dprintf("ZFS: %s:%d: subrange (page-aligned) success!", __func__, __LINE__);
+		} else if (ap->a_f_offset + ap->a_size < rl->r_off
+		    && trunc_page_64(ap->a_f_offset) != trunc_page_64(rl->r_off)) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
 			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
 			drop_rl = B_TRUE;
-		} else if (ap->a_f_offset > rl->r_off + rl->r_len) {
+		} else if (ap->a_f_offset > rl->r_off + rl->r_len
+		    && trunc_page_64(ap->a_f_offset) > trunc_page_64(rl->r_off)) {
+			/* we'd fail the try if the offsets start in the same page */
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely above"
 			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
 			drop_rl = B_TRUE;
-		} else if (ap->a_f_offset < rl->r_off
-			   && ap->a_f_offset + ap->a_size < rl->r_off + rl->r_len) {
+		} else if (ap->a_f_offset + ap->a_size < rl->r_off + rl->r_len
+		    && trunc_page_64(ap->a_f_offset) < trunc_page_64(rl->r_off) ) {
+			/* we'd fail the try if the offsets start in the same page */
 			const off_t newlen = rl->r_off - ap->a_f_offset - 1;
 			if (newlen > PAGE_SIZE_64)
 				printf("ZFS: %s:%d: locking (sz %lld) [%lld..%lld] partially below"
@@ -3750,7 +3768,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, newlen, RL_WRITER);
 			drop_rl = B_TRUE;
-		} else if (ap->a_f_offset + ap->a_size > rl->r_off  + rl->r_len) {
+		} else if (ap->a_f_offset + ap->a_size > rl->r_off  + rl->r_len
+		    && trunc_page_64(ap->a_f_offset) > trunc_page_64(rl->r_off)) {
+			/* we would fail the try if the offsets are in the same page */
 			const off_t aprangeend = ap->a_f_offset + ap->a_size;
 			const off_t rlrangeend = rl->r_off + rl->r_len;
 			ASSERT3S(rlrangeend, <, aprangeend);
@@ -3764,6 +3784,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			drop_rl = B_TRUE;
 		} else if (trunc_page_64(rl->r_off) != trunc_page_64(ap->a_f_offset)
 		    || round_page_64(rl->r_len) != round_page_64(ap->a_size)) {
+			/*
+			 * note that the RL can be 0...UINTMAX_64 in
+			 * principle, so earlier we had to catch proper
+			 * subranges
+			 */
 			printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
 				" (write wanted? %d) (read wanted? %d),"
 				" (filesize %lld, foff %lld, a_size %ld),"
@@ -3785,7 +3810,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		  ASSERT3S(drop_rl, ==, B_TRUE);
 		  drop_rl = B_FALSE;
 		  rl = tsd_get(rl_key); // just try without locking, see what happens
-		  printf("ZFS: %s:%d: failed to get new RL\n", __func__, __LINE__);
+		  printf("ZFS: %s:%d: failed to get new RL for fs %s file %s\n", __func__, __LINE__,
+		      fsname, fname);
 		}
 		/* Check our caller hasn't underlocked */
 #if 0 // done above
