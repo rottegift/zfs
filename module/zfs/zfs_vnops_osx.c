@@ -3675,6 +3675,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 
 	boolean_t drop_rl = B_TRUE;
+	boolean_t xxxbleat = B_FALSE;
 
 	if (tsd_get(rl_key) != NULL) {
 		rl = tsd_get(rl_key);
@@ -3684,18 +3685,23 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 __func__, __LINE__, zp->z_name_cache,
 			 (rl->r_zp != NULL) ? rl->r_zp->z_name_cache : "(no r_zp)");
 		}
+		drop_rl = B_FALSE;
 		if (ap->a_f_offset + ap->a_size < rl->r_off) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
 			       " TSD RL [%lld..%lld], fs %s file %s\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
 			rl = zfs_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
+			drop_rl = B_TRUE;
+			xxxbleat = B_TRUE;
 		} else if (ap->a_f_offset > rl->r_off + rl->r_len) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely above"
 			       " TSD RL [%lld..%lld], fs %s file %s\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
 			rl = zfs_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
+			drop_rl = B_TRUE;
+			xxxbleat = B_TRUE;
 		} else if (ap->a_f_offset < rl->r_off
 			   && ap->a_f_offset + ap->a_size < rl->r_off + rl->r_len) {
 			const off_t newlen = rl->r_off - ap->a_f_offset - 1;
@@ -3704,6 +3710,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + newlen,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
 			rl = zfs_range_lock(zp, ap->a_f_offset, newlen, RL_WRITER);
+			drop_rl = B_TRUE;
+			xxxbleat = B_TRUE;
 		} else if (ap->a_f_offset + ap->a_size > rl->r_off  + rl->r_len) {
 			const off_t aprangeend = ap->a_f_offset + ap->a_size;
 			const off_t rlrangeend = rl->r_off + rl->r_len;
@@ -3715,6 +3723,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       rl->r_off + rl->r_len + 1, rl->r_off + rl->r_len + newlen,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
 			rl = zfs_range_lock(zp, rl->r_off + rl->r_len + 1, newlen, RL_WRITER);
+			drop_rl = B_TRUE;
+			xxxbleat = B_TRUE;
 		} else if (rl->r_off != ap->a_f_offset || rl->r_len != ap->a_size) {
 			printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
 				" (write wanted? %d) (read wanted? %d),"
@@ -3728,10 +3738,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				fsname, fname,
 				had_map_lock_at_entry,
 				rllen, rloff, rloff + rllen);
+			xxxbleat = B_TRUE;
 		} else {
 			printf("ZFS: %s:%d: success!\n", __func__, __LINE__);
+			ASSERT3S(xxxbleat, ==, B_FALSE);
+			ASSERT3S(drop_rl, ==, B_FALSE);
 		}
 		/* check our caller hasn't underlocked */
+#if 0 // done above
 		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
 		const off_t rlsize = rloff + rllen;
 		const off_t rlsize_or_fsize = MIN(rlsize, zp->z_size);
@@ -3739,7 +3753,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT3S(round_page_64(rl->r_len) + PAGE_SIZE_64, >=, rllen_not_past_eof);
 		ASSERT3S(MIN(trunc_page_64(rl->r_off) + round_page_64(rl->r_len) + PAGE_SIZE_64, zp->z_size),
 			 >=, MIN(zp->z_size, rlsize));
-
+#endif
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
 		if (!rw_lock_held(&zp->z_map_lock)) {
@@ -3749,7 +3763,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 		ASSERT(rw_lock_held(&zp->z_map_lock));
 		/* let our caller drop the range_lock */
-		drop_rl = B_FALSE;
 		goto already_acquired_locks;
 	}
 
@@ -4001,7 +4014,6 @@ already_acquired_locks:
 	 */
 
 	int upl_pages_dismissed = 0;
-	boolean_t xxxbleat = B_FALSE;
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
 		if (upl_valid_page(pl, --page_index)) {
