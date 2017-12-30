@@ -2013,7 +2013,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		if (newblksz > zp->z_blksz)
 			zfs_grow_blocksize(zp, newblksz, tx);
 
-		zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid));
+		zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
 
 		/*
 		 * uint64_t pre = zp->z_size;
@@ -3019,7 +3019,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 				}
 			}
 			zfs_grow_blocksize(zp, new_blksz, tx);
-			zfs_range_reduce(rl, woff, n);
+			zfs_range_reduce(rl, woff, round_page_64(n + PAGE_SIZE_64));
 		}
 #endif
 

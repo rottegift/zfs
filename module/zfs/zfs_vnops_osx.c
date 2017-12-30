@@ -3698,7 +3698,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * often, therefore it goes first.
 			 */
 			dprintf("ZFS: %s:%d: subrange success!\n", __func__, __LINE__);
-			ASSERT3S(drop_rl, ==, B_TRUE);
+			drop_rl = B_FALSE;
 			ASSERT3S(xxxbleat, ==, B_FALSE);
 		} else if (ap->a_f_offset + ap->a_size < rl->r_off) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
@@ -3903,10 +3903,10 @@ already_acquired_locks:
 	off_t woff = ap->a_f_offset;
 	off_t end_size = MAX(zp->z_size, woff + a_size);
 
-	if (rl->r_len == UINT64_MAX ||
-	    (end_size > zp->z_blksz &&
-	     ((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
-	      !dmu_write_is_safe(zp, woff, end_size)))) {
+	if (rl->r_len == UINT64_MAX
+	    || (end_size > zp->z_blksz &&
+		((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
+		    !dmu_write_is_safe(zp, woff, end_size)))) {
 
 		uint64_t new_blksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
@@ -3939,7 +3939,7 @@ already_acquired_locks:
 			zfs_grow_blocksize(zp, new_blksz, tx);
 			dmu_tx_commit(tx);
 		}
-		if (rl->r_len == 0 && rl->r_off == UINT64_MAX) {
+		if (rl != tsd_get(rl_key) && rl->r_len == 0 && rl->r_off == UINT64_MAX) {
 		  zfs_range_reduce(rl, rloff, rllen);
 		} else {
 		  const off_t rlsize = rloff + rllen;
@@ -4507,7 +4507,7 @@ already_acquired_locks:
 	}
 
 	if (drop_rl) {
-		ASSERT3P(tsd_get(rl_key), ==, NULL);
+		VERIFY3P(rl, !=, tsd_get(rl_key));
 		VERIFY3P(rl, !=, NULL);
 		zfs_range_unlock(rl);
 		rl = NULL;
