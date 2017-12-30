@@ -3691,7 +3691,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       " TSD RL [%lld..%lld], fs %s file %s\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
-			rl = zfs_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
+			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
 			drop_rl = B_TRUE;
 			xxxbleat = B_TRUE;
 		} else if (ap->a_f_offset > rl->r_off + rl->r_len) {
@@ -3699,7 +3699,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       " TSD RL [%lld..%lld], fs %s file %s\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
-			rl = zfs_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
+			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
 			drop_rl = B_TRUE;
 			xxxbleat = B_TRUE;
 		} else if (ap->a_f_offset < rl->r_off
@@ -3709,7 +3709,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       " TSD RL [%lld..%lld], fs %s file %s\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + newlen,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
-			rl = zfs_range_lock(zp, ap->a_f_offset, newlen, RL_WRITER);
+			rl = zfs_try_range_lock(zp, ap->a_f_offset, newlen, RL_WRITER);
 			drop_rl = B_TRUE;
 			xxxbleat = B_TRUE;
 		} else if (ap->a_f_offset + ap->a_size > rl->r_off  + rl->r_len) {
@@ -3722,7 +3722,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       __func__, __LINE__,
 			       rl->r_off + rl->r_len + 1, rl->r_off + rl->r_len + newlen,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname);
-			rl = zfs_range_lock(zp, rl->r_off + rl->r_len + 1, newlen, RL_WRITER);
+			rl = zfs_try_range_lock(zp, rl->r_off + rl->r_len + 1, newlen, RL_WRITER);
 			drop_rl = B_TRUE;
 			xxxbleat = B_TRUE;
 		} else if (rl->r_off != ap->a_f_offset || rl->r_len != ap->a_size) {
@@ -3744,7 +3744,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			ASSERT3S(xxxbleat, ==, B_FALSE);
 			ASSERT3S(drop_rl, ==, B_FALSE);
 		}
-		/* check our caller hasn't underlocked */
+		if (rl == NULL && tsd_get(rl_key) != NULL) {
+		  ASSERT3S(drop_rl, ==, B_TRUE);
+		  drop_rl = B_FALSE;
+		  printf("ZFS: %s:%d: failed to get new RL\n", __func__, __LINE__);
+		}
+		/* Check our caller hasn't underlocked */
 #if 0 // done above
 		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
 		const off_t rlsize = rloff + rllen;
@@ -4492,6 +4497,7 @@ already_acquired_locks:
 
 	if (drop_rl) {
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
+		VERIFY3P(rl, !=, NULL);
 		zfs_range_unlock(rl);
 		rl = NULL;
 	}
@@ -4532,8 +4538,10 @@ pageout_done:
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
 
-	if (drop_rl)
+	if (drop_rl) {
+		VERIFY3P(rl, !=, NULL);
 		zfs_range_unlock(rl);
+	}
 	dec_z_in_pager_op(zp, fsname, fname);
 
 exit_abort:
