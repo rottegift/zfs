@@ -3718,10 +3718,18 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		} else if (ap->a_f_offset < rl->r_off
 			   && ap->a_f_offset + ap->a_size < rl->r_off + rl->r_len) {
 			const off_t newlen = rl->r_off - ap->a_f_offset - 1;
-			printf("ZFS: %s:%d: locking [%lld..%lld] partially below"
-			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
-			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + newlen,
-			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
+			if (newlen > PAGE_SIZE_64)
+				printf("ZFS: %s:%d: locking (sz %lld) [%lld..%lld] partially below"
+				    " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
+				    __func__, __LINE__, newlen,
+				    ap->a_f_offset, ap->a_f_offset + newlen,
+				    rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
+			else
+				dprintf("ZFS: %s:%d: locking (sz %lld) [%lld..%lld] partially below"
+				    " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
+				    __func__, __LINE__, newlen,
+				    ap->a_f_offset, ap->a_f_offset + newlen,
+				    rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, newlen, RL_WRITER);
 			drop_rl = B_TRUE;
 		} else if (ap->a_f_offset + ap->a_size > rl->r_off  + rl->r_len) {
