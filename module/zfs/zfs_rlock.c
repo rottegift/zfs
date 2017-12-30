@@ -683,9 +683,9 @@ zfs_range_compare(const void *arg1, const void *arg2)
 	const rl_t *rl1 = arg1;
 	const rl_t *rl2 = arg2;
 
-	if (rl1->r_off > rl2->r_off)
+	if (trunc_page_64(rl1->r_off) > trunc_page_64(rl2->r_off))
 		return (1);
-	if (rl1->r_off < rl2->r_off)
+	if (trunc_page_64(rl1->r_off) < trunc_page_64(rl2->r_off))
 		return (-1);
 	return (0);
 }
