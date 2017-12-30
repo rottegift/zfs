@@ -2836,7 +2836,7 @@ out:
 	if (rl == NULL && tsd_get(rl_key) == NULL && flags & UPL_IOSYNC)
 		zil_commit(zfsvfs->z_log, zp->z_id);
 	else if (flags & UPL_IOSYNC)
-		printf("ZFS: %s:%d: zil_commit skipped because range lock may be held "
+		dprintf("ZFS: %s:%d: zil_commit skipped because range lock may be held "
 		       " [%lld..%lld] fs %s fname %s (rl NULL? %d) (tsd rl null? %d)\n",
 		       __func__, __LINE__,
 		       off, off+len, fsname, fname,
