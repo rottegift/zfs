@@ -7039,12 +7039,31 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 	 */
 
 	/* So pageout can know if it is called recursively, add this thread to list*/
+
+	rl_t *rl = NULL;
+
+
+	if (vfsp.vnfs_vtype == VREG) {
+		ASSERT3S(tsd_get(rl_key), ==, NULL);
+		if ((rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER)) == NULL) {
+			printf("ZFS: %s:%d: waiting to acquire RL for whole file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+		}
+		ASSERT3S(rl, !=, NULL);
+		tsd_set(rl_key, rl);
+	}
 	zp->z_no_fsync = B_TRUE;
 	while (vnode_create(VNCREATE_FLAVOR, VCREATESIZE, &vfsp, &vp) != 0) {
 		kpreempt(KPREEMPT_SYNC);
 	}
 	atomic_inc_64(&vnop_num_vnodes);
 	zp->z_no_fsync = B_FALSE;
+	if (rl) {
+		ASSERT3S(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+	}
 
 	dprintf("Assigned zp %p with vp %p\n", zp, vp);
 
