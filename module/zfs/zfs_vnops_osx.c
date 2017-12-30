@@ -3666,14 +3666,22 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	if (tsd_get(rl_key) != NULL) {
 		rl = tsd_get(rl_key);
+		if (rl->r_zp != zp) {
+		  printf("ZFS: %s:%d: recovered rl from TSD has"
+			 " zp mismatch: our zp fname %s tsd zp fname %s\n",
+			 __func__, __LINE__, zp->z_name_cache,
+			 (rl->r_zp != NULL) ? rl->r_zp->z_name_cache : "(no r_zp)");
+		}
 		if (rl->r_len < rllen || rl->r_off > rloff) {
 			printf("ZFS: %s:%d: recovered rl from TSD, (type %d)(len %lld)[%lld, %lld],"
-			       " (write wanted? %d) (read wanted? %d), (filesize %lld), fs %s fn %s"
+			       " (write wanted? %d) (read wanted? %d), (filesize %lld, foff %lld, a_size %ld),"
+			       " fs %s fn %s"
 			       " (lock held at entry? %d),"
 			       " desired range (len %lld) [%lld..%lld]\n",
 			       __func__, __LINE__,
 			       rl->r_type, rl->r_len, rl->r_off, rl->r_len + rl->r_off,
-			       rl->r_write_wanted,  rl->r_read_wanted, zp->z_size, fsname, fname,
+			       rl->r_write_wanted,  rl->r_read_wanted, zp->z_size, ap->a_f_offset, ap->a_size,
+			       fsname, fname,
 			       had_map_lock_at_entry,
 			       rllen, rloff, rloff + rllen);
 		}
