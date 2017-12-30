@@ -94,6 +94,8 @@
 #include <sys/znode_z_map_lock.h>
 
 uint_t rl_key;
+uint_t rl_key_zp_key_mismatch_key;
+
 extern const size_t MAX_UPL_SIZE_BYTES;
 
 typedef struct vnops_osx_stats {
@@ -3312,7 +3314,7 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 		ASSERT3S(rl->r_off + rl->r_len, >=, end);
 	} else if (tsd_get(rl_key) == NULL) {
 		ASSERT3S(start, <, end);
-		ASSERT3S(tsd_get(rl_key), ==, NULL);
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		if ((rl = zfs_try_range_lock(zp, start, end, RL_WRITER)) == NULL) {
 			printf("ZFS: %s:%d: acquiring RL (len %lld) [%lld..%lld] (filesize %lld) file %s\n",
 			    __func__, __LINE__, end - start, start, end, zp->z_size, zp->z_name_cache);
@@ -3453,7 +3455,7 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	}
 
 	if (release_my_rl == B_TRUE) {
-		ASSERT3S(tsd_get(rl_key), ==, rl);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, NULL);
 		zfs_range_unlock(rl);
 		rl = NULL;
@@ -3664,11 +3666,23 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	if (tsd_get(rl_key) != NULL) {
 		off_t fsize = zp->z_size;
 		rl = tsd_get(rl_key);
-		if (rl->r_zp != zp) {
-		  panic("ZFS: %s:%d: recovered rl from TSD has"
-			 " zp mismatch: our zp fname %s tsd zp fname %s\n",
-			 __func__, __LINE__, zp->z_name_cache,
-			 (rl->r_zp != NULL) ? rl->r_zp->z_name_cache : "(no r_zp)");
+		if (rl->r_zp != zp && tsd_get(rl_key_zp_key_mismatch_key) != NULL) {
+			VERIFY3P(rl->r_zp, !=, NULL);
+			panic("ZFS: %s:%d: recovered rl from TSD has"
+			    " zp mismatch: our zp fname %s tsd zp fname %s\n",
+			    __func__, __LINE__, zp->z_name_cache,
+			    (rl->r_zp != NULL) ? rl->r_zp->z_name_cache : "(no r_zp)");
+		} else if (rl->r_zp != zp) {
+			znode_t *tsdzp = tsd_get(rl_key_zp_key_mismatch_key);
+			znode_t *rlzp = rl->r_zp;
+			VERIFY3P(tsdzp, !=, NULL);
+			VERIFY3P(rlzp, !=, NULL);
+			printf("ZFS: %s:%d: mismatch zp: TSD rl_key != zp"
+			    " (TSD mm zp == zp? %d) (RL zp == zp? %d), fnamezp %s fnametsdrlzp %s fnametsdmmzp %s\n",
+			    __func__, __LINE__, tsdzp == zp, rlzp == zp,
+			    zp->z_name_cache, rlzp->z_name_cache, tsdzp->z_name_cache );
+			printf("ZFS: %s:%d: continuing with TSD RL len %lld [%lld..%lld]\n",
+			    __func__, __LINE__, rl->r_len, rl->r_off, rl->r_off + rl->r_len);
 		}
 		drop_rl = B_FALSE;
 		if (rl->r_off <= ap->a_f_offset &&
@@ -7033,16 +7047,24 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 
 	rl_t *rl = NULL;
 
-
 	if (vfsp.vnfs_vtype == VREG) {
-		ASSERT3S(tsd_get(rl_key), ==, NULL);
-		if ((rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER)) == NULL) {
-			printf("ZFS: %s:%d: waiting to acquire RL for whole file %s\n",
-			    __func__, __LINE__, zp->z_name_cache);
-			rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+		if (tsd_get(rl_key) == NULL) {
+			if ((rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER)) == NULL) {
+				printf("ZFS: %s:%d: waiting to acquire RL for whole file %s\n",
+				    __func__, __LINE__, zp->z_name_cache);
+				rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+			}
+			ASSERT3S(rl, !=, NULL);
+			tsd_set(rl_key, rl);
+			ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
+			tsd_set(rl_key_zp_key_mismatch_key, zp);
+		} else {
+			rl_t *tsdrl = tsd_get(rl_key);
+			printf("ZFS: %s:%d: TSD RL exists! len %lld [%lld..%lld] file %s"
+			    " so will let pageoutv2_helper deal with this\n",
+			    __func__, __LINE__, tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
+			    zp->z_name_cache);
 		}
-		ASSERT3S(rl, !=, NULL);
-		tsd_set(rl_key, rl);
 	}
 	zp->z_no_fsync = B_TRUE;
 	while (vnode_create(VNCREATE_FLAVOR, VCREATESIZE, &vfsp, &vp) != 0) {
@@ -7051,8 +7073,10 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 	atomic_inc_64(&vnop_num_vnodes);
 	zp->z_no_fsync = B_FALSE;
 	if (rl) {
-		ASSERT3S(tsd_get(rl_key), ==, rl);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, NULL);
+		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
+		tsd_set(rl_key_zp_key_mismatch_key, NULL);
 		zfs_range_unlock(rl);
 	}
 
@@ -7093,6 +7117,7 @@ zfs_vfsops_init(void)
 	struct vfs_fsentry vfe;
 
 	tsd_create(&rl_key, NULL);
+	tsd_create(&rl_key_zp_key_mismatch_key, NULL);
 
 	zfs_init();
 
@@ -7138,6 +7163,7 @@ zfs_vfsops_fini(void)
 
 	zfs_fini();
 
+	tsd_destroy(&rl_key_zp_key_mismatch_key);
 	tsd_destroy(&rl_key);
 
 	return (vfs_fsremove(zfs_vfsconf));
