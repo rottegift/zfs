@@ -3687,7 +3687,20 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 (rl->r_zp != NULL) ? rl->r_zp->z_name_cache : "(no r_zp)");
 		}
 		drop_rl = B_FALSE;
-		if (ap->a_f_offset + ap->a_size < rl->r_off) {
+		if (rl->r_off <= ap->a_f_offset &&
+			   rl->r_off + rl->r_len >= ap->a_f_offset + ap->a_size) {
+			/* subrange  [rloff](aprange)[rloff+rllen] */
+			/*
+			 * It's worth noting that we only receive 1 MiB
+			 * chunks into pageoutv2_helper, but the range
+			 * lock length can be up to UINT_MAX bytes long,
+			 * so this bit of code should happen fairly
+			 * often, therefore it goes first.
+			 */
+			dprintf("ZFS: %s:%d: subrange success!\n", __func__, __LINE__);
+			ASSERT3S(drop_rl, ==, B_TRUE);
+			ASSERT3S(xxxbleat, ==, B_FALSE);
+		} else if (ap->a_f_offset + ap->a_size < rl->r_off) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
 			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
