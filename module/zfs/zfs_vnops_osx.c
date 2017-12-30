@@ -1954,8 +1954,8 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 				}
 				if (!rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
 					ASSERT3P(tsd_get(rl_key), ==, rl);
-					zfs_range_unlock(rl);
 					tsd_set(rl_key, NULL);
+					zfs_range_unlock(rl);
 					extern void IOSleep(unsigned milliseconds);
 					IOSleep(1);
 				} else {
@@ -1977,8 +1977,8 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			VATTR_SET_SUPPORTED(vap, va_data_size);
 			ASSERT3P(tsd_get(rl_key), ==, rl);
-			zfs_range_unlock(rl);
 			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rl);
 			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 		}
 		if (VATTR_IS_ACTIVE(vap, va_mode))
@@ -3490,8 +3490,8 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 
 	if (release_my_rl == B_TRUE) {
 		ASSERT3S(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
 	}
 
 	if (rl == NULL && tsd_get(rl_key) == NULL

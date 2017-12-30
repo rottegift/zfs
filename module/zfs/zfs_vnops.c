@@ -1482,8 +1482,8 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	ASSERT3U(initial_u_size, ==, ubc_getsize(vp));
 out:
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-	zfs_range_unlock(rl);
 	tsd_set(rl_key, NULL);
+	zfs_range_unlock(rl);
 
 	ZFS_ACCESSTIME_STAMP(zfsvfs, zp);
 	ZFS_EXIT(zfsvfs);
@@ -1701,8 +1701,8 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-	zfs_range_unlock(rl);
 	tsd_set(rl_key, NULL);
+	zfs_range_unlock(rl);
 
 	if (error != 0) {
 		printf("ZFS: %s:%d: ubc_msync error %d msync_resid %lld"
@@ -1807,8 +1807,8 @@ zfs_write_sync_range(void *arg)
                 printf("ZFS: %s:%d safety_check failed with error %d for file %s\n",
                     __func__, __LINE__, error, zp->z_name_cache);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
 		error = EDEADLK;
 		goto get_out;
         }
@@ -1890,8 +1890,8 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 			if (error) {
 				dmu_tx_abort(tx);
 				ASSERT3P(tsd_get(rl_key), ==, rlock);
-				zfs_range_unlock(rlock);
 				tsd_set(rl_key, NULL);
+				zfs_range_unlock(rlock);
 				printf("ZFS: %s:%d: dmu_tx_assign error %d\n",
 				    __func__, __LINE__, error);
 				return(error);
@@ -1911,8 +1911,8 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 		ASSERT3S(ubcsize, ==, zp->z_size);
 		if (ubcsize == 0 || woff >= ubcsize) {
 			ASSERT3P(tsd_get(rl_key), ==, rlock);
-			zfs_range_unlock(rlock);
 			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rlock);
 			return (0);
 		}
 		boolean_t sync = (ioflag & (FSYNC | FDSYNC)) ||
@@ -1934,8 +1934,8 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 			int retval = zfs_ubc_msync(zp, rlock, aoff, aend, &resid_off, msync_flags);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3P(tsd_get(rl_key), ==, rlock);
-			zfs_range_unlock(rlock);
 			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rlock);
 			ASSERT3S(tries, <=, 2);
 			ASSERT3S(retval, ==, 0);
 			if (retval != 0) {
@@ -1953,8 +1953,8 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 			}
 		} else {
 			ASSERT3P(tsd_get(rl_key), ==, rlock);
-			zfs_range_unlock(rlock);
 			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rlock);
 		}
 
 		rlock = NULL;
@@ -1988,8 +1988,8 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		if (error) {
 			dmu_tx_abort(tx);
 			ASSERT3P(tsd_get(rl_key), ==, rl);
-			zfs_range_unlock(rl);
 			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rl);
 			printf("ZFS: %s:%d: dmu_tx_assign error %d\n",
 			    __func__, __LINE__, error);
 			return(error);
@@ -2435,8 +2435,8 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 					z_map_drop_lock(zp,
 					    &need_release, &need_upgrade);
 					ASSERT3P(tsd_get(rl_key), ==, rl);
-					zfs_range_unlock(rl);
 					tsd_set(rl_key, NULL);
+					zfs_range_unlock(rl);
 					ZFS_EXIT(zfsvfs);
 					ASSERT3S(error, ==, 0);
 					return (error);
@@ -2469,8 +2469,8 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			    zp->z_name_cache);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3P(tsd_get(rl_key), ==, rl);
-			zfs_range_unlock(rl);
 			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rl);
 			VNOPS_STAT_BUMP(zfs_write_cluster_copy_error);
 			ZFS_EXIT(zfsvfs);
 			return(error);
@@ -2599,8 +2599,8 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
 	}
 
 skip_sync:
@@ -2802,8 +2802,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	if (woff >= limit) {
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
 		ZFS_EXIT(zfsvfs);
 		return ((EFBIG));
 	}
@@ -2898,8 +2898,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	if (woff >= limit) {
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
 		ZFS_EXIT(zfsvfs);
 		return ((EFBIG));
 	}
@@ -3361,8 +3361,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	printf("ZFS: %s:%d (old_style) done remainder %lu\n", __func__, __LINE__,  n);
 
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-	zfs_range_unlock(rl);
 	tsd_set(rl_key, NULL);
+	zfs_range_unlock(rl);
 
 	/*
 	 * If we're in replay mode, or we made no progress, return error.
@@ -3554,8 +3554,8 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 				break;
 			offset += blkoff;
 			ASSERT3P(tsd_get(rl_key), ==, rl);
-			zfs_range_unlock(zgd->zgd_rl);
 			tsd_set(rl_key, NULL);
+			zfs_range_unlock(zgd->zgd_rl);
 		}
 		/* test for truncation needs to be done while range locked */
 		if (lr->lr_offset >= zp->z_size)
@@ -5285,8 +5285,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-	zfs_range_unlock(rl);
 	tsd_set(rl_key, NULL);
+	zfs_range_unlock(rl);
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 
@@ -7370,8 +7370,8 @@ zfs_putapage(vnode_t *vp, page_t **pp, u_offset_t *offp,
 	if (unlikely((mapping != pp->mapping) || !PageDirty(pp))) {
 		unlock_page(pp);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
 		ZFS_EXIT(zsb);
 		return (0);
 	}
@@ -7380,8 +7380,8 @@ zfs_putapage(vnode_t *vp, page_t **pp, u_offset_t *offp,
 	if (PageWriteback(pp)) {
 		unlock_page(pp);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
 
 		if (wbc->sync_mode != WB_SYNC_NONE)
 			wait_on_page_writeback(pp);
@@ -7394,8 +7394,9 @@ zfs_putapage(vnode_t *vp, page_t **pp, u_offset_t *offp,
 	if (!clear_page_dirty_for_io(pp)) {
 		unlock_page(pp);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+
 		ZFS_EXIT(zsb);
 		return (0);
 	}
@@ -7459,8 +7460,8 @@ out:
 	if (lenp)
 		*lenp = len;
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-	zfs_range_unlock(rl);
 	tsd_set(rl_key, NULL);
+	zfs_range_unlock(rl);
 
 	if (wbc->sync_mode != WB_SYNC_NONE) {
 		/*
@@ -7546,8 +7547,8 @@ zfs_putpage(vnode_t *vp, offset_t off, size_t len, int flags, cred_t *cr,
 	if (off > zp->z_size) {
 		/* past end of file */
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		zfs_range_unlock(rl);
 		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
 		ZFS_EXIT(zfsvfs);
 		return (0);
 	}
@@ -7578,8 +7579,8 @@ zfs_putpage(vnode_t *vp, offset_t off, size_t len, int flags, cred_t *cr,
 	}
 out:
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-	zfs_range_unlock(rl);
 	tsd_set(rl_key, NULL);
+	zfs_range_unlock(rl);
 	if ((flags & B_ASYNC) == 0 || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 		zil_commit(zfsvfs->z_log, zp->z_id);
 	ZFS_EXIT(zfsvfs);
