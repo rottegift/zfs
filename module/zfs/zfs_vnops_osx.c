@@ -7110,8 +7110,12 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 	else
 		vnode_settag(vp, VT_ZFS);
 
+	tsd_set(rl_key_vp_from_getvnode, vp);
+
 	zp->z_vid = vnode_vid(vp);
 	zp->z_vnode = vp;
+
+	tsd_set(rl_key_vp_from_getvnode, vp);
 
 	/*
 	 * OS X Finder is hardlink agnostic, so we need to mark vp's that
@@ -7126,7 +7130,6 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, NULL);
 		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
-		ASSERT3P(vp, ==, tsd_get(rl_key_vp_from_getvnode));
 		tsd_set(rl_key_vp_from_getvnode, NULL);
 		tsd_set(rl_key_zp_key_mismatch_key, NULL);
 		zfs_range_unlock(rl);
