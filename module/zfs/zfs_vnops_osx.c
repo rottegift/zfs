@@ -95,6 +95,7 @@
 
 uint_t rl_key;
 uint_t rl_key_zp_key_mismatch_key;
+uint_t rl_key_vp_from_getvnode;
 
 extern const size_t MAX_UPL_SIZE_BYTES;
 
@@ -3674,13 +3675,33 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    (rl->r_zp != NULL) ? rl->r_zp->z_name_cache : "(no r_zp)");
 		} else if (rl->r_zp != zp) {
 			znode_t *tsdzp = tsd_get(rl_key_zp_key_mismatch_key);
+			struct vnode *tsdvp = tsd_get(rl_key_vp_from_getvnode);
 			znode_t *rlzp = rl->r_zp;
-			VERIFY3P(tsdzp, !=, NULL);
 			VERIFY3P(rlzp, !=, NULL);
 			printf("ZFS: %s:%d: mismatch zp: TSD rl_key != zp"
+			    " (TSD vp == NULL? %d) (TSD vp == ap->a_vp? %d) "
+			    "(TSD mm zp == NULL? %d)"
 			    " (TSD mm zp == zp? %d) (RL zp == zp? %d), fnamezp %s fnametsdrlzp %s fnametsdmmzp %s\n",
-			    __func__, __LINE__, tsdzp == zp, rlzp == zp,
-			    zp->z_name_cache, rlzp->z_name_cache, tsdzp->z_name_cache );
+			    __func__, __LINE__,
+			    tsdvp == NULL,  tsdvp == ap->a_vp,
+			    tsdzp == NULL, tsdzp == zp, rlzp == zp,
+			    zp->z_name_cache, rlzp->z_name_cache,
+			    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null tsdzp)" );
+			/*
+			 * so one problem here is that if the RL we have
+			 * found in TSD is truly from a different file,
+			 * then using it for locking here is a bit strange.
+			 *
+			 * But if the ZP/VP is truly a different file from what
+			 * we found in the TSD, then we can lock the whole range.
+			 */
+			if (rlzp == NULL
+			    || tsdzp == NULL
+			    || (tsdvp != NULL && tsdvp != ap->a_vp)) {
+				printf("ZFS: %s:%d: TSD RL possibly not for this file, acquring locks\n",
+				    __func__, __LINE__);
+				goto acquire_locks;
+			}
 			printf("ZFS: %s:%d: continuing with TSD RL len %lld [%lld..%lld]\n",
 			    __func__, __LINE__, rl->r_len, rl->r_off, rl->r_off + rl->r_len);
 		}
@@ -3816,6 +3837,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	extern void IOSleep(unsigned milliseconds); // yields thread
 	extern void IODelay(unsigned microseconds); // x86_64 rep nop
+
+acquire_locks:
 
 	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
 
@@ -7047,41 +7070,34 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 
 	rl_t *rl = NULL;
 
-	if (vfsp.vnfs_vtype == VREG) {
-		if (tsd_get(rl_key) == NULL) {
-			if ((rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER)) == NULL) {
-				printf("ZFS: %s:%d: waiting to acquire RL for whole file %s\n",
-				    __func__, __LINE__, zp->z_name_cache);
-				rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-			}
-			ASSERT3S(rl, !=, NULL);
-			tsd_set(rl_key, rl);
-			ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
-			tsd_set(rl_key_zp_key_mismatch_key, zp);
-		} else {
-			rl_t *tsdrl = tsd_get(rl_key);
-			printf("ZFS: %s:%d: TSD RL exists! len %lld [%lld..%lld] file %s"
-			    " so will let pageoutv2_helper deal with this\n",
-			    __func__, __LINE__, tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
-			    zp->z_name_cache);
+	if (tsd_get(rl_key) == NULL) {
+		if ((rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER)) == NULL) {
+			printf("ZFS: %s:%d: waiting to acquire RL for whole file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 		}
+		ASSERT3S(rl, !=, NULL);
+		tsd_set(rl_key, rl);
+		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
+		tsd_set(rl_key_zp_key_mismatch_key, zp);
+		tsd_set(rl_key_vp_from_getvnode, vp);
+	} else {
+		rl_t *tsdrl = tsd_get(rl_key);
+		printf("ZFS: %s:%d: TSD RL exists! len %lld [%lld..%lld] file %s"
+		    " so will let pageoutv2_helper deal with this\n",
+		    __func__, __LINE__, tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
+		    zp->z_name_cache);
 	}
+
 	zp->z_no_fsync = B_TRUE;
 	while (vnode_create(VNCREATE_FLAVOR, VCREATESIZE, &vfsp, &vp) != 0) {
 		kpreempt(KPREEMPT_SYNC);
 	}
 	atomic_inc_64(&vnop_num_vnodes);
-	zp->z_no_fsync = B_FALSE;
-	if (rl) {
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
-		tsd_set(rl_key_zp_key_mismatch_key, NULL);
-		zfs_range_unlock(rl);
-	}
 
 	dprintf("Assigned zp %p with vp %p\n", zp, vp);
 
+	tsd_set(rl_key_vp_from_getvnode, vp);
 	/*
 	 * Unfortunately, when it comes to IOCTL_GET_BOOT_INFO and getting
 	 * the volume finderinfo, XNU checks the tags, and only acts on
@@ -7105,6 +7121,17 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 	if ((zp->z_links > 1) && (IFTOVT((mode_t)zp->z_mode) == VREG))
 		vnode_setmultipath(vp);
 
+	zp->z_no_fsync = B_FALSE;
+	if (rl) {
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
+		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
+		ASSERT3P(vp, ==, tsd_get(rl_key_vp_from_getvnode));
+		tsd_set(rl_key_vp_from_getvnode, NULL);
+		tsd_set(rl_key_zp_key_mismatch_key, NULL);
+		zfs_range_unlock(rl);
+	}
+
 	return (0);
 }
 
@@ -7118,6 +7145,7 @@ zfs_vfsops_init(void)
 
 	tsd_create(&rl_key, NULL);
 	tsd_create(&rl_key_zp_key_mismatch_key, NULL);
+	tsd_create(&rl_key_vp_from_getvnode, NULL);
 
 	zfs_init();
 
@@ -7163,6 +7191,7 @@ zfs_vfsops_fini(void)
 
 	zfs_fini();
 
+	tsd_destroy(&rl_key_vp_from_getvnode);
 	tsd_destroy(&rl_key_zp_key_mismatch_key);
 	tsd_destroy(&rl_key);
 
