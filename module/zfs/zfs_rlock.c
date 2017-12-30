@@ -122,6 +122,7 @@ zfs_range_lock_writer(znode_t *zp, rl_t *new, boolean_t try)
 		 * we could make the range locking code generically available
 		 * to other non-zfs consumers.
 		 */
+		boolean_t append_trunc = B_FALSE;
 		if (!zp->z_is_zvol) { /* caller is ZPL */
 			/*
 			 * If in append mode pick up the current end of file.
@@ -142,8 +143,10 @@ zfs_range_lock_writer(znode_t *zp, rl_t *new, boolean_t try)
 				new->r_len = UINT64_MAX;
 			}
 
-			if (new->r_type == RL_APPEND && new->r_off != 0)
+			if (new->r_type == RL_APPEND && new->r_off != 0) {
 				new->r_off = trunc_page_64(zp->z_size);
+				append_trunc = B_TRUE;
+			}
 		}
 
 		/*
@@ -152,6 +155,8 @@ zfs_range_lock_writer(znode_t *zp, rl_t *new, boolean_t try)
 		if (avl_numnodes(tree) == 0) {
 			new->r_type = RL_WRITER; /* convert to writer */
 			avl_add(tree, new);
+			if (append_trunc)
+				new->r_off = zp->z_size;
 			return (B_TRUE);
 		}
 
@@ -172,6 +177,9 @@ zfs_range_lock_writer(znode_t *zp, rl_t *new, boolean_t try)
 
 		new->r_type = RL_WRITER; /* convert possible RL_APPEND */
 		avl_insert(tree, new, where);
+
+		if (append_trunc)
+			new->r_off = zp->z_size;
 		return (B_TRUE);
 wait:
 		if (!rl->r_write_wanted) {
