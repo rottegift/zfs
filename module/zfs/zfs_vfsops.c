@@ -262,9 +262,15 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			flags = UBC_PUSHDIRTY | UBC_SYNC;
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;
-		/* See if we are colldiing with other ZPL activity, hang here rather than below */
+		/* See if we are colliding with other ZPL activity, hang here rather than below */
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		rl_t *rl = NULL;
+		if ((rl = zfs_try_range_lock(zp, 0, ubcsize, RL_WRITER)) == NULL) {
+			printf("ZFS: %s:%d: could not get range lock [0..%lld] for file %s\n",
+			    __func__, __LINE__, ubcsize, zp->z_name_cache);
+			ZFS_EXIT(zfsvfs);
+			return (VNODE_CLAIMED);
+		}
 		tsd_set(rl_key, rl);
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
