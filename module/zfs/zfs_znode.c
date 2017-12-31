@@ -1426,12 +1426,36 @@ again:
 		 * -> vnode_getwithvid() -> deadlock. Unsure why vnode_getwithvid()
 		 * ends up sleeping in msleep() but vnode_get() does not.
 		 */
-		if (!vp || (err=vnode_getwithvid(vp, vid) != 0)) {
+		rl_t *rl = NULL;
+
+		if (tsd_get(rl_key) == NULL) {
+			rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+			tsd_set(rl_key, rl);
+		} else {
+			ASSERT3P(tsd_get(rl_key), !=, NULL); // bleat
+		}
+
+		if (!vp || (rl == NULL && tsd_get(rl_key) == NULL) || (err=vnode_getwithvid(vp, vid) != 0)) {
+			if (rl != NULL) {
+				if (tsd_get(rl_key) == rl)
+					tsd_set(rl_key, NULL);
+				ASSERT3P(tsd_get(rl_key), ==, NULL);
+				zfs_range_unlock(rl);
+				rl = NULL;
+			}
 			ASSERT3S(zp->z_no_fsync, ==, B_TRUE);
 			//if ((err = vnode_get(vp)) != 0) {
 			dprintf("ZFS: vnode_get() returned %d\n", err);
 			kpreempt(KPREEMPT_SYNC);
 			goto again;
+		}
+
+		if (rl != NULL) {
+			ASSERT3P(tsd_get(rl_key), ==, rl);
+			if (tsd_get(rl_key) == rl)
+				tsd_set(rl_key, NULL);
+			zfs_range_unlock(rl);
+			rl = NULL;
 		}
 
 		/*
