@@ -3881,6 +3881,46 @@ acquire_locks:
 			drop_rl = B_TRUE;
 			break;
 		}
+		if (secs > 1 && (rl = zfs_try_range_lock(zp, rloff, rllen, RL_READER))) {
+			/* zfs_read may possess locks, leaving us stuck here */
+			printf("ZFS: %s:%d: acquired RL_READER for off %lld len %lld file %s, continuing\n",
+			    __func__, __LINE__, rloff, rllen, zp->z_name_cache);
+			if (!rw_write_held(&zp->z_map_lock)) {
+				if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+					VNOPS_OSX_STAT_BUMP(pageoutv2_want_lock);
+					drop_rl = B_TRUE;
+					need_release = B_TRUE;
+					zp->z_map_lock_holder = __func__;
+					break;
+				} else if (secs > 30) {
+					printf("ZFS: %s:%d: proceeding on file %s without z_map_lock"
+					    " held by %s\n", __func__, __LINE__,
+					    zp->z_name_cache, zp->z_map_lock_holder);
+					drop_rl = B_TRUE;
+					need_release = B_FALSE;
+					goto skip_lock_acquisition;
+				}
+			}
+		}
+		if (secs > 40) {
+			/* scream and break out */
+			if (!rw_tryenter (&zp->z_map_lock, RW_WRITER)) {
+				printf("ZFS: %s:%d: proceeding to pageout without locks"
+				    " off %lld len %lld for file %s\n", __func__, __LINE__,
+				    rloff, rllen, zp->z_name_cache);
+				drop_rl = B_FALSE;
+				need_release = B_FALSE;
+				goto skip_lock_acquisition;
+			} else {
+				printf("ZFS: %s:%d: couldn't get RL off %lld len %lld for file %s,"
+				    " but acquired z_map_lock, proceeding\n", __func__, __LINE__,
+				    rloff, rllen, zp->z_name_cache);
+				drop_rl = B_FALSE;
+				need_release = B_TRUE;
+				zp->z_map_lock_holder = __func__;
+				goto skip_lock_acquisition;
+			}
+		}
 		hrtime_t cur_time = gethrtime();
 		if (cur_time > print_time) {
 			secs++;
@@ -3907,11 +3947,14 @@ acquire_locks:
 			IOSleep(10); // we hold no locks, so let work be done
 			/* as we hold no locks, we can stay in the cv_wait in the non try version */
 		}
-		IODelay(1);
-		if ((ctr % 1024) == 0 && ctr > 0) {
+		IOSleep(1);
+#if 0
+		if ((ctr % 512) == 0 && ctr > 0) {
 			kpreempt(KPREEMPT_SYNC);
 			VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, 1024);
 		}
+#endif
+		VNOPS_OSX_STAT_BUMP(pageoutv2_want_lock);
 	}
 
 	VERIFY3P(rl, !=, NULL);
@@ -3923,8 +3966,6 @@ acquire_locks:
 	if (secs == 0) {
 		dprintf("ZFS: %s:%d: lock was already held for fs %s file %s\n",
 		    __func__, __LINE__, fsname, fname);
-	} else {
-		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, secs);
 	}
 
 already_acquired_locks:
@@ -4012,6 +4053,8 @@ already_acquired_locks:
 
 	/* Grab UPL now */
 	int request_flags;
+
+skip_lock_acquisition:
 
 	/*
 	 * we're in control of any UPL we commit
