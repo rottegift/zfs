@@ -4574,7 +4574,6 @@ already_acquired_locks:
 	if (drop_rl == B_TRUE) {
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
-		VERIFY3P(tsd_rl_at_entry, ==, tsd_get(rl_key));
 		if (rl != tsd_get(rl_key)) {
 		    zfs_range_unlock(rl);
 		    rl = NULL;
