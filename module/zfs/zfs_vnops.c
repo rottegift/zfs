@@ -2204,6 +2204,8 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 	off_t end_size;
 	ASSERT3S(error, ==, 0);
 
+	ASSERT3P(rl, ==, tsd_get(rl_key));
+
 	ASSERT3S(start_resid, <=, INT_MAX);
 	ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 
@@ -2932,6 +2934,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	}
 
 	/* on error, zfs_write_maybe_extend_file does zfs_range_unlock */
+	ASSERT3P(rl, !=, NULL);
+	ASSERT3P(tsd_get(rl_key), ==, rl);
         error = zfs_write_maybe_extend_file(zp, woff, start_resid, rl);
 	if (error) {
 		ZFS_EXIT(zfsvfs);
