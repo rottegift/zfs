@@ -3496,6 +3496,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
+	extern void IOSleep(unsigned milliseconds); // yields thread
+	extern void IODelay(unsigned microseconds); // x86_64 rep nop
+
 	/* We can still get into this function as non-v2 style, by the default
 	 * pager (ie, swap - when we eventually support it)
 	 */
@@ -3817,16 +3820,38 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
 		if (!rw_write_held(&zp->z_map_lock)) {
 			ASSERT3S(had_map_lock_at_entry, ==, B_FALSE);
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-			VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
+			for (uint64_t tries = 0; ; tries++) {
+				if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+					need_release = B_TRUE;
+					break;
+				}
+				VNOPS_OSX_STAT_BUMP(pageoutv2_want_lock);
+				if ((tries % 1000) == 0) {
+					printf("ZFS: %s:%d: (%lld msec) trying to get z_map_lock for file %s"
+					    " (held by %s)\n", __func__, __LINE__, tries,
+					    zp->z_name_cache,
+					    (zp->z_map_lock_holder != NULL)
+					    ? zp->z_map_lock_holder
+					    : "(null holder!)");
+				}
+				IOSleep(1);
+				if (tries > 10000) {
+					printf("ZFS: %s:%d: after ~ %lld msec,"
+					    " proceeding WITHOUT holding z_map_lock, file %s"
+					    " (held by %s)\n", __func__, __LINE__, tries,
+					    zp->z_name_cache,
+					    (zp->z_map_lock_holder != NULL)
+					    ? zp->z_map_lock_holder
+					    : "(null holder!)");
+					goto already_acquired_locks;
+				}
+			}
 		}
 		ASSERT(rw_write_held(&zp->z_map_lock));
 		/* let our caller drop the range_lock */
 		goto already_acquired_locks;
 	}
 
-	extern void IOSleep(unsigned milliseconds); // yields thread
-	extern void IODelay(unsigned microseconds); // x86_64 rep nop
 
 acquire_locks:
 
@@ -3876,8 +3901,32 @@ acquire_locks:
 			 * as we have the range lock we can now safely wait on the
 			 * z_map_lock
 			 */
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-			VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
+			for (uint64_t tries = 0; ; tries++) {
+				if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+					need_release = B_TRUE;
+					break;
+				}
+				VNOPS_OSX_STAT_BUMP(pageoutv2_want_lock);
+				if ((tries % 1000) == 0) {
+					printf("ZFS: %s:%d: (%lld msec) trying to get z_map_lock for file %s"
+					    " (held by %s)\n", __func__, __LINE__, tries,
+					    zp->z_name_cache,
+					    (zp->z_map_lock_holder != NULL)
+					    ? zp->z_map_lock_holder
+					    : "(null holder!)");
+				}
+				IOSleep(1);
+				if (tries > 10000) {
+					printf("ZFS: %s:%d: after ~ %lld msec,"
+					    " proceeding WITHOUT holding z_map_lock, file %s"
+					    " (held by %s)\n", __func__, __LINE__, tries,
+					    zp->z_name_cache,
+					    (zp->z_map_lock_holder != NULL)
+					    ? zp->z_map_lock_holder
+					    : "(null holder!)");
+					goto already_acquired_locks;
+				}
+			}
 			drop_rl = B_TRUE;
 			break;
 		}
