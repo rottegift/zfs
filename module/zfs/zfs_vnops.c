@@ -1869,7 +1869,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	ASSERT3S(start_resid, >, 0);
 	/* overlock so that we don't underlock beneath ubc_msync */
 	const off_t aoff = trunc_page_64(woff);
-	const off_t alen = round_page_64(start_resid + PAGE_SIZE_64);
+	const off_t alen = round_page_64(start_resid);
 
 	/*
 	 * if this file is NOT now mmapped and there are dirty pages,
@@ -1882,10 +1882,50 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	    !spl_ubc_is_mapped(vp, NULL) &&
 	    ubc_getsize(vp) != 0 &&
 	    (is_file_clean(vp, ubc_getsize(vp)))) {
-		//remember that is_file_clean() reports EINVAL if there are dirty pages
+		//remember that is_file_clean() reports EINVAL if there
+		// are dirty pages.
+		// note we probably should not really be called
+		// if FAPPEND because there is at most the last page
+		// that may be dirty, and we will sync that out anyway
 		if (ioflag & FAPPEND) {
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
-			rlock = zfs_range_lock(zp, 0, alen, RL_APPEND);
+			const off_t target_len = start_resid;
+			for ( ; ; ) {
+				const off_t zsize_start = zp->z_size;
+				const off_t a_zsize_start = trunc_page_64(zsize_start);
+				const off_t a_zsize_diff = zsize_start - a_zsize_start;
+				const off_t a_target_len = round_page_64(target_len + a_zsize_diff);
+				rlock = zfs_range_lock(zp, 0, a_target_len, RL_APPEND);
+				ASSERT3S(rlock->r_off, ==, zp->z_size);
+				/* we might luckily have locked a correctly page-aligned range */
+				if ((rlock->r_off & PAGE_MASK_64) == 0
+				    && ((rlock->r_off + rlock->r_len) & PAGE_MASK_64) == 0)
+					break;
+				/* otherwise, try to grab one now */
+				const uint64_t locked_off = rlock->r_off;
+				const uint64_t aligned_locked_off = trunc_page_64(locked_off);
+				ASSERT3S(locked_off, >=, aligned_locked_off);
+				const int64_t aligned_diff = locked_off - aligned_locked_off;
+				const int64_t upd_target_len = target_len + aligned_diff;
+				const int64_t aligned_target_len = round_page_64(upd_target_len);
+				ASSERT3S(aligned_locked_off + aligned_target_len, >=, PAGE_SIZE_64);
+				zfs_range_unlock(rlock);
+				rlock = zfs_try_range_lock(zp, aligned_locked_off, aligned_target_len, RL_WRITER);
+				if (rlock == NULL) {
+					printf("ZFS: %s:%d: couldn't get aligned lock off %lld len %lld for file %s, "
+					    " retrying with append lock\n",
+					    __func__, __LINE__, aligned_locked_off, aligned_target_len,
+					    zp->z_name_cache);
+					continue;
+				}
+				if (zp->z_size == locked_off)
+					break;
+				printf("ZFS: %s:%d: after append EOF @ %lld, after writer EOF @ %lld,"
+				    " giving up off %lld len %lld, retrying append lock file %s\n", __func__, __LINE__,
+				    locked_off, zp->z_size, aligned_locked_off, aligned_target_len,
+				    zp->z_name_cache);
+				continue;
+			}
 			tsd_set(rl_key, rlock);
 			woff = rlock->r_off;
 		} else {
@@ -2809,7 +2849,43 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	if (ioflag & FAPPEND) {
 		const off_t old_woff = woff;
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl = zfs_range_lock(zp, 0, round_page_64(n + PAGE_SIZE_64), RL_APPEND);
+		const off_t target_len = n;
+		for ( ; ; ) {
+			const off_t zsize_start = zp->z_size;
+			const off_t a_zsize_start = trunc_page_64(zsize_start);
+			const off_t a_zsize_diff = zsize_start - a_zsize_start;
+			const off_t a_target_len = round_page_64(target_len + a_zsize_diff);
+			rl = zfs_range_lock(zp, 0, a_target_len, RL_APPEND);
+			ASSERT3S(rl->r_off, ==, zp->z_size);
+			/* we might luckily have locked a correctly page-aligned range */
+			if ((rl->r_off & PAGE_MASK_64) == 0
+			    && ((rl->r_off + rl->r_len) & PAGE_MASK_64) == 0)
+				break;
+			/* otherwise, try to grab one now */
+			const uint64_t locked_off = rl->r_off;
+			const uint64_t aligned_locked_off = trunc_page_64(locked_off);
+			ASSERT3S(locked_off, >=, aligned_locked_off);
+			const int64_t aligned_diff = locked_off - aligned_locked_off;
+			const int64_t upd_target_len = target_len + aligned_diff;
+			const int64_t aligned_target_len = round_page_64(upd_target_len);
+			ASSERT3S(aligned_locked_off + aligned_target_len, >=, PAGE_SIZE_64);
+			zfs_range_unlock(rl);
+			rl = zfs_try_range_lock(zp, aligned_locked_off, aligned_target_len, RL_WRITER);
+			if (rl == NULL) {
+				printf("ZFS: %s:%d: couldn't get aligned lock off %lld len %lld for file %s, "
+				    " retrying with append lock\n",
+				    __func__, __LINE__, aligned_locked_off, aligned_target_len,
+				    zp->z_name_cache);
+				continue;
+			}
+			if (zp->z_size == locked_off)
+				break;
+			printf("ZFS: %s:%d: after append EOF @ %lld, after writer EOF @ %lld,"
+			    " giving up off %lld len %lld, retrying append lock file %s\n", __func__, __LINE__,
+			    locked_off, zp->z_size, aligned_locked_off, aligned_target_len,
+			    zp->z_name_cache);
+			continue;
+		}
 		tsd_set(rl_key, rl);
 		woff = rl->r_off;
 		if (rl->r_len == UINT64_MAX) {
