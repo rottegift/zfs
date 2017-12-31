@@ -3311,17 +3311,18 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 			       ? rl->r_zp->z_name_cache
 			       : "(null rl or r_zp)");
 		}
-		ASSERT3S(rl->r_off, <=, start);
-		ASSERT3S(rl->r_off + rl->r_len, >=, end);
+		/* rl->r_off can be UINT64_MAX */
+		ASSERT3U(rl->r_off, <=, start);
+		ASSERT3U(rl->r_off + rl->r_len, >=, end);
 	} else if (tsd_get(rl_key) == NULL) {
-		ASSERT3S(start, <, end);
+		ASSERT3U(start, <, end);
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		if ((rl = zfs_try_range_lock(zp, start, end, RL_WRITER)) == NULL) {
 			printf("ZFS: %s:%d: acquiring RL (len %lld) [%lld..%lld] (filesize %lld) file %s\n",
 			    __func__, __LINE__, end - start, start, end, zp->z_size, zp->z_name_cache);
 			rl = zfs_range_lock(zp, start, end, RL_WRITER);
 		}
-		ASSERT3S(rl, !=, NULL);
+		ASSERT3P(rl, !=, NULL);
 		tsd_set(rl_key, rl);
 		release_my_rl = B_TRUE;
 	}
