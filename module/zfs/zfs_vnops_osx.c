@@ -3706,7 +3706,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			printf("ZFS: %s:%d: continuing with TSD RL len %lld [%lld..%lld]\n",
 			    __func__, __LINE__, rl->r_len, rl->r_off, rl->r_off + rl->r_len);
 		}
-		drop_rl = B_FALSE;
 		if (rl->r_off <= ap->a_f_offset &&
 			   rl->r_off + rl->r_len >= ap->a_f_offset + ap->a_size) {
 			/* subrange  [rloff](aprange)[rloff+rllen] */
@@ -3734,6 +3733,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * avoid doing so here.
 			 */
 			dprintf("ZFS: %s:%d: subrange (page-aligned) success!", __func__, __LINE__);
+			drop_rl = B_FALSE;
 		} else if (ap->a_f_offset + ap->a_size < rl->r_off
 		    && trunc_page_64(ap->a_f_offset) != trunc_page_64(rl->r_off)) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
@@ -3802,10 +3802,11 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				fsname, fname,
 				had_map_lock_at_entry,
 				rllen, rloff, rloff + rllen);
+			drop_rl = B_FALSE;
 		} else {
 			dprintf("ZFS: %s:%d: success!\n", __func__, __LINE__);
 			ASSERT3S(xxxbleat, ==, B_FALSE);
-			ASSERT3S(drop_rl, ==, B_FALSE);
+			drop_rl = B_FALSE;
 		}
 		if (rl == NULL && tsd_get(rl_key) != NULL) {
 		  ASSERT3S(drop_rl, ==, B_TRUE);
@@ -3814,16 +3815,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		  printf("ZFS: %s:%d: failed to get new RL for fs %s file %s\n", __func__, __LINE__,
 		      fsname, fname);
 		}
-		/* Check our caller hasn't underlocked */
-#if 0 // done above
-		ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
-		const off_t rlsize = rloff + rllen;
-		const off_t rlsize_or_fsize = MIN(rlsize, zp->z_size);
-		const off_t rllen_not_past_eof = rlsize_or_fsize - rloff;
-		ASSERT3S(round_page_64(rl->r_len) + PAGE_SIZE_64, >=, rllen_not_past_eof);
-		ASSERT3S(MIN(trunc_page_64(rl->r_off) + round_page_64(rl->r_len) + PAGE_SIZE_64, zp->z_size),
-			 >=, MIN(zp->z_size, rlsize));
-#endif
+
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
 		if (!rw_lock_held(&zp->z_map_lock)) {
@@ -3859,9 +3851,11 @@ acquire_locks:
 		/* as we have the range lock, it is safe for us to wait on the z_map_lock */
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
+		drop_rl = B_TRUE;
 	} else {
 		VERIFY3P(rl, !=, NULL);
 		VERIFY(rw_lock_held(&zp->z_map_lock));
+		drop_rl = B_TRUE;
 	}
 
 	EQUIV(rl != NULL, rw_write_held(&zp->z_map_lock));
@@ -3876,6 +3870,7 @@ acquire_locks:
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		if ((rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER))
 		    && rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+			drop_rl = B_TRUE;
 			break;
 		}
 		if (rl != NULL) {
@@ -3885,6 +3880,7 @@ acquire_locks:
 			 */
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
+			drop_rl = B_TRUE;
 			break;
 		}
 		hrtime_t cur_time = gethrtime();
@@ -3922,6 +3918,7 @@ acquire_locks:
 
 	VERIFY3P(rl, !=, NULL);
 	VERIFY(rw_write_held(&zp->z_map_lock));
+	VERIFY3S(drop_rl, ==, B_TRUE);
 	zp->z_map_lock_holder = __func__;
 	need_release = B_TRUE;
 
