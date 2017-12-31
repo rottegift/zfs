@@ -2906,6 +2906,18 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	} else {
 		ASSERT3S(start_resid, >, 0);
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
+		if (tsd_get(rl_key) != NULL) {
+			rl_t *tsdrl = tsd_get(rl_key);
+			VERIFY3P(tsdrl, !=, NULL);
+			printf("ZFS: %s:%d: anomalous TSD RL, (zp == TSD zp ? %d),"
+			    " (our off %lld, TSD off %lld) (our len %lld, TSD len %lld)"
+			    " TSD file %s, our file %s\n", __func__, __LINE__,
+			    (zp == tsdrl->r_zp), trunc_page_64(woff), tsdrl->r_off,
+			    round_page_64(start_resid + PAGE_SIZE_64), tsdrl->r_len,
+			    (tsdrl->r_zp != NULL) ? tsd->r_zp->z_name_cache : "(null zp)",
+			    zp->z_name_cache);
+		}
+
 		rl = zfs_range_lock(zp, trunc_page_64(woff),
 				    round_page_64(start_resid + PAGE_SIZE_64), RL_WRITER);
 		tsd_set(rl_key, rl);
@@ -5378,9 +5390,36 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * it.  Retain the z_map_lock because things below ubc_msync
 	 * must be able to deal with rw_writer_held() being true.
 	 */
-	ASSERT3P(tsd_get(rl_key), ==, NULL);
-	rl_t *rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
-	tsd_set(rl_key, rl);
+	boolean_t have_trl = B_FALSE;
+
+	rl_t *rl = NULL;
+	if (tsd_get(rl_key) == NULL) {
+		rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		tsd_set(rl_key, rl);
+	} else {
+		rl_t *trl = tsd_get(rl_key);
+		VERIFY3P(trl, !=, NULL);
+		ASSERT3P(trl->r_zp, ==, zp);
+		ASSERT3P(trl->r_off, ==, 0);
+		ASSERT3P(trl->r_len, ==, ubc_getsize(vp));
+		if (trl->r_zp != zp) {
+			printf("ZFS: %s:%d: have TSD RL but zp MISMATCHED TSD file %s our file %s,"
+			    " therefore getting RL\n",
+			    __func__, __LINE__,
+			    (trl->r_zp) ? trl->r_zp->z_name_cache,
+			    zp->z_name_cache);
+			rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		} else {
+			printf("ZFS: %s:%d: TSD RL off %lld len %lld versus our RL off %lld len %lld,"
+			    "file %s, continuing\n", __func__, __LINE__,
+			    tsd->r_off, tsd->r_len, 0, ubc_getsize(vp), zp->z_name_cache);
+			have_trl = B_TRUE;
+		}
+
+	}
+
+	IMPLY(have_trl, rl == NULL);
+
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
@@ -5395,12 +5434,14 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
-	ASSERT3P(tsd_get(rl_key), ==, rl);
-	tsd_set(rl_key, NULL);
-	zfs_range_unlock(rl);
+	if (rl != NULL) {
+		ASSERT3P(have_trl, ==, B_FALSE);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+	}
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
-
 
 	if (do_zil_commit == B_TRUE) {
 		VNOPS_STAT_BUMP(zfs_fsync_zil_commit_reg_vn);
