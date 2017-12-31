@@ -3289,7 +3289,6 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 
 	vnode_t *vp = ZTOV(zp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
-	boolean_t do_zil_commit = B_FALSE;
 	boolean_t release_my_rl = B_FALSE;
 
 	if (vnode_isrecycled(vp)) {
@@ -3352,15 +3351,6 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 		    "flags %d, file %s\n",
 		    __func__, __LINE__, zp->z_size, start, end, flags, zp->z_name_cache);
 	}
-
-	/*
-	 * If the file's clean, ubc_msync might not descend into pageoutv2,
-	 * so we should do a zil_commit
-	 */
-
-	if (flags & UBC_SYNC &&
-	    is_file_clean(vp, end) == 0)
-		do_zil_commit = B_TRUE;
 
 	ASSERT3P(zp->z_syncer_active, !=, curthread);
 	ASSERT3P(curthread, !=, NULL);
@@ -3437,7 +3427,6 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	} else {
 		printf("ZFS: %s:%d: ubc_msync skipped because vnode_isrecycled went true file %s\n",
 		       __func__, __LINE__, zp->z_name_cache);
-		do_zil_commit = B_FALSE;
 	}
 	mutex_enter(&zp->z_ubc_msync_lock);
 
@@ -3462,10 +3451,6 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 		zfs_range_unlock(rl);
 		rl = NULL;
 	}
-
-	if (rl == NULL && tsd_get(rl_key) == NULL
-	    && do_zil_commit && zfsvfs->z_log && !vnode_isrecycled(vp))
-		zil_commit(zfsvfs->z_log, zp->z_id);
 
 	if (retval == 0)
 		zp->z_mr_sync = exit_time;
@@ -3878,7 +3863,6 @@ acquire_locks:
 		VERIFY3P(rl, ==, NULL);
 		if (secs == 0)
 			secs = 1;
-		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		if ((rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER))
 		    && rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
 			drop_rl = B_TRUE;
