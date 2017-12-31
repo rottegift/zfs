@@ -1899,8 +1899,10 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				ASSERT3S(rlock->r_off, ==, zp->z_size);
 				/* we might luckily have locked a correctly page-aligned range */
 				if ((rlock->r_off & PAGE_MASK_64) == 0
-				    && ((rlock->r_off + rlock->r_len) & PAGE_MASK_64) == 0)
+				    && (((rlock->r_off + rlock->r_len) & PAGE_MASK_64) == 0
+					|| rlock->r_len == UINT64_MAX)) {
 					break;
+				}
 				/* otherwise, try to grab one now */
 				const uint64_t locked_off = rlock->r_off;
 				const uint64_t aligned_locked_off = trunc_page_64(locked_off);
@@ -1927,7 +1929,8 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				continue;
 			}
 			tsd_set(rl_key, rlock);
-			woff = rlock->r_off;
+			ASSERT3S(trunc_page_64(zp->z_size), ==, rlock->r_off);
+			woff = zp->z_size;
 		} else {
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
 			rlock = zfs_range_lock(zp, aoff, alen, RL_WRITER);
@@ -2859,8 +2862,10 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			ASSERT3S(rl->r_off, ==, zp->z_size);
 			/* we might luckily have locked a correctly page-aligned range */
 			if ((rl->r_off & PAGE_MASK_64) == 0
-			    && ((rl->r_off + rl->r_len) & PAGE_MASK_64) == 0)
+			    && (((rl->r_off + rl->r_len) & PAGE_MASK_64) == 0
+				||rl->r_len == UINT64_MAX)) {
 				break;
+			}
 			/* otherwise, try to grab one now */
 			const uint64_t locked_off = rl->r_off;
 			const uint64_t aligned_locked_off = trunc_page_64(locked_off);
@@ -2887,10 +2892,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			continue;
 		}
 		tsd_set(rl_key, rl);
-		woff = rl->r_off;
-		if (rl->r_len == UINT64_MAX) {
-			woff = zp->z_size;
-		}
+		ASSERT3S(trunc_page_64(zp->z_size), ==, rl->r_off);
+		woff = zp->z_size;
 		if (woff != old_woff) {
 			printf("ZFS: %s:%d: append range lock says set woff to %lld from %lld"
 			    " rl->r_len %lld uio_offset %lld uio_resid %lld file %s\n",
