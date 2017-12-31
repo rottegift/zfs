@@ -2075,7 +2075,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			zfs_grow_blocksize(zp, newblksz, tx);
 
 		zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
-		tsd_set(rl_key, rl);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
 
 		/*
 		 * uint64_t pre = zp->z_size;
@@ -3564,6 +3564,7 @@ zfs_get_done(zgd_t *zgd, int error)
 		dmu_buf_rele(zgd->zgd_db, zgd);
 
 	//ASSERT3P(tsd_get(rl_key), ==, zgd->zgd_rl);
+	ASSERT3P(zgd->zgd_rl, !=, NULL);
 	zfs_range_unlock(zgd->zgd_rl);
 	//tsd_set(rl_key, NULL);
 
@@ -3632,6 +3633,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 	zgd = (zgd_t *)kmem_zalloc(sizeof (zgd_t), KM_SLEEP);
 	zgd->zgd_zilog = zfsvfs->z_log;
 	zgd->zgd_private = zp;
+	ASSERT3P(rl, !=, NULL);
 	zgd->zgd_rl = rl;
 	//ASSERT3P(tsd_get(rl_key), ==, NULL);
 	//tsd_set(rl_key, rl);
@@ -3677,7 +3679,6 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 				break;
 			offset += blkoff;
 			ASSERT3P(tsd_get(rl_key), ==, rl);
-			tsd_set(rl_key, NULL);
 			zfs_range_unlock(zgd->zgd_rl);
 		}
 		/* test for truncation needs to be done while range locked */

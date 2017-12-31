@@ -1224,7 +1224,9 @@ zil_lwb_commit(zilog_t *zilog, itx_t *itx, lwb_t *lwb)
 					printf("ZFS: zil is NULL case\n");
 				}
 
+				extern uint_t rl_key;
 				if (dlen) {                     /* immediate write */
+					ASSERT3P(tsd_get(rl_key), ==, NULL);
 					rl = zfs_range_lock(zp, off, len, RL_READER);
 				} else {
 					uint64_t boff; /* block starting offset */
@@ -1243,9 +1245,11 @@ zil_lwb_commit(zilog_t *zilog, itx_t *itx, lwb_t *lwb)
 							boff = 0;
 						}
 						len = zp->z_blksz;
+						ASSERT3P(tsd_get(rl_key), ==, NULL);
 						rl = zfs_range_lock(zp, boff, len, RL_READER);
 						if (zp->z_blksz == len)
 							break;
+						ASSERT3P(tsd_get(rl_key), ==, NULL);
 						zfs_range_unlock(rl);
 					}
 				} /* if (dlen) ... else */
