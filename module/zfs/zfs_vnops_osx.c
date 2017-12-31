@@ -2919,7 +2919,7 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 
 	if (!rw_write_held(&zp->z_map_lock)) {
 		ASSERT(spl_ubc_is_mapped(vp, NULL));
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		VNOPS_OSX_STAT_INCR(pageoutv1_want_lock, tries);
 	} else {
 		printf("ZFS: %s:%d: z_map_lock already held for file %s\n", __func__, __LINE__,
@@ -3873,7 +3873,7 @@ acquire_locks:
 		VERIFY(!rw_write_held(&zp->z_map_lock));
 	} else if (!rw_write_held(&zp->z_map_lock)){
 		/* as we have the range lock, it is safe for us to wait on the z_map_lock */
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
 		drop_rl = B_TRUE;
 	} else {
@@ -5048,7 +5048,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		off_t resid_off = 0;
 		int retval = 0;
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		int msync_flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
 		retval = zfs_ubc_msync(zp, NULL, (off_t)0, ubcsize, &resid_off, msync_flags);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);

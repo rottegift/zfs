@@ -35,7 +35,8 @@ z_map_downgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgra
 }
 
 static inline uint64_t
-z_map_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade, const char *caller)
+z_map_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade,
+    const char *caller, const int line)
 {
 	uint64_t lock_tries = 0;
 
@@ -46,8 +47,8 @@ z_map_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade
 	for (unsigned int i = 1; !rw_tryupgrade(&zp->z_map_lock); i++) {
 		lock_tries++;
 		if ((i % 512) == 0)
-			printf("ZFS: %s: trying to upgrade z_map_lock (%d) for %s (held by %s)\n",
-			    __func__, i, caller,
+			printf("ZFS: %s: trying to upgrade z_map_lock (%d) for %s : %d (held by %s)\n",
+			    __func__, i, caller, line,
 			    (zp->z_map_lock_holder != NULL)
 			    ? zp->z_map_lock_holder
 			    : "(NULL)");
@@ -65,7 +66,8 @@ z_map_upgrade_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade
 }
 
 static inline uint64_t
-z_map_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade, const char *caller)
+z_map_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade, const char *caller,
+	const int line)
 {
 	uint64_t lock_tries = 0;
 
@@ -80,8 +82,8 @@ z_map_rw_lock(znode_t *zp, boolean_t *need_release, boolean_t *need_upgrade, con
 	for (unsigned int i=1; !rw_tryenter(&zp->z_map_lock, RW_WRITER) ; i++) {
 		lock_tries++;
 		if (i > 0 && (i % 512) == 0)
-			printf("ZFS: %s: waiting for z_map_lock (%u) for %s (held by %s) file %s\n",
-			    __func__, i, caller,
+			printf("ZFS: %s: waiting for z_map_lock (%u) for %s : %d (held by %s) file %s\n",
+			    __func__, i, caller, line,
 			    (zp->z_map_lock_holder != NULL)
 			    ? zp->z_map_lock_holder
 			    : "(NULL)",

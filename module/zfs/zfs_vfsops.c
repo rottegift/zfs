@@ -273,7 +273,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		tsd_set(rl_key, rl);
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		/* do the msync */
 		int msync_retval = 0;
 		if (zp->z_in_pager_op == 0) {

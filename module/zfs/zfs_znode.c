@@ -1658,7 +1658,7 @@ zfs_rezget(znode_t *zp)
 		int setsize_retval = 0;
 		boolean_t did_setsize = B_FALSE;
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		off_t ubcsize = ubc_getsize(vp);
 		off_t zsize = zp->z_size;
 		vn_pages_remove(vp, 0, 0); // does nothing in O3X
@@ -1676,7 +1676,7 @@ zfs_rezget(znode_t *zp)
 			if (zsize > size) {
 				ASSERT3S(zsize, ==, zp->z_size);
 				boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-				uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+				uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 				int refresh_retval = ubc_refresh_range(vp, size, zsize);
 				z_map_drop_lock(zp, &need_release, &need_upgrade);
 				ASSERT3S(tries, <=, 2);
@@ -1991,7 +1991,7 @@ zfs_extend(znode_t *zp, uint64_t end)
 	 * or update_pages.
 	 */
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 	/*
 	 * ubc_getsize() carefully trims the last page when nsize < osize,
 	 * but here we have osize < nsize (we return above otherwise).
@@ -2229,7 +2229,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 */
 
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
+	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 
 	if (vnode_isreg(vp) || vn_has_cached_data(vp) || ubc_pages_resident(vp)) {
 		// note: 10a286 says "This work is accomplished
