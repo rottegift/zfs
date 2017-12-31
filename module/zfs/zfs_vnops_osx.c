@@ -3649,6 +3649,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	boolean_t drop_rl = B_FALSE;
 	boolean_t xxxbleat = B_FALSE;
+	boolean_t subrange = B_FALSE;
 	const rl_t *tsd_rl_at_entry = tsd_get(rl_key);
 
 	if (tsd_get(rl_key) != NULL) {
@@ -3708,6 +3709,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			dprintf("ZFS: %s:%d: subrange success!\n", __func__, __LINE__);
 			ASSERT3P(rl, !=, NULL);
 			drop_rl = B_FALSE;
+			subrange = B_TRUE;
 			ASSERT3S(xxxbleat, ==, B_FALSE);
 		} else if (trunc_page_64(rl->r_off) <= trunc_page_64(ap->a_f_offset)
 		    && rl->r_off + rl->r_len >= ap->a_f_offset + ap->a_size) {
@@ -3724,6 +3726,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 */
 			dprintf("ZFS: %s:%d: subrange (page-aligned) success!", __func__, __LINE__);
 			ASSERT3P(rl, !=, NULL);
+			subrange = B_TRUE;
 			drop_rl = B_FALSE;
 		} else if (ap->a_f_offset + ap->a_size < rl->r_off
 		    && trunc_page_64(ap->a_f_offset) != trunc_page_64(rl->r_off)) {
@@ -4568,15 +4571,21 @@ already_acquired_locks:
 	}
 	dec_z_in_pager_op(zp, fsname, fname);
 
-	if (a_flags & UPL_IOSYNC && rl == NULL && tsd_get(rl_key) == NULL) {
+	if (a_flags & UPL_IOSYNC
+	    && tsd_rl_at_entry == NULL
+	    && !rw_lock_held(&zp->z_map_lock)
+	    && drop_rl == B_TRUE
+	    && rl == NULL
+	    && tsd_get(rl_key) == NULL) {
 		if (xxxbleat) printf("ZFS: %s:%d zil_commit file %s\n", __func__, __LINE__, zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
 	} else if (a_flags & UPL_IOSYNC) {
-		printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
-		       " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)\n",
-		       __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
-		       rl == NULL, tsd_get(rl_key) == NULL);
+		if (subrange == B_FALSE && drop_rl == B_TRUE)
+			printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
+			    " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)\n",
+			    __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
+			    rl == NULL, tsd_get(rl_key) == NULL);
 	}
 
 	if (error != 0) {
