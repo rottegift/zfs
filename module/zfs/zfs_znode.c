@@ -1432,7 +1432,7 @@ again:
 			rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 			tsd_set(rl_key, rl);
 		} else {
-			ASSERT3P(tsd_get(rl_key), !=, NULL); // bleat
+			ASSERT3P(tsd_get(rl_key), !=, NULL); // bleat about this
 		}
 
 		if (!vp || (rl == NULL && tsd_get(rl_key) == NULL) || (err=vnode_getwithvid(vp, vid) != 0)) {
@@ -1440,6 +1440,7 @@ again:
 				if (tsd_get(rl_key) == rl)
 					tsd_set(rl_key, NULL);
 				ASSERT3P(tsd_get(rl_key), ==, NULL);
+				if (tsd_get(rl_key)) { ASSERT3P(tsd_get(rl_key), !=, rl); }
 				zfs_range_unlock(rl);
 				rl = NULL;
 			}

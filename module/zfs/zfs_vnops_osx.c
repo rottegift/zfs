@@ -4575,8 +4575,13 @@ already_acquired_locks:
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
 		VERIFY3P(tsd_rl_at_entry, ==, tsd_get(rl_key));
-		zfs_range_unlock(rl);
-		rl = NULL;
+		if (rl != tsd_get(rl_key)) {
+		    zfs_range_unlock(rl);
+		    rl = NULL;
+		} else {
+			printf("ZFS: %s:%d: not dropping rl since rl == tsd_get(rl_key)? %d for file %s\n",
+			    __func__, __LINE__, rl == tsd_get(rl_key), zp->z_name_cache);
+		}
 	}
 	dec_z_in_pager_op(zp, fsname, fname);
 
@@ -4617,7 +4622,13 @@ pageout_done:
 
 	if (drop_rl) {
 		VERIFY3P(rl, !=, NULL);
-		zfs_range_unlock(rl);
+		if (rl != tsd_get(rl_key)) {
+			zfs_range_unlock(rl);
+			rl = NULL;
+		} else {
+			printf("ZFS: %s:%d pageout_done: not dropping rl since rl == rl_get(rl_key)? %d"
+			    " for file %s\n", __func__, __LINE__, rl == tsd_get(rl_key), zp->z_name_cache);
+		}
 	}
 	dec_z_in_pager_op(zp, fsname, fname);
 
