@@ -3662,8 +3662,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * Check to see if we have a range lock
 	 */
 
-	boolean_t drop_rl = B_TRUE;
+	boolean_t drop_rl = B_FALSE;
 	boolean_t xxxbleat = B_FALSE;
+	const rl_t *tsd_rl_at_entry = tsd_get(rl_key);
 
 	if (tsd_get(rl_key) != NULL) {
 		off_t fsize = zp->z_size;
@@ -3701,6 +3702,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    || (tsdvp != NULL && tsdvp != ap->a_vp)) {
 				printf("ZFS: %s:%d: TSD RL possibly not for this file, acquring locks\n",
 				    __func__, __LINE__);
+				drop_rl = B_FALSE;
+				ASSERT3P(rl, !=, NULL);
+				rl = NULL;
 				goto acquire_locks;
 			}
 			printf("ZFS: %s:%d: continuing with TSD RL len %lld [%lld..%lld]\n",
@@ -3717,6 +3721,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * often, therefore it goes first.
 			 */
 			dprintf("ZFS: %s:%d: subrange success!\n", __func__, __LINE__);
+			ASSERT3P(rl, !=, NULL);
 			drop_rl = B_FALSE;
 			ASSERT3S(xxxbleat, ==, B_FALSE);
 		} else if (trunc_page_64(rl->r_off) <= trunc_page_64(ap->a_f_offset)
@@ -3733,6 +3738,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * avoid doing so here.
 			 */
 			dprintf("ZFS: %s:%d: subrange (page-aligned) success!", __func__, __LINE__);
+			ASSERT3P(rl, !=, NULL);
 			drop_rl = B_FALSE;
 		} else if (ap->a_f_offset + ap->a_size < rl->r_off
 		    && trunc_page_64(ap->a_f_offset) != trunc_page_64(rl->r_off)) {
@@ -3741,7 +3747,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
-			drop_rl = B_TRUE;
+			ASSERT3P(rl, !=, NULL);
+			if (rl != NULL) drop_rl = B_TRUE;
 		} else if (ap->a_f_offset > rl->r_off + rl->r_len
 		    && trunc_page_64(ap->a_f_offset) > trunc_page_64(rl->r_off)) {
 			/* we'd fail the try if the offsets start in the same page */
@@ -3750,7 +3757,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
-			drop_rl = B_TRUE;
+			ASSERT3P(rl, !=, NULL);
+			if (rl != NULL) drop_rl = B_TRUE;
 		} else if (ap->a_f_offset + ap->a_size < rl->r_off + rl->r_len
 		    && trunc_page_64(ap->a_f_offset) < trunc_page_64(rl->r_off) ) {
 			/* we'd fail the try if the offsets start in the same page */
@@ -3768,7 +3776,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    ap->a_f_offset, ap->a_f_offset + newlen,
 				    rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, newlen, RL_WRITER);
-			drop_rl = B_TRUE;
+			ASSERT3P(rl, !=, NULL);
+			if (rl != NULL) drop_rl = B_TRUE;
 		} else if (ap->a_f_offset + ap->a_size > rl->r_off  + rl->r_len
 		    && trunc_page_64(ap->a_f_offset) > trunc_page_64(rl->r_off)) {
 			/* we would fail the try if the offsets are in the same page */
@@ -3782,7 +3791,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			       rl->r_off + rl->r_len + 1, rl->r_off + rl->r_len + newlen,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, rl->r_off + rl->r_len + 1, newlen, RL_WRITER);
-			drop_rl = B_TRUE;
+			ASSERT3P(rl, !=, NULL);
+			if (rl != NULL) drop_rl = B_TRUE;
 		} else if (trunc_page_64(rl->r_off) != trunc_page_64(ap->a_f_offset)
 		    || round_page_64(rl->r_len) != round_page_64(ap->a_size)) {
 			/*
@@ -3806,16 +3816,15 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		} else {
 			dprintf("ZFS: %s:%d: success!\n", __func__, __LINE__);
 			ASSERT3S(xxxbleat, ==, B_FALSE);
+			ASSERT3P(rl, !=, NULL);
 			drop_rl = B_FALSE;
 		}
 		if (rl == NULL && tsd_get(rl_key) != NULL) {
-		  ASSERT3S(drop_rl, ==, B_TRUE);
+		  rl = tsd_get(rl_key); // just try without proper locking, see what happens
 		  drop_rl = B_FALSE;
-		  rl = tsd_get(rl_key); // just try without locking, see what happens
 		  printf("ZFS: %s:%d: failed to get new RL for fs %s file %s\n", __func__, __LINE__,
 		      fsname, fname);
 		}
-
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
 		if (!rw_lock_held(&zp->z_map_lock)) {
@@ -3834,6 +3843,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 acquire_locks:
 
 	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
+
+	VERIFY3S(drop_rl, ==, B_FALSE);
 
 	rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER);
 
@@ -3992,7 +4003,8 @@ already_acquired_locks:
 			zfs_grow_blocksize(zp, new_blksz, tx);
 			dmu_tx_commit(tx);
 		}
-		if (rl != tsd_get(rl_key) && rl->r_len == 0 && rl->r_off == UINT64_MAX) {
+		if (rl != tsd_get(rl_key) && rl != tsd_rl_at_entry
+		    && rl->r_len == 0 && rl->r_off == UINT64_MAX) {
 		  zfs_range_reduce(rl, rloff, rllen);
 		} else {
 		  const off_t rlsize = rloff + rllen;
@@ -4559,9 +4571,10 @@ already_acquired_locks:
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
 
-	if (drop_rl) {
-		VERIFY3P(rl, !=, tsd_get(rl_key));
+	if (drop_rl == B_TRUE) {
 		VERIFY3P(rl, !=, NULL);
+		VERIFY3P(rl, !=, tsd_rl_at_entry);
+		VERIFY3P(tsd_rl_at_entry, ==, tsd_get(rl_key));
 		zfs_range_unlock(rl);
 		rl = NULL;
 	}
