@@ -5312,8 +5312,54 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
         znode_t *zp = VTOZ(vp);
         zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 
+       if (zp == NULL)
+		goto zero;
+
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
+
+	if (!zfsvfs)
+		goto zero;
+
+	/*
+	 * If vnode_create() puts us here, we deadlock in
+	 * memory_object_lock_request(). As vnode_isrecycled(vp) is a
+	 * snapshot indicating that the vnode is in the process of being
+	 * killed, we can use that to decide to just return 0.
+	 *
+	 * We should also not descend to zfs_ubc_msync if there is any
+	 * syncer active, of if the file is already in pageout/pageoutv2.
+	 */
+
+	if (vnode_isrecycled(vp)
+	    || zp->z_no_fsync != B_FALSE
+	    || zp->z_in_pager_op > 0
+	    || zp->z_syncer_active != NULL)
+		goto zero;
+
+	/*
+	 * Alternatively, if it's a zero-size file, just return.
+	 */
+	if (ubc_getsize(vp) == 0)
+		goto zero;
+
+	/*
+	 * Alternatively, if the file has never been through zfs_ubc_msync,
+	 * and is not dirty, then just return.
+	 */
+	if (zp->z_mr_sync == 0) {
+		if (0 == is_file_clean(vp, ubc_getsize(vp))) {
+			goto zero;
+		} else {
+			printf("ZFS: %s:%d: z_mr_sync is 0 but file is dirty at this time"
+			    " ubcsz %lld filesz %lld file %s\n",
+			    __func__, __LINE__, ubc_getsize(vp),
+			    zp->z_size, zp->z_name_cache);
+		}
+	}
+
+/* otherwise proceed to try to sync */
+
 
 	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED) {
 		VNOPS_STAT_BUMP(zfs_fsync_disabled);
@@ -5390,12 +5436,18 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * it.  Retain the z_map_lock because things below ubc_msync
 	 * must be able to deal with rw_writer_held() being true.
 	 */
+	int retval = 0;
 	boolean_t have_trl = B_FALSE;
-
 	rl_t *rl = NULL;
 	if (tsd_get(rl_key) == NULL) {
-		rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
-		tsd_set(rl_key, rl);
+		rl = zfs_try_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		if (rl != NULL) {
+			tsd_set(rl_key, rl);
+		} else {
+			printf("ZFS: %s:%d: unable to get range lock, skipping ubc_msync for file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+			goto skip_ubc_msync;
+		}
 	} else {
 		rl_t *trl = tsd_get(rl_key);
 		VERIFY3P(trl, !=, NULL);
@@ -5403,16 +5455,28 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		ASSERT3P(trl->r_off, ==, 0);
 		ASSERT3P(trl->r_len, ==, ubc_getsize(vp));
 		if (trl->r_zp != zp) {
-			printf("ZFS: %s:%d: have TSD RL but zp MISMATCHED TSD file %s our file %s,"
-			    " therefore getting RL\n",
-			    __func__, __LINE__,
-			    (trl->r_zp) ? trl->r_zp->z_name_cache : "(no name)",
-			    zp->z_name_cache);
-			rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+			rl = zfs_try_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+			if (rl != NULL) {
+				printf("ZFS: %s:%d: despite TSD RL with mismatched zp (TSD %s, us %s),"
+				    " RL acquired, overriding TSD & proceeding\n", __func__, __LINE__,
+				    (trl->r_zp != NULL) ? trl->r_zp->z_name_cache : "(null TSD zp)",
+				    zp->z_name_cache);
+				tsd_set(rl_key, rl);
+				have_trl = B_FALSE;
+			} else {
+				printf("ZFS: %s:%d: have TSD RL but zp MISMATCHED TSD file %s our file %s,"
+				    " and could not acquire RL, skipping sync\n",
+				    __func__, __LINE__,
+				    (trl->r_zp != NULL) ? trl->r_zp->z_name_cache : "(null TSD zp)",
+				    zp->z_name_cache);
+				have_trl = B_TRUE;
+				goto zero;
+                       }
 		} else {
 			printf("ZFS: %s:%d: TSD RL off %lld len %lld versus our RL off %lld len %lld,"
-			    "file %s, continuing\n", __func__, __LINE__,
+			    "file %s, SKIPPING sync\n", __func__, __LINE__,
 			    trl->r_off, trl->r_len, 0LL, ubc_getsize(vp), zp->z_name_cache);
+
 			have_trl = B_TRUE;
 			do_zil_commit = B_FALSE;
 		}
@@ -5427,7 +5491,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	off_t resid_off = 0;
 	int flags = UBC_PUSHALL | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
-	int retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, flags);
+	retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, flags);
 	if (retval != 0) {
 		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
 		    __func__, __LINE__, retval, zp->z_size, zp->z_name_cache);
@@ -5443,12 +5507,18 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 
+skip_ubc_msync:
+
 	if (do_zil_commit == B_TRUE && have_trl == B_FALSE) {
 		VNOPS_STAT_BUMP(zfs_fsync_zil_commit_reg_vn);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 	}
 	ZFS_EXIT(zfsvfs);
         return (retval);
+
+zero:
+	VNOPS_STAT_BUMP(zfs_fsync_skipped);
+	return (0);
 }
 
 /*
