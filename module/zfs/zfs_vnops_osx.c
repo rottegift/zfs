@@ -4615,6 +4615,8 @@ skip_lock_acquisition:
 	dec_z_in_pager_op(zp, fsname, fname);
 
 	if (a_flags & UPL_IOSYNC
+	    && error == 0
+	    && !vnode_isrecycled(vp)
 	    && tsd_rl_at_entry == NULL
 	    && !rw_write_held(&zp->z_map_lock)
 	    && drop_rl == B_TRUE
@@ -4626,9 +4628,10 @@ skip_lock_acquisition:
 	} else if (a_flags & UPL_IOSYNC) {
 		if (subrange == B_FALSE && drop_rl == B_TRUE && !rw_write_held(&zp->z_map_lock))
 			printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
-			    " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)\n",
+			    " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)"
+			    " (error %d) (recycled? %d)\n",
 			    __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
-			    rl == NULL, tsd_get(rl_key) == NULL);
+			    rl == NULL, tsd_get(rl_key) == NULL, error, vnode_isrecycled(vp));
 	}
 
 	if (error != 0) {

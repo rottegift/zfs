@@ -5414,8 +5414,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			    "file %s, continuing\n", __func__, __LINE__,
 			    trl->r_off, trl->r_len, 0LL, ubc_getsize(vp), zp->z_name_cache);
 			have_trl = B_TRUE;
+			do_zil_commit = B_FALSE;
 		}
-
 	}
 
 	IMPLY(have_trl, rl == NULL);
@@ -5443,7 +5443,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 
-	if (do_zil_commit == B_TRUE) {
+	if (do_zil_commit == B_TRUE && have_trl == B_FALSE) {
 		VNOPS_STAT_BUMP(zfs_fsync_zil_commit_reg_vn);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 	}
