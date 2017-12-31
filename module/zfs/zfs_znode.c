@@ -1478,7 +1478,6 @@ again:
 
 		*zpp = zp;
 		getnewvnode_drop_reserve();
-		ASSERT3S(zp->z_no_fsync, ==, B_TRUE);
 		zp->z_no_fsync = B_FALSE;
 		return (0);
 	} // if vnode != NULL
