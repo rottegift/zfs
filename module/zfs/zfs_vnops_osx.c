@@ -3364,7 +3364,7 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 		if (rw_lock_held_on_entry) {
 			rw_exit(&zp->z_map_lock);
 		}
-		ASSERT(!rw_lock_held(&zp->z_map_lock));
+		ASSERT(!rw_write_held(&zp->z_map_lock));
 
 		cv_signal(&zp->z_ubc_msync_cv); /* wake someone else up */
 		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
@@ -3815,12 +3815,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		}
 		/* check our caller hasn't dropped z_map_lock */
 		ASSERT3S(had_map_lock_at_entry, !=, B_FALSE);
-		if (!rw_lock_held(&zp->z_map_lock)) {
+		if (!rw_write_held(&zp->z_map_lock)) {
 			ASSERT3S(had_map_lock_at_entry, ==, B_FALSE);
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 			VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
 		}
-		ASSERT(rw_lock_held(&zp->z_map_lock));
+		ASSERT(rw_write_held(&zp->z_map_lock));
 		/* let our caller drop the range_lock */
 		goto already_acquired_locks;
 	}
@@ -3846,14 +3846,14 @@ acquire_locks:
 			rw_exit(&zp->z_map_lock);
 		}
 		VERIFY(!rw_write_held(&zp->z_map_lock));
-	} else if (!rw_lock_held(&zp->z_map_lock)){
+	} else if (!rw_write_held(&zp->z_map_lock)){
 		/* as we have the range lock, it is safe for us to wait on the z_map_lock */
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
 		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
 		drop_rl = B_TRUE;
 	} else {
 		VERIFY3P(rl, !=, NULL);
-		VERIFY(rw_lock_held(&zp->z_map_lock));
+		VERIFY(rw_write_held(&zp->z_map_lock));
 		drop_rl = B_TRUE;
 	}
 
@@ -4573,7 +4573,7 @@ already_acquired_locks:
 
 	if (a_flags & UPL_IOSYNC
 	    && tsd_rl_at_entry == NULL
-	    && !rw_lock_held(&zp->z_map_lock)
+	    && !rw_write_held(&zp->z_map_lock)
 	    && drop_rl == B_TRUE
 	    && rl == NULL
 	    && tsd_get(rl_key) == NULL) {
@@ -4581,7 +4581,7 @@ already_acquired_locks:
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
 	} else if (a_flags & UPL_IOSYNC) {
-		if (subrange == B_FALSE && drop_rl == B_TRUE)
+		if (subrange == B_FALSE && drop_rl == B_TRUE && !rw_write_held(&zp->z_map_lock))
 			printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
 			    " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)\n",
 			    __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
