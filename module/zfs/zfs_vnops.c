@@ -2914,7 +2914,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			    " TSD file %s, our file %s\n", __func__, __LINE__,
 			    (zp == tsdrl->r_zp), trunc_page_64(woff), tsdrl->r_off,
 			    round_page_64(start_resid + PAGE_SIZE_64), tsdrl->r_len,
-			    (tsdrl->r_zp != NULL) ? tsd->r_zp->z_name_cache : "(null zp)",
+			    (tsdrl->r_zp != NULL) ? tsdrl->r_zp->z_name_cache : "(null zp)",
 			    zp->z_name_cache);
 		}
 
@@ -5406,13 +5406,13 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			printf("ZFS: %s:%d: have TSD RL but zp MISMATCHED TSD file %s our file %s,"
 			    " therefore getting RL\n",
 			    __func__, __LINE__,
-			    (trl->r_zp) ? trl->r_zp->z_name_cache,
+			    (trl->r_zp) ? trl->r_zp->z_name_cache : "(no name)",
 			    zp->z_name_cache);
 			rl = zfs_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
 		} else {
 			printf("ZFS: %s:%d: TSD RL off %lld len %lld versus our RL off %lld len %lld,"
 			    "file %s, continuing\n", __func__, __LINE__,
-			    tsd->r_off, tsd->r_len, 0, ubc_getsize(vp), zp->z_name_cache);
+			    trl->r_off, trl->r_len, 0LL, ubc_getsize(vp), zp->z_name_cache);
 			have_trl = B_TRUE;
 		}
 
@@ -5435,7 +5435,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	if (rl != NULL) {
-		ASSERT3P(have_trl, ==, B_FALSE);
+		ASSERT3S(have_trl, ==, B_FALSE);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, NULL);
 		zfs_range_unlock(rl);
