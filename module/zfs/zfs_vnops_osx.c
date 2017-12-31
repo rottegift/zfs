@@ -3892,8 +3892,8 @@ acquire_locks:
 					need_release = B_TRUE;
 					zp->z_map_lock_holder = __func__;
 					break;
-				} else if (secs > 30) {
-					printf("ZFS: %s:%d: proceeding on file %s without z_map_lock"
+				} else if (secs > 2) {
+					printf("ZFS: %s:%d: proceeding on file %s WITHOUT z_map_lock"
 					    " held by %s\n", __func__, __LINE__,
 					    zp->z_name_cache, zp->z_map_lock_holder);
 					drop_rl = B_TRUE;
@@ -3902,10 +3902,10 @@ acquire_locks:
 				}
 			}
 		}
-		if (secs > 40) {
+		if (secs > 5) {
 			/* scream and break out */
 			if (!rw_tryenter (&zp->z_map_lock, RW_WRITER)) {
-				printf("ZFS: %s:%d: proceeding to pageout without locks"
+				printf("ZFS: %s:%d: proceeding to pageout WITHOUT LOCKS"
 				    " off %lld len %lld for file %s\n", __func__, __LINE__,
 				    rloff, rllen, zp->z_name_cache);
 				drop_rl = B_FALSE;
