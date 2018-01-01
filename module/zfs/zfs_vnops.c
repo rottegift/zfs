@@ -889,6 +889,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		ASSERT3P(pl, ==, NULL);
 		pl = NULL;
 		upl = NULL;
+		boolean_t upl_mapped = B_FALSE;
 
 		if (cur_upl_size <= 0)
 			break;
@@ -934,6 +935,18 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		} else {
 			ASSERT3S(err, ==, 0);
 			err = 0;
+		}
+
+		/* map in the address range, which does some useful locking */
+		int ubc_map_retval = 0;
+		vm_offset_t vaddr;
+		if ((ubc_map_retval = ubc_upl_map(upl, &vaddr)) != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: error %d ubc_upl_map (pass %d curoff %lld"
+			    " cursz %ld file %s)\n", __func__, __LINE__, ubc_map_retval,
+			    i, cur_upl_file_offset, cur_upl_size, filename);
+			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+			ASSERT3S(abortall, ==, KERN_SUCCESS);
+			return (ubc_map_retval);
 		}
 
 		const int upl_num_pages = round_page_64(cur_upl_size) / PAGE_SIZE_64;
@@ -995,12 +1008,18 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			 *
 			 * upl_abort(upl, ... | UPL_FREE_ON_EMPTY) does this.
 			 *
-			 * maybe we will chose to add UPL_ABORT_REFERENCE, which
-			 * boosts the presesnt pages in the page LRU, but looping
-			 * will in any event bring them back in
+			 * additionally add UPL_ABORT_REFERERNCE, which
+			 * boosts the present pages in the system LRU, so
+			 * that they are less likely to be paged out as we
+			 * bring in the other pages in the range
 			 */
 
-			err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+			ASSERT3S(upl_mapped, ==, B_TRUE);
+			kern_return_t unmapret = ubc_upl_unmap(upl);
+			upl_mapped = B_FALSE;
+			ASSERT3S(unmapret, ==, KERN_SUCCESS);
+
+			err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_REFERENCE);
 			if (err != 0) {
 				printf("ZFS: %s: upl_abort failed (err: %d, pass: %d, file: %s)\n",
 				    __func__, err, i, filename);
@@ -1044,10 +1063,21 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		/* out of while loop, still in for loop */
 		/* the UPL may either be NULL or still alive (NULL it below) */
 
+		EQUIV(upl == NULL, upl_mapped == B_FALSE);
+
+		if (upl_mapped) {
+			ASSERT3S(upl, !=, NULL);
+			kern_return_t unmapret = KERN_INVALID_ADDRESS;
+			if (upl)
+				unmapret = ubc_upl_unmap(upl);
+			ASSERT3S(unmapret, ==, KERN_SUCCESS);
+			upl_mapped = B_FALSE;
+		}
+
 		if (page_index >= upl_num_pages) {
 			/* no holes left */
 			if (upl != NULL) {
-				err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+				err = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_REFERENCE);
 				if (err != 0) {
 					printf("ZFS: %s: no holes left, but upl_abort failed"
 					    " with error %d, file %s\n",
