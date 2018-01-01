@@ -1297,14 +1297,15 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 		}
 		if (upl_dirty_page(pl, pg_index)) {
 			printf("ZFS: %s:%d: WARNING dirty page at index %d (resid %d, uio_resid %lld)"
-			    "upl foff %lld sz %ld fs %s file %s\n",
-			    __func__, __LINE__, pg_index, resid, uio_resid(uio),
+			    "uiooff %lld upl foff %lld sz %ld fs %s file %s\n",
+			    __func__, __LINE__, pg_index, resid, uio_resid(uio), uio_offset(uio),
 			    upl_file_offset, upl_size, fsname, fname);
 		}
 
 		uio_setrw(uio, UIO_READ);
-		const uint64_t off_in_this_page = uio_offset(uio) & PAGE_MASK_64;
-		if (pg_index > 0) { ASSERT0(off_in_this_page); }
+		uint64_t off_in_this_page = 0;
+		if (pg_index == 0)
+			off_in_this_page = uio_offset(uio) & PAGE_MASK_64;
 		const uint64_t cur_resid = MIN(resid, uio_resid(uio));
 		ASSERT3S(cur_resid, >, 0);
 		uint64_t bytes_in_this_page = PAGE_SIZE_64;
@@ -1320,9 +1321,10 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 
 		if (uioretval != 0) {
 			printf("ZFS: %s:%d: uiomove64 error %d pg_index %d,"
-			    "upl foff %lld sz %ld fs %s file %s\n",
+			    "upl foff %lld sz %ld uiooff %lld uiores %lld fs %s file %s\n",
 			    __func__, __LINE__, uioretval, pg_index,
-			    upl_file_offset, upl_size, fsname, fname);
+			    upl_file_offset, upl_size,
+			    uio_offset(uio), uio_resid(uio), fsname, fname);
 			break;
 		}
 
