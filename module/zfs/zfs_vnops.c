@@ -947,6 +947,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			ASSERT3S(abortall, ==, KERN_SUCCESS);
 			return (ubc_map_retval);
 		}
+		upl_mapped = B_TRUE;
 
 		const int upl_num_pages = round_page_64(cur_upl_size) / PAGE_SIZE_64;
 		ASSERT3S(upl_num_pages, >, 0);
