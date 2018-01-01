@@ -1282,8 +1282,8 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	int error = 0;
 
 	for ( ; resid > 0; pg_index++) {
+		ASSERT3S(resid, <=, uio_resid(uio));
 		ASSERT3S(pg_index, <, upl_num_pgs);
-		ASSERT3S(pg_index + 1, ==, howmany(resid, PAGE_SIZE_64));
 		if (!upl_valid_page(pl, pg_index)) {
 			printf("ZFS: %s:%d non-valid page at index %d (resid %d, uio_resid %lld)"
 			    " upl foff %lld sz %ld fs %s file %s\n",
@@ -1310,10 +1310,10 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 		const uint64_t cur_resid = MIN(resid, uio_resid(uio));
 		ASSERT3S(cur_resid, >, 0);
 		uint64_t bytes_in_this_page = PAGE_SIZE_64;
-		if (cur_resid & PAGE_MASK_64) {
-			/* could be in first or last page */
-			if (pg_index > 0) { ASSERT3S(pg_index, ==, upl_num_pgs - 1); }
+		if (pg_index == 0 && cur_resid & PAGE_MASK_64) {
 			bytes_in_this_page = cur_resid & PAGE_MASK_64;
+		} else if (pg_index > 0 && cur_resid < PAGE_SIZE_64) {
+			bytes_in_this_page = cur_resid;
 		}
 
 		vm_offset_t cur_addr = vaddr + (pg_index * PAGE_SIZE_64) + off_in_this_page;
