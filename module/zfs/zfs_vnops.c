@@ -713,7 +713,6 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	if (err != KERN_SUCCESS) {
 		printf("ZFS: %s:%d failed to create upl: err %d flags %d for file %s\n",
 		    __func__, __LINE__, err, upl_flags, filename);
-		ubc_upl_unmap(upl);
 		return (err);
 	}
 
