@@ -1240,6 +1240,9 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 
 	/* we are called with appropriate locks held */
 
+	const int upl_num_pgs = howmany(upl_size, PAGE_SIZE);
+	ASSERT3S(upl_num_pgs * PAGE_SIZE_64, >=, *bytes_to_copy);
+
 	upl_t upl = NULL;
 	upl_page_info_t *pl = NULL;
 
@@ -1279,10 +1282,11 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	int error = 0;
 
 	for ( ; resid > 0; pg_index++) {
+		ASSERT3S(pg_index, <, upl_num_pgs);
 		if (!upl_valid_page(pl, pg_index)) {
-			printf("ZFS: %s:%d non-valid page at index %d"
+			printf("ZFS: %s:%d non-valid page at index %d (resid %d, uio_resid %lld)"
 			    " upl foff %lld sz %ld fs %s file %s\n",
-			    __func__, __LINE__, pg_index,
+			    __func__, __LINE__, pg_index, resid, uio_resid(uio),
 			    upl_file_offset, upl_size, fsname, fname);
 			int umapretval = ubc_upl_unmap(upl);
 			ASSERT3S(umapretval, ==, KERN_SUCCESS);
@@ -1292,9 +1296,9 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			return (EFAULT);
 		}
 		if (upl_dirty_page(pl, pg_index)) {
-			printf("ZFS: %s:%d: WARNING dirty page at index %d"
+			printf("ZFS: %s:%d: WARNING dirty page at index %d (resid %d, uio_resid %lld)"
 			    "upl foff %lld sz %ld fs %s file %s\n",
-			    __func__, __LINE__, pg_index,
+			    __func__, __LINE__, pg_index, resid, uio_resid(uio),
 			    upl_file_offset, upl_size, fsname, fname);
 		}
 
@@ -1431,6 +1435,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 	// size of the UPL, page-aligned bytes
 	const size_t upl_size = round_page_64(inbytes + upl_sz_vs_fsize);
 
+	ASSERT3S(upl_size, >=, howmany(inbytes, PAGE_SIZE_64));
 	ASSERT3S(upl_file_offset + upl_size, <=, round_page_64(zp->z_size));
 	ASSERT3S(upl_size, >=, PAGE_SIZE_64);
 	ASSERT3S(upl_size, >=, inbytes);
