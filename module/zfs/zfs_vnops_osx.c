@@ -3883,9 +3883,35 @@ acquire_locks:
 		VERIFY(!rw_write_held(&zp->z_map_lock));
 	} else if (!rw_write_held(&zp->z_map_lock)){
 		/* as we have the range lock, it is safe for us to wait on the z_map_lock */
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-		VNOPS_OSX_STAT_INCR(pageoutv2_want_lock, tries);
+		for (uint64_t tries = 0; ; tries++) {
+			if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+				need_release = B_TRUE;
+				break;
+			}
+			VNOPS_OSX_STAT_BUMP(pageoutv2_want_lock);
+			if ((tries % 1000) == 0) {
+				printf("ZFS: %s:%d: (%lld msec) trying to get z_map_lock for file %s"
+				    " (held by %s)\n", __func__, __LINE__, tries,
+				    zp->z_name_cache,
+				    (zp->z_map_lock_holder != NULL)
+				    ? zp->z_map_lock_holder
+				    : "(null holder!)");
+			}
+			IOSleep(1);
+			if (tries > 10000) {
+				printf("ZFS: %s:%d: after ~ %lld msec,"
+				    " proceeding WITHOUT holding z_map_lock, file %s"
+				    " (held by %s)\n", __func__, __LINE__, tries,
+				    zp->z_name_cache,
+				    (zp->z_map_lock_holder != NULL)
+				    ? zp->z_map_lock_holder
+				    : "(null holder!)");
+				goto already_acquired_locks;
+			}
+		}
 		drop_rl = B_TRUE;
+		ASSERT(rw_write_held(&zp->z_map_lock));
+		ASSERT3P(rl, !=, NULL);
 	} else {
 		VERIFY3P(rl, !=, NULL);
 		VERIFY(rw_write_held(&zp->z_map_lock));
