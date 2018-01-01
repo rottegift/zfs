@@ -1283,6 +1283,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 
 	for ( ; resid > 0; pg_index++) {
 		ASSERT3S(pg_index, <, upl_num_pgs);
+		ASSERT3S(pg_index + 1, ==, howmany(resid, PAGE_SIZE_64));
 		if (!upl_valid_page(pl, pg_index)) {
 			printf("ZFS: %s:%d non-valid page at index %d (resid %d, uio_resid %lld)"
 			    " upl foff %lld sz %ld fs %s file %s\n",
