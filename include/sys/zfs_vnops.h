@@ -259,7 +259,11 @@ extern void nfsacl_set_wellknown(int wkg, guid_t *guid);
 extern int  zfs_addacl_trivial(znode_t *zp, ace_t *aces, int *nentries,
 							   int seen_type);
 extern int ubc_invalidate_range(znode_t *zp, rl_t *rl, off_t start_byte, off_t end_byte);
-extern int ubc_fill_holes_in_range(vnode_t *vp, off_t    start_byte, off_t end_byte, boolean_t will_mod);
+typedef enum fill_holes_direction {
+	FILL_FOR_READ = 0,
+	FILL_FOR_WRITE = 1,
+} fill_holes_direction_t;
+extern int ubc_fill_holes_in_range(vnode_t *vp, off_t    start_byte, off_t end_byte, fill_holes_direction_t who_for);
 extern int ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte);
 extern int dmu_write_wait_safe(znode_t *zp, off_t start_range, off_t end_range);
 extern boolean_t dmu_write_is_safe(znode_t *zp, off_t start_range, off_t end_range);

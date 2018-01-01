@@ -514,7 +514,7 @@ ubc_invalidate_range(znode_t *zp, rl_t *rl, off_t start_byte, off_t end_byte)
  *              the page and the dmu buffer.
  */
 static int fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_size,
-	boolean_t will_mod);
+	fill_holes_direction_t who_for);
 
 static void
 update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
@@ -582,7 +582,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 	 * Loop through the pages, looking for holes to fill.
 	 */
 
-	error = ubc_fill_holes_in_range(vp, upl_start, upl_start + upl_size, B_FALSE);
+	error = ubc_fill_holes_in_range(vp, upl_start, upl_start + upl_size, FILL_FOR_WRITE);
 	if (error != 0) {
 		printf("ZFS: %s: fill_holes_in_range error %d range [%lld, +%lld], filename %s\n",
 		    __func__, error, upl_start, upl_size, filename);
@@ -664,7 +664,7 @@ drop_and_exit:
 static int
 fill_hole(vnode_t *vp, const off_t foffset,
     int page_hole_start, int page_hole_end, const char *filename,
-    boolean_t o_will_mod)
+    fill_holes_direction_t who_for)
 {
 	ASSERT3S(page_hole_end - page_hole_start, >, 0);
 	ASSERT3S(page_hole_end, >, 0);
@@ -713,28 +713,8 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	if (err != KERN_SUCCESS) {
 		printf("ZFS: %s:%d failed to create upl: err %d flags %d for file %s\n",
 		    __func__, __LINE__, err, upl_flags, filename);
+		ubc_upl_unmap(upl);
 		return (err);
-	}
-
-	for (int pg = 0; pg < upl_pages; pg++) {
-		if (upl_valid_page(pl, pg)) {
-			printf("ZFS: %s:%d pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
-			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
-			    __func__, __LINE__, pg, upl_size, upl_start, filename,
-			    upl_flags, spl_ubc_is_mapped(vp, NULL),
-			    spl_ubc_is_mapped_writable(vp));
-			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
-			return (EAGAIN);
-		}
-		if (upl_dirty_page(pl, pg)) {
-			printf("ZFS: %s%d: pg %d of (upl_size %lld upl_start %lld) file %s is DIRTY"
-			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
-			    __func__, __LINE__, pg, upl_size, upl_start, filename,
-			    upl_flags, spl_ubc_is_mapped(vp, NULL),
-			    spl_ubc_is_mapped_writable(vp));
-			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
-			return (EAGAIN);
-		}
 	}
 
 	vm_offset_t vaddr = 0;
@@ -746,6 +726,36 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		return (err);
 	}
 
+	for (int pg = 0; pg < upl_pages; pg++) {
+		/*
+		 *  as we hold the UPL map lock and said
+		 *  RET_ONLY_ABSENT, this conditions should NEVER happen
+		 */
+		if (upl_dirty_page(pl, pg)) {
+			printf("ZFS: %s%d: (who_for: %d)"
+			    " pg %d of (upl_size %lld upl_start %lld) file %s is DIRTY"
+			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
+			    __func__, __LINE__, who_for, pg, upl_size, upl_start, filename,
+			    upl_flags, spl_ubc_is_mapped(vp, NULL),
+			    spl_ubc_is_mapped_writable(vp));
+			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
+			(void) ubc_upl_unmap(upl);
+			return (EAGAIN);
+		}
+		if (upl_valid_page(pl, pg)) {
+			printf("ZFS: %s:%d (who_for %d)"
+			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
+			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
+			    __func__, __LINE__, who_for, pg, upl_size, upl_start, filename,
+			    upl_flags, spl_ubc_is_mapped(vp, NULL),
+			    spl_ubc_is_mapped_writable(vp));
+			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
+			(void) ubc_upl_unmap(upl);
+			return (EAGAIN);
+		}
+	}
+
+
 	if (spl_ubc_is_mapped(vp, NULL))
 		zp->z_mod_while_mapped = 1;
 
@@ -755,8 +765,10 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	if (err != 0) {
 		printf("ZFS: %s:%d dmu_read error %d reading %llu bytes offs %llu from file %s\n",
 		    __func__, __LINE__, err, upl_size, upl_start, filename);
-		(void) ubc_upl_unmap(upl);
-		(void) ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR | UPL_ABORT_DUMP_PAGES);
+		int unmapret = ubc_upl_unmap(upl);
+		ASSERT3S(unmapret, ==, KERN_SUCCESS);
+		int abortdump = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR | UPL_ABORT_DUMP_PAGES);
+		ASSERT3S(abortdump, ==, KERN_SUCCESS);
 		if (err == EAGAIN) {
 			printf("ZFS: %s: WARNING converting EAGAIN from dmu_read into EIO\n", __func__);
 			err = EIO;
@@ -810,7 +822,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
  */
 
 static int
-fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_size, boolean_t o_will_mod)
+fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_size, fill_holes_direction_t who_for)
 {
 
 	/* the range should be page aligned */
@@ -939,22 +951,30 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		while (page_index < upl_num_pages && err == 0) {
 			VERIFY3P(upl, !=, NULL);
 			VERIFY3P(pl, !=, NULL);
-			if (upl_valid_page(pl, page_index)) {
-				page_index++;
-				/* don't count pages not present during first pass */
+			if (upl_dirty_page(pl, page_index)) {
+				/* count any dirty pages during first pass */
 				if (i == 0) present_pages_skipped++;
+				if (who_for == FILL_FOR_READ) {
+					/*
+					 * these may trigger a pageout
+					 * when our parent tries to read
+					 * the pages
+					 */
+					printf("ZFS: %s:%d: (FILL_FOR_READ pass %d)"
+					    " skipping DIRTY,!VALID page %d in range"
+					    " [off %lld len %ld] of file %s uplcflags %d"
+					    " mapped %d mapped_write %d\n", __func__, __LINE__, i,
+					    page_index, cur_upl_file_offset, cur_upl_size,
+					    zp->z_name_cache, uplcflags,
+					    spl_ubc_is_mapped(vp, NULL),
+					    spl_ubc_is_mapped_writable(vp));
+					page_index++;
+				}
 				continue;
-			} else if (upl_dirty_page(pl, page_index)) {
-				/* don't count dirty pages during first pass either */
-				if (i == 0) present_pages_skipped++;
-				printf("ZFS: %s:%d: skipping DIRTY,!VALID page %d in range"
-				    " [off %lld len %ld] of file %s uplcflags %d"
-				    " mapped %d mapped_write %d\n", __func__, __LINE__,
-				    page_index, cur_upl_file_offset, cur_upl_size,
-				    zp->z_name_cache, uplcflags,
-				    spl_ubc_is_mapped(vp, NULL),
-				    spl_ubc_is_mapped_writable(vp));
+			} else if (upl_valid_page(pl, page_index)) {
 				page_index++;
+				/* count any present pages during first pass */
+				if (i == 0) present_pages_skipped++;
 				continue;
 			}
 			/* this is a hole.  find its end */
@@ -998,7 +1018,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			 */
 
 			err = fill_hole(vp, cur_upl_file_offset, page_index_hole_start, page_index_hole_end,
-			    filename, o_will_mod);
+			    filename, who_for);
 
 			if (err == EAGAIN) {
 				printf("ZFS: %s:%d: EAGAIN curoff %lld pist %d pien %d pass %d file %s\n",
@@ -1095,7 +1115,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 }
 
 int
-ubc_fill_holes_in_range(vnode_t *vp, off_t start_byte, off_t end_byte, boolean_t will_mod)
+ubc_fill_holes_in_range(vnode_t *vp, off_t start_byte, off_t end_byte, fill_holes_direction_t who_for)
 {
 
 	ASSERT3S(start_byte, <=, end_byte);
@@ -1115,7 +1135,7 @@ ubc_fill_holes_in_range(vnode_t *vp, off_t start_byte, off_t end_byte, boolean_t
 		const off_t todo = total_size - size_done;
 		const off_t cur_size = MIN(todo, MAX_UPL_SIZE_BYTES);
 
-		int err = fill_holes_in_range(vp, cur_off, cur_size, will_mod);
+		int err = fill_holes_in_range(vp, cur_off, cur_size, who_for);
 		if (err) {
 			printf("ZFS: %s:%d: error %d from fill_holes_in_range(vp, %lld, %lld) todo %lld iter %d\n",
 			    __func__, __LINE__, err, cur_off, cur_size, todo, i);
@@ -1143,7 +1163,7 @@ ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte)
 	}
 #endif
 
-	int fill_err = ubc_fill_holes_in_range(vp, start_byte, end_byte, B_FALSE);
+	int fill_err = ubc_fill_holes_in_range(vp, start_byte, end_byte, FILL_FOR_READ);
 	if (fill_err) {
 		printf("ZFS: %s: error filling holes [%lld, %lld], file %s\n",
 		    __func__, start_byte, end_byte, filename);
@@ -1252,7 +1272,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 	ASSERT3S(upl_size, >=, PAGE_SIZE_64);
 	ASSERT3S(upl_size, >=, inbytes);
 
-	err = fill_holes_in_range(vp, upl_file_offset, upl_size, B_FALSE);
+	err = fill_holes_in_range(vp, upl_file_offset, upl_size, FILL_FOR_READ);
 
 	if (err != 0) {
 		printf("ZFS: %s: fill_holes_in_range (%lld, %ld) error %d file %s\n",
@@ -2282,7 +2302,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		const uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
 
 		/* fill any holes */
-		int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, B_FALSE);
+		int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, FILL_FOR_WRITE);
 		if (fill_err) {
 			printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
 			    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
