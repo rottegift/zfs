@@ -1309,14 +1309,12 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			off_in_this_page = uio_offset(uio) & PAGE_MASK_64;
 		const uint64_t cur_resid = MIN(resid, uio_resid(uio));
 		ASSERT3S(cur_resid, >, 0);
-		uint64_t bytes_in_this_page = PAGE_SIZE_64;
-		if (pg_index == 0 && cur_resid & PAGE_MASK_64) {
-			bytes_in_this_page = cur_resid & PAGE_MASK_64;
-		} else if (pg_index > 0 && cur_resid < PAGE_SIZE_64) {
-			bytes_in_this_page = cur_resid;
-		}
+		uint64_t bytes_in_this_page = MIN(PAGE_SIZE_64, cur_resid);
+		if (off_in_this_page > 0)
+			bytes_in_this_page = MIN(PAGE_SIZE_64 - off_in_this_page, cur_resid);
 
 		vm_offset_t cur_addr = vaddr + (pg_index * PAGE_SIZE_64) + off_in_this_page;
+
 		int uioretval = uiomove64(cur_addr, bytes_in_this_page, uio);
 		error = uioretval;
 
