@@ -719,7 +719,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	vm_offset_t vaddr = 0;
 	err = ubc_upl_map(upl, &vaddr);
 	if (err != KERN_SUCCESS) {
-		printf("ZFS: %s:%d failed to ubc_map_upl: err %d, mapped %d\n", __func__, __LINE__,
+		printf("ZFS: %s:%d failed to ubc_upl_map: err %d, mapped %d\n", __func__, __LINE__,
 		    err, spl_ubc_is_mapped(vp, NULL));
 		(void) ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
 		return (err);
@@ -1213,6 +1213,139 @@ ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte)
 	return (0);
 }
 
+
+static int
+zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
+    __unused const int mark_dirty, const off_t upl_file_offset, const size_t upl_size)
+{
+	if (bytes_to_copy == NULL)
+		return (EINVAL);
+
+	/* the range should be page aligned */
+	ASSERT3S((upl_file_offset % PAGE_SIZE), ==, 0);
+	ASSERT3S((upl_size % PAGE_SIZE), ==, 0);
+	ASSERT3S(upl_size, >, 0);
+	ASSERT3S(upl_size, <=, MAX_UPL_SIZE_BYTES);
+
+	/* the range should fit within the UPL */
+	ASSERT3S(upl_file_offset, <=, uio_offset(uio));
+	ASSERT3S(upl_size, >=, *bytes_to_copy);
+
+	ASSERT3S(upl_file_offset, ==, trunc_page_64(uio_offset(uio)));
+
+	/* we are called withing a ZFS_ENTER/ZFS_VERIFY_ZP */
+	const zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	/* we are called with appropriate locks held */
+
+	upl_t upl = NULL;
+	upl_page_info_t *pl = NULL;
+
+	kern_return_t uplret = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl,
+	    UPL_PRECIOUS | UPL_SET_LITE);
+
+	if (uplret != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld sz %ld fs %s file %s\n",
+		    __func__, __LINE__, uplret, upl_file_offset, upl_size, fsname, fname);
+		return (uplret);
+	}
+
+	vm_offset_t vaddr = 0;
+	kern_return_t maperr = ubc_upl_map(upl, &vaddr);
+	if (maperr != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: failed to ubc_upl_map: err %d foff %lld sz %ld fs %s file %s\n",
+		    __func__, __LINE__, maperr, upl_file_offset, upl_size, fsname, fname);
+		kern_return_t uplfullabort = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+		ASSERT3S(uplfullabort, ==, KERN_SUCCESS);
+		return (maperr);
+	}
+
+	/* get page list info after mapping for COPYOUT semantic goodness */
+	if (!pl) {
+		printf("ZFS: %s:%d: upl_page_info returned NULL foff %lld sz %ld fs %s file %s\n",
+		    __func__, __LINE__, upl_file_offset, upl_size, fsname, fname);
+		int umapretval = ubc_upl_unmap(upl);
+		ASSERT3S(umapretval, ==, KERN_SUCCESS);
+		int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+		ASSERT3S(abortall, ==, KERN_SUCCESS);
+		return (EINVAL);
+	}
+
+	int pg_index = 0;
+	int resid = *bytes_to_copy;
+	ASSERT3S(resid, <=, uio_resid(uio));
+	int error = 0;
+
+	for ( ; resid > 0; pg_index++) {
+		if (!upl_valid_page(pl, pg_index)) {
+			printf("ZFS: %s:%d non-valid page at index %d"
+			    " upl foff %lld sz %ld fs %s file %s\n",
+			    __func__, __LINE__, pg_index,
+			    upl_file_offset, upl_size, fsname, fname);
+			int umapretval = ubc_upl_unmap(upl);
+			ASSERT3S(umapretval, ==, KERN_SUCCESS);
+			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+			ASSERT3S(abortall, ==, KERN_SUCCESS);
+			*bytes_to_copy = resid;
+			return (EFAULT);
+		}
+		if (upl_dirty_page(pl, pg_index)) {
+			printf("ZFS: %s:%d: WARNING dirty page at index %d"
+			    "upl foff %lld sz %ld fs %s file %s\n",
+			    __func__, __LINE__, pg_index,
+			    upl_file_offset, upl_size, fsname, fname);
+		}
+
+		uio_setrw(uio, UIO_READ);
+		const uint64_t off_in_this_page = uio_offset(uio) & PAGE_MASK_64;
+		if (pg_index > 0) { ASSERT0(off_in_this_page); }
+		const uint64_t cur_resid = MIN(resid, uio_resid(uio));
+		ASSERT3S(cur_resid, >, 0);
+		uint64_t bytes_in_this_page = PAGE_SIZE_64;
+		if (cur_resid & PAGE_MASK_64) {
+			ASSERT3S(cur_resid, >=, PAGE_SIZE_64);
+			bytes_in_this_page = PAGE_SIZE_64;
+		} else {
+			bytes_in_this_page = cur_resid & PAGE_SIZE_64;
+		}
+
+		vm_offset_t cur_addr = vaddr + (pg_index * PAGE_SIZE_64) + off_in_this_page;
+		int uioretval = uiomove64(cur_addr, bytes_in_this_page, uio);
+		error = uioretval;
+
+		if (uioretval != 0) {
+			printf("ZFS: %s:%d: uiomove64 error %d pg_index %d,"
+			    "upl foff %lld sz %ld fs %s file %s\n",
+			    __func__, __LINE__, uioretval, pg_index,
+			    upl_file_offset, upl_size, fsname, fname);
+			break;
+		}
+
+		resid -= bytes_in_this_page;
+		if (resid > 0) { ASSERT3S(uio_resid(uio), >, 0); }
+	}
+
+	*bytes_to_copy = resid;
+
+	kern_return_t unmapret = ubc_upl_unmap(upl);
+	ASSERT3S(unmapret, ==, KERN_SUCCESS);
+	if (error == 0 && unmapret != KERN_SUCCESS)
+		error = unmapret;
+
+	int abortflags = UPL_ABORT_FREE_ON_EMPTY;
+	if (error)
+		abortflags |= UPL_ABORT_ERROR;
+
+	kern_return_t abortret = ubc_upl_abort(upl, abortflags);
+	ASSERT3S(abortret, ==, KERN_SUCCESS);
+	if (error == 0 && abortret != KERN_SUCCESS)
+		error = abortret;
+
+	return (error);
+}
+
 static int
 mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 {
@@ -1331,7 +1464,8 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 		ASSERT0(vnode_get_error);
 		if (vnode_get_error == 0) {
 			/* here we do the magic */
-			err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+			//err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+			err = zfs_ubc_to_uio(zp, vp, uio, &cache_resid, 0, upl_file_offset, upl_size);
 			vnode_put(vp);
 		}
 		if (err == 0 && vnode_get_error != 0)
