@@ -2374,7 +2374,16 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    zp->z_name_cache);
 				print_time = cur_time + SEC2NSEC(1);
 			}
-			IODelay(1);
+			IOSleep(1);
+			if (secs > 5) {
+				printf("ZFS: %s:%d: UNABLE to get z_map_lock after %d seconds for"
+				    " file %s, continuing wihtout lock\n", __func__, __LINE__,
+				    secs, zp->z_name_cache);
+				VNOPS_OSX_STAT_INCR(pagein_want_lock, tries);
+				need_release = B_FALSE;
+				need_z_lock = B_FALSE;
+				goto norwlock;
+			}
 		}
 		ASSERT(rw_write_held(&zp->z_map_lock));
 		need_release = B_TRUE;
@@ -2382,6 +2391,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		VNOPS_OSX_STAT_INCR(pagein_want_lock, tries);
 	}
 
+norwlock:
 
 	dprintf("vaddr %p with upl_off 0x%x\n", vaddr, upl_offset);
 	vaddr += upl_offset;
