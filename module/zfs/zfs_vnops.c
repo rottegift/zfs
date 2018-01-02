@@ -1372,13 +1372,6 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 
 	ASSERT3S(arg_bytes, <=, MAX_UPL_SIZE_BYTES);
 
-	/*
-	 * we are called under z_map_lock to make sure that
-	 * other pager activity or writes don't interfere with our
-	 * manipulation of the vnode pager object
-	 */
-	ASSERT(rw_write_held(&zp->z_map_lock));
-
 	objset_t *os = zp->z_zfsvfs->z_os;
         uint64_t object = zp->z_id;
         const char *filename = zp->z_name_cache;
