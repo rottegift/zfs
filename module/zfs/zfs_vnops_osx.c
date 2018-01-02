@@ -2494,8 +2494,13 @@ norwlock:
 	    ASSERT3S(ap->a_f_offset, <, zp->z_size);
 	    ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 
-	if (ap->a_f_offset >= file_sz || ap->a_f_offset >= zp->z_size)
-		error = EFAULT;
+	    if (ap->a_f_offset >= file_sz || ap->a_f_offset >= zp->z_size) {
+		    printf("ZFS: %s:%d: returning EFAULT because file size changed during pagein"
+			" arg foff %lld beyond filesz %lld z_size %lld fs %s file %s\n",
+			__func__, __LINE__, ap->a_f_offset, file_sz, zp->z_size,
+			fsname, fname);
+		    error = EFAULT;
+	    }
 
 	if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
 	if (need_rl_unlock) { ASSERT3P(tsd_get(rl_key), ==, NULL);  zfs_range_unlock(rl); }
@@ -2506,7 +2511,7 @@ norwlock:
 		    error, ap->a_f_offset, ap->a_size, zp->z_name_cache);
 	}
 	if (error == EAGAIN || error == EPERM) {
-		printf("ZFS: %s:%d: changing error %d to EIO becaus eof special handling in our caller\n",
+		printf("ZFS: %s:%d: changing error %d to EIO because of special handling in our caller\n",
 		    __func__, __LINE__, error);
 		error = EIO;
 	}
@@ -4159,7 +4164,7 @@ skip_lock_acquisition:
 	a_pl_offset = 0;
 
 	if (a_flags & UPL_MSYNC) {
-		request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
+	  request_flags = UPL_UBC_MSYNC | UPL_KEEPCACHED;
 		VNOPS_OSX_STAT_BUMP(pageoutv2_msync);
 	}
 	else {
@@ -4469,7 +4474,7 @@ skip_lock_acquisition:
 					continue;
 				}
 			} else {
-				printf("ZFS: %s:%d: successfully committed precious (mapped %d)"
+				dprintf("ZFS: %s:%d: successfully committed precious (mapped %d)"
 				    " UPL range [%lld..%lld] of file range [%lld..%lld] fs %s file %s"
 				    " pg_index %lld page_past_end_of_range %lld upl_end_pg %lld (done: %d)\n",
 				    __func__, __LINE__, mapped,
@@ -4477,7 +4482,7 @@ skip_lock_acquisition:
 				    f_start_of_upl, f_end_of_upl,
 				    fsname, fname, pg_index, page_past_end_of_range, upl_end_pg,
 				    page_past_end_of_range > upl_end_pg);
-				xxxbleat = B_TRUE;
+				// xxxbleat = B_TRUE;
 			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_cleaned, pages_in_range);
 			pg_index = page_past_end_of_range;

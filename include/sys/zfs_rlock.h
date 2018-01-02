@@ -35,9 +35,9 @@ extern "C" {
 #include <sys/zfs_znode.h>
 
 typedef enum {
-	RL_READER,
-	RL_WRITER,
-	RL_APPEND
+	RL_READER = 0,
+	RL_WRITER = 1,
+	RL_APPEND = 2
 } rl_type_t;
 
 typedef struct rl {
