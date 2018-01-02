@@ -2867,7 +2867,6 @@ out:
 			int cflags = UPL_COMMIT_FREE_ON_EMPTY;
 			if (clear_flags) {
 				cflags |= UPL_COMMIT_CLEAR_DIRTY;
-				cflags |= UPL_COMMIT_CLEAR_PRECIOUS;
 			}
 			if (inactivate)
 				cflags |= UPL_COMMIT_INACTIVATE;
@@ -3261,8 +3260,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			}
 		} else {
 			int commitflags = UPL_COMMIT_FREE_ON_EMPTY
-			    | UPL_COMMIT_CLEAR_DIRTY
-			    | UPL_COMMIT_CLEAR_PRECIOUS;
+			    | UPL_COMMIT_CLEAR_DIRTY;
 			kern_return_t commitret = ubc_upl_commit_range(upl, upl_offset, size, commitflags);
 			if (commitret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error %d"
@@ -4419,8 +4417,7 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
                         }
-			const int commit_precious_flags = UPL_COMMIT_FREE_ON_EMPTY
-			    | UPL_COMMIT_CLEAR_PRECIOUS;
+			const int commit_precious_flags = UPL_COMMIT_FREE_ON_EMPTY;
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
 			if (commit_precious_ret != KERN_SUCCESS) {
