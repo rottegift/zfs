@@ -202,7 +202,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 	boolean_t claim = B_FALSE;
 
 	if (vnode_isreg(vp) &&
-	    !vnode_isrecycled(vp) &&
 	    ubc_pages_resident(vp) &&
 	    !spl_ubc_is_mapped (vp, NULL) &&
 	    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
@@ -221,6 +220,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		if (zfsvfs && zfsvfs->z_unmounted) {
 			printf("ZFS: %s:%d: zfvfs is not mounted file %s\n", __func__, __LINE__,
+			    zp->z_name_cache);
+			return (VNODE_RETURNED);
+		}
+		if (vnode_isrecycled(vp)) {
+			printf("ZFS: %s:%d: vnode_isrecyled for file %s\n", __func__, __LINE__,
 			    zp->z_name_cache);
 			return (VNODE_RETURNED);
 		}
