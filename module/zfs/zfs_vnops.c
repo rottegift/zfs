@@ -1663,14 +1663,10 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		nbytes = MIN(n, zfs_read_chunk_size -
                      P2PHASE(uio_offset(uio), zfs_read_chunk_size));
 
-		boolean_t need_release = B_FALSE;
-		boolean_t need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-		if (tries > 0)
-			VNOPS_STAT_INCR(mappedread_lock_tries, tries);
 		boolean_t was_mapped = spl_ubc_is_mapped(vp, NULL);
+
 		error = mappedread_new(vp, nbytes, uio);
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
+
 		ASSERT3S(error, ==, 0);
 		if (error == 0 && nbytes > 0) {
 			if (was_mapped)
