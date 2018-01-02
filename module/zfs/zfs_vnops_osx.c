@@ -4410,29 +4410,6 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
 			}
-#ifdef REALLY_ABORT_ABSENT
-			const int abortret = ubc_upl_abort_range(upl, start_of_range, end_of_range, 0);
-#else
-			const int abortret = KERN_SUCCESS;
-#endif
-			if (abortret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: error %d aborting UPL range [%lld, %lld] of UPL"
-				    " [%lld..%lld] fs %s file %s (mapped %d)"
-				    " z_size %lld ubcsize %lld a_size %ld\n", __func__, __LINE__,
-				    abortret,
-				    start_of_range, end_of_range,
-				    f_start_of_upl, f_end_of_upl,
-				    fsname, fname, mapped,
-				    zp->z_size, ubc_getsize(vp), ap->a_size);
-				error = abortret;
-				if (mapped) {
-					mapped = B_FALSE;
-					int umapret_err = ubc_upl_unmap(upl);
-					ASSERT3S(umapret_err, ==, KERN_SUCCESS);
-				}
-				ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
-				goto pageout_done;
-			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_present_pages_aborted, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
