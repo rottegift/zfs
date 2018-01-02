@@ -1247,7 +1247,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	upl_page_info_t *pl = NULL;
 
 	kern_return_t uplret = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl,
-	    UPL_PRECIOUS | UPL_SET_LITE);
+	    UPL_PRECIOUS | UPL_SET_LITE | UPL_NOBLOCK);
 
 	if (uplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld sz %ld fs %s file %s\n",
