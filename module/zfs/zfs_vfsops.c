@@ -203,7 +203,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 
 	if (vnode_isreg(vp) &&
 	    ubc_pages_resident(vp) &&
-	    !spl_ubc_is_mapped (vp, NULL) &&
 	    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
 		// error = is_file_clean(vp, len) -> 0 if clean, nonzero if dirty
 		boolean_t caught_syncer = B_FALSE;
@@ -228,11 +227,16 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    zp->z_name_cache);
 			return (VNODE_RETURNED);
 		}
+		if (spl_ubc_is_mapped(vp, NULL)) {
+			printf("ZFS: %s:%d: spl_ubc_is_mapped true (writeable? %d) for file %s\n",
+			    __func__, __LINE__, spl_ismapped_writable(vp), zp->z_name_cache);
+			return (VNODE_CLAIMED);
+		}
 		if (vnode_isinuse(vp, 0)) {
 			if (waitfor)
 				printf("ZFS: %s:%d WAITFOR when vnode_isinuse(vp, 0) for file %s\n",
 				    __func__, __LINE__, zp->z_name_cache);
-			return (VNODE_RETURNED);
+			return (VNODE_CLAIMED);
 		}
 		if (zp->z_in_pager_op > 0) {
 			printf("ZFS: %s:%d: z_in_pager_op %d > 0 for file %s\n", __func__, __LINE__,
