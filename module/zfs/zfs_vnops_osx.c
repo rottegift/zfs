@@ -4152,7 +4152,7 @@ skip_lock_acquisition:
 	a_pl_offset = 0;
 
 	if (a_flags & UPL_MSYNC) {
-		request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
+	  request_flags = UPL_UBC_MSYNC | UPL_KEEPCACHED;
 		VNOPS_OSX_STAT_BUMP(pageoutv2_msync);
 	}
 	else {
