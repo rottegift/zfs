@@ -1363,16 +1363,16 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 		error = abortret;
 
 	const hrtime_t dt_final = gethrtime() - t_start;
-	const hrtime_t MS_THRESHOLD = MSEC2NSEC(1);
-	const hrtime_t DAUS_THRESHOLD = USEC2NSEC(10);
+	const hrtime_t cs_THRESHOLD = MSEC2NSEC(10);
+	const hrtime_t ms_THRESHOLD = MSEC2NSEC(1);
 
-	if (dt_final > MS_THRESHOLD) {
-		printf("ZFS: %s:%d: very long UBC read time (> 1 ms) in nsec:"
+	if (dt_final > cs_THRESHOLD) {
+		printf("ZFS: %s:%d: very long UBC read time (> 10 ms) in nsec:"
 		    " dt_final %lld dt_after_map %lld dt_after_upl %lld off %lld sz %ld fs %s file %s\n",
 		    __func__, __LINE__, dt_final, dt_after_map, dt_after_upl,
 		    upl_file_offset, upl_size, fsname, fname);
-	} else if (dt_after_map > DAUS_THRESHOLD || dt_after_upl > DAUS_THRESHOLD) {
-		printf("ZFS: %s:%d: long UBC read time (> 10 microseconds) in nsec:"
+	} else if (dt_after_map > ms_THRESHOLD || dt_after_upl > ms_THRESHOLD) {
+		printf("ZFS: %s:%d: long UBC read time (> 1 ms) in nsec:"
 		    " dt_final %lld dt_after_map %lld dt_after_upl %lld off %lld sz %ld fs %s file %s\n",
 		    __func__, __LINE__, dt_final, dt_after_map, dt_after_upl,
 		    upl_file_offset, upl_size, fsname, fname);
