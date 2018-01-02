@@ -1249,7 +1249,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	const hrtime_t t_start = gethrtime();
 
 	kern_return_t uplret = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl,
-	    UPL_PRECIOUS | UPL_SET_LITE | UPL_NOBLOCK);
+	    UPL_PRECIOUS | UPL_SET_LITE | UPL_NOBLOCK | UPL_COPYOUT_FROM);
 
 	const hrtime_t dt_after_upl = gethrtime() - t_start;
 
@@ -1291,6 +1291,11 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 		ASSERT3S(resid, <=, uio_resid(uio));
 		ASSERT3S(pg_index, <, upl_num_pgs);
 		if (!upl_valid_page(pl, pg_index)) {
+			/*
+			 * touching this page would cause a page fault
+			 * (pagein), which we do not want to do in this
+			 * context
+			 */
 			printf("ZFS: %s:%d non-valid page at index %d (resid %d, uio_resid %lld)"
 			    " upl foff %lld sz %ld fs %s file %s\n",
 			    __func__, __LINE__, pg_index, resid, uio_resid(uio),
@@ -1303,6 +1308,10 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			return (EFAULT);
 		}
 		if (upl_dirty_page(pl, pg_index)) {
+			/*
+			 * it is OK to read this page, because it is already valid;
+			 * we do not change its dirty/busy state with our abort below
+			 */
 			printf("ZFS: %s:%d: WARNING dirty page at index %d (resid %d, uio_resid %lld)"
 			    "uiooff %lld upl foff %lld sz %ld fs %s file %s\n",
 			    __func__, __LINE__, pg_index, resid, uio_resid(uio), uio_offset(uio),
