@@ -4260,51 +4260,12 @@ skip_lock_acquisition:
 		 * empty pages, and they are "donated" to the vm map, which
 		 * disposes of them at unmap time.
 		 */
-#ifdef REALLY_ABORT_ABSENT
-		int abort_tail = ubc_upl_abort_range(upl, start_of_tail, end_of_tail, 0);
-#else
-		int abort_tail = KERN_SUCCESS;
-#endif
 		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
-		    " [%lld..%lld] fs %s file %s (abort_tail err %d)\n",
+		    " [%lld..%lld] fs %s file %s\n",
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
-		    f_start_of_upl, f_end_of_upl, fsname, fname, abort_tail);
+		    f_start_of_upl, f_end_of_upl, fsname, fname);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
-		if (abort_tail != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: abort tail failed (retval %d)"
-			    " (foff %lld, sz %ld) for"
-			    " fs %s file %s (XXX possibly continuing)\n", __func__, __LINE__,
-			    abort_tail,
-			    ap->a_f_offset, ap->a_size,
-			    fsname, fname);
-			for (int pg = lowest_page_dismissed - 1; pg > 0; ) {
-				if (upl_valid_page(pl, pg)) {
-					printf("ZFS: %s:%d: XXX phew valid page at %d\n",
-					    __func__, __LINE__, pg);
-					xxxbleat = B_TRUE;
-					break;
-				}
-				if (pg == 0) {
-					printf("ZFS: %s:%d: XXX DONE reached 0 without finding"
-					    " a valid page in UPL [%lld...%lld] fs %s file %s\n",
-					    __func__, __LINE__, f_start_of_upl, f_end_of_upl,
-					    fsname, fname);
-					extern void IOSleep(unsigned milliseconds);
-					IOSleep(10);
-					if (mapped) {
-						mapped = B_FALSE;
-						int umapret_err = ubc_upl_unmap(upl);
-						ASSERT3S(umapret_err, ==, KERN_SUCCESS);
-					}
-					int abortall_after_tail_fail = ubc_upl_abort(upl,
-					    UPL_ABORT_FREE_ON_EMPTY);
-					ASSERT3S(abortall_after_tail_fail, ==, KERN_SUCCESS);
-					goto pageout_done;
-				}
-			}
-			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
-		}
 	}
 
 	const off_t trimmed_upl_size = (off_t)ap->a_size - ((off_t)upl_pages_dismissed * PAGE_SIZE_64);
