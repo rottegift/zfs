@@ -229,7 +229,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		if (spl_ubc_is_mapped(vp, NULL)) {
 			printf("ZFS: %s:%d: spl_ubc_is_mapped true (writeable? %d) for file %s\n",
-			    __func__, __LINE__, spl_is_mapped_writable(vp), zp->z_name_cache);
+			    __func__, __LINE__, spl_ubc_is_mapped_writable(vp), zp->z_name_cache);
 			return (VNODE_CLAIMED);
 		}
 		if (vnode_isinuse(vp, 0)) {
