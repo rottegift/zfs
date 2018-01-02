@@ -1230,7 +1230,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	const hrtime_t t_start = gethrtime();
 
 	kern_return_t uplret = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl,
-	    UPL_SET_LITE | UPL_COPYOUT_FROM); // UPL_NOBLOCK?
+	    UPL_COPYOUT_FROM); // UPL_NOBLOCK?
 
 	const hrtime_t dt_after_upl = gethrtime() - t_start;
 
@@ -1277,16 +1277,21 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			 * (pagein), which we do not want to do in this
 			 * context
 			 */
-			printf("ZFS: %s:%d non-valid page at index %d (resid %d, uio_resid %lld)"
-			    " upl foff %lld sz %ld fs %s file %s\n",
-			    __func__, __LINE__, pg_index, resid, uio_resid(uio),
+			printf("ZFS: %s:%d non-valid page at index %d (resid %d, uio_resid %lld,"
+			    " *bytes_to_copy %d), upl foff %lld sz %ld fs %s file %s\n",
+			    __func__, __LINE__, pg_index, resid, uio_resid(uio), *bytes_to_copy,
 			    upl_file_offset, upl_size, fsname, fname);
 			int umapretval = ubc_upl_unmap(upl);
 			ASSERT3S(umapretval, ==, KERN_SUCCESS);
 			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
 			ASSERT3S(abortall, ==, KERN_SUCCESS);
-			*bytes_to_copy = resid;
-			return (EFAULT);
+			if (resid < *bytes_to_copy) {
+				*bytes_to_copy = resid;
+				return (0);
+			} else {
+				*bytes_to_copy = resid;
+				return (EFAULT);
+			}
 		}
 		if (upl_dirty_page(pl, pg_index)) {
 			/*
@@ -1489,13 +1494,13 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 			mutex_exit(&zp->z_ubc_msync_lock);
 		}
 		if (err != 0) {
-			printf("ZFS: %s: cluster_copy_ubc_data returned error %d,"
+			printf("ZFS: %s:%d zfs_ubc_to_uio returned error %d,"
 			    " cache_resid now %d, arg_bytes was %d orig offset %lld filname %s\n",
-			    __func__, err, cache_resid, arg_bytes, orig_offset, filename);
+			    __func__, __LINE__, err, cache_resid, arg_bytes, orig_offset, filename);
 		} else if (cache_resid != 0) {
-			printf("ZFS: %s: cluster_copy_ubc_data short read,"
+			printf("ZFS: %s:%d zfs_ubc_to_uio returned short read,"
 			    " arg_bytes was %d cache_resid now %d orig offset %lld filename %s\n",
-			    __func__, arg_bytes, cache_resid, orig_offset, filename);
+			    __func__, __LINE__, arg_bytes, cache_resid, orig_offset, filename);
 		}
 	}
 
