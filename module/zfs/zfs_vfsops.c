@@ -228,6 +228,12 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    zp->z_name_cache);
 			return (VNODE_RETURNED);
 		}
+		if (vnode_isinuse(vp, 0)) {
+			if (waitfor)
+				printf("ZFS: %s:%d WAITFOR when vnode_isinuse(vp, 0) for file %s\n",
+				    __func__, __LINE__, zp->z_name_cache);
+			return (VNODE_RETURNED);
+		}
 		if (zp->z_in_pager_op > 0) {
 			printf("ZFS: %s:%d: z_in_pager_op %d > 0 for file %s\n", __func__, __LINE__,
 			    zp->z_in_pager_op, zp->z_name_cache);
