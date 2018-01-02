@@ -202,8 +202,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 	boolean_t claim = B_FALSE;
 
 	if (vnode_isreg(vp) &&
+	    !vnode_isrecycled(vp) &&
 	    ubc_pages_resident(vp) &&
+	    !spl_ubc_is_mapped (vp, NULL) &&
 	    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
+		// error = is_file_clean(vp, len) -> 0 if clean, nonzero if dirty
 		boolean_t caught_syncer = B_FALSE;
 		znode_t *zp = VTOZ(vp);
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
@@ -257,9 +260,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* take a range lock */
 		off_t resid_off = 0;
 		off_t ubcsize = ubc_getsize(vp);
-		int flags = UBC_PUSHDIRTY;
-		if (spl_ubc_is_mapped(vp, NULL))
-			flags = UBC_PUSHDIRTY | UBC_SYNC;
+		int flags = UBC_PUSHALL;
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;
 		/* See if we are colliding with other ZPL activity, hang here rather than below */
