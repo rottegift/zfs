@@ -1230,7 +1230,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	const hrtime_t t_start = gethrtime();
 
 	kern_return_t uplret = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl,
-	    UPL_COPYOUT_FROM); // UPL_NOBLOCK?
+					      UPL_SET_LITE | UPL_COPYOUT_FROM); // UPL_NOBLOCK?
 
 	const hrtime_t dt_after_upl = gethrtime() - t_start;
 
@@ -1277,9 +1277,11 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			 * (pagein), which we do not want to do in this
 			 * context
 			 */
-			printf("ZFS: %s:%d non-valid page at index %d (resid %d, uio_resid %lld,"
+			printf("ZFS: %s:%d WARNING non-valid page at index %d of %d"
+			    " (resid %d, uio_resid %lld,"
 			    " *bytes_to_copy %d), upl foff %lld sz %ld fs %s file %s\n",
-			    __func__, __LINE__, pg_index, resid, uio_resid(uio), *bytes_to_copy,
+			    __func__, __LINE__,
+			    pg_index, upl_num_pgs, resid, uio_resid(uio), *bytes_to_copy,
 			    upl_file_offset, upl_size, fsname, fname);
 			int umapretval = ubc_upl_unmap(upl);
 			ASSERT3S(umapretval, ==, KERN_SUCCESS);
@@ -1288,9 +1290,6 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			if (resid < *bytes_to_copy) {
 				*bytes_to_copy = resid;
 				return (0);
-			} else {
-				*bytes_to_copy = resid;
-				return (EFAULT);
 			}
 		}
 		if (upl_dirty_page(pl, pg_index)) {
