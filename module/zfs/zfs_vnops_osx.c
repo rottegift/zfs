@@ -2482,8 +2482,13 @@ norwlock:
 	    ASSERT3S(ap->a_f_offset, <, zp->z_size);
 	    ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 
-	if (ap->a_f_offset >= file_sz || ap->a_f_offset >= zp->z_size)
-		error = EFAULT;
+	    if (ap->a_f_offset >= file_sz || ap->a_f_offset >= zp->z_size) {
+		    printf("ZFS: %s:%d: returning EFAULT because file size changed during pagein"
+			" arg foff %lld beyond filesz %lld z_size %lld fs %s file %s\n",
+			__func__, __LINE__, ap->a_f_offset, file_sz, zp->z_size,
+			fsname, fname);
+		    error = EFAULT;
+	    }
 
 	if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
 	if (need_rl_unlock) { ASSERT3P(tsd_get(rl_key), ==, NULL);  zfs_range_unlock(rl); }
@@ -2494,7 +2499,7 @@ norwlock:
 		    error, ap->a_f_offset, ap->a_size, zp->z_name_cache);
 	}
 	if (error == EAGAIN || error == EPERM) {
-		printf("ZFS: %s:%d: changing error %d to EIO becaus eof special handling in our caller\n",
+		printf("ZFS: %s:%d: changing error %d to EIO because of special handling in our caller\n",
 		    __func__, __LINE__, error);
 		error = EIO;
 	}
