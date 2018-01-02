@@ -4462,7 +4462,7 @@ skip_lock_acquisition:
 					continue;
 				}
 			} else {
-				printf("ZFS: %s:%d: successfully committed precious (mapped %d)"
+				dprintf("ZFS: %s:%d: successfully committed precious (mapped %d)"
 				    " UPL range [%lld..%lld] of file range [%lld..%lld] fs %s file %s"
 				    " pg_index %lld page_past_end_of_range %lld upl_end_pg %lld (done: %d)\n",
 				    __func__, __LINE__, mapped,
@@ -4470,7 +4470,7 @@ skip_lock_acquisition:
 				    f_start_of_upl, f_end_of_upl,
 				    fsname, fname, pg_index, page_past_end_of_range, upl_end_pg,
 				    page_past_end_of_range > upl_end_pg);
-				xxxbleat = B_TRUE;
+				// xxxbleat = B_TRUE;
 			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_cleaned, pages_in_range);
 			pg_index = page_past_end_of_range;
