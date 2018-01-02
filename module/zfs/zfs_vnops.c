@@ -1185,29 +1185,15 @@ ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte)
 	znode_t *zp = VTOZ(vp);
 	const char *filename = zp->z_name_cache;
 
-#if 0
-	int inval_err = ubc_invalidate_range(vp, start_byte, end_byte);
-	if (inval_err) {
-		printf("ZFS: %s: error from ubc_invalidate_range [%lld, %lld], file %s\n",
-		    __func__, start_byte, end_byte, filename);
-	}
-#endif
-
 	int fill_err = ubc_fill_holes_in_range(vp, start_byte, end_byte, FILL_FOR_READ);
 	if (fill_err) {
 		printf("ZFS: %s: error filling holes [%lld, %lld], file %s\n",
 		    __func__, start_byte, end_byte, filename);
 	}
 
-#if 0
-	if (inval_err != 0 || fill_err != 0) {
-		return (1);
-	}
-#else
 	if (fill_err != 0) {
 		return (1);
 	}
-#endif
 #endif //__UNDEFINED__
 
 	return (0);
@@ -4569,8 +4555,10 @@ top:
 		// we should report and invalidate any
 		dprintf("ZFS: %s:%d: may_delete_now but ubc_pages_resident is true (z_drain %d) file %s\n",
 		    __func__, __LINE__, zp->z_drain, zp->z_name_cache);
+#if 0
 		int inval_err = ubc_invalidate_range(zp, NULL, 0, ubc_getsize(vp));
 		ASSERT3S(inval_err, ==, 0);
+#endif
 		ASSERT0(is_file_clean(vp, ubc_getsize(vp))); // is_file_clean is 0 if clean
 		ASSERT0(vnode_isinuse(vp, 0));
 		if (is_file_clean(vp, ubc_getsize(vp)) != 0 || vnode_isinuse(vp, 0))
