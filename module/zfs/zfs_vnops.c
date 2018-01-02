@@ -1312,7 +1312,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			 * it is OK to read this page, because it is already valid;
 			 * we do not change its dirty/busy state with our abort below
 			 */
-			printf("ZFS: %s:%d: WARNING dirty page at index %d (resid %d, uio_resid %lld)"
+			dprintf("ZFS: %s:%d: WARNING dirty page at index %d (resid %d, uio_resid %lld)"
 			    "uiooff %lld upl foff %lld sz %ld fs %s file %s\n",
 			    __func__, __LINE__, pg_index, resid, uio_resid(uio), uio_offset(uio),
 			    upl_file_offset, upl_size, fsname, fname);
