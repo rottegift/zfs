@@ -116,6 +116,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_pageout;
 	kstat_named_t pageoutv2_want_lock;
 	kstat_named_t pageoutv2_upl_iosync;
+	kstat_named_t pageoutv2_upl_iosync_skipped;
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
 	kstat_named_t pageoutv2_invalid_tail_err;
@@ -149,6 +150,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_pageout",                 KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
+	{ "pageoutv2_upl_iosync_skipped",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_err",        KSTAT_DATA_UINT64 },
@@ -4711,12 +4713,15 @@ skip_lock_acquisition:
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
 	} else if (a_flags & UPL_IOSYNC) {
+		/* cut down on logspam a bit with these two ifs */
 		if (subrange == B_FALSE && drop_rl == B_TRUE && !rw_write_held(&zp->z_map_lock))
-			printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
-			    " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)"
-			    " (error %d) (recycled? %d)\n",
-			    __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
-			    rl == NULL, tsd_get(rl_key) == NULL, error, vnode_isrecycled(vp));
+			if (!vnode_isrecycled(vp))
+				printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
+				    " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)"
+				    " (error %d) (recycled? %d)\n",
+				    __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
+				    rl == NULL, tsd_get(rl_key) == NULL, error, vnode_isrecycled(vp));
+		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync_skipped);
 	}
 
 	if (error != 0) {
