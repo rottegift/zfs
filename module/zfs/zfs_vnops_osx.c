@@ -4505,21 +4505,9 @@ skip_lock_acquisition:
 					    trimmed_upl_size, ap->a_size,
 					    f_start_of_upl, f_end_of_upl,
 					    fsname, fname, mapped);
-#ifdef REALLY_FAIL_FAILED_PRECIOUS
-					error = commit_precious_ret;
-					mapped = B_FALSE;
-					const int umapret_err = ubc_upl_unmap(upl);
-					ASSERT3S(umapret_err, ==, KERN_SUCCESS);
-
-					const int fullabort_err = ubc_upl_abort(upl,
-					    UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
-					ASSERT3S(fullabort_err, ==, KERN_SUCCESS);
-					goto pageout_done;
-#else
 					xxxbleat = B_TRUE;
 					pg_index = page_past_end_of_range;
 					continue;
-#endif
 				} else {
 					xxxbleat = B_TRUE;
 					printf("ZFS: %s:%d: (precious) range at end of trimmed UPL"

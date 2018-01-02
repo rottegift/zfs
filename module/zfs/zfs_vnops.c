@@ -684,7 +684,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	int err = 0;
 
-	int upl_flags = UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT | UPL_PRECIOUS;
+	int upl_flags = UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT;
 
 	boolean_t unset_syncer = B_FALSE;
 
@@ -902,7 +902,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags = UPL_PRECIOUS | UPL_FILE_IO | UPL_SET_LITE;
+		int uplcflags = UPL_FILE_IO | UPL_SET_LITE;
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
@@ -2392,7 +2392,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		return (ccupl_retval);
 	}
 	/* hand off to zfs_pageout */
-	printf("ZFS: %s:%d: cluster_copy_upl_data done OK, handing off to zfs_pageout,"
+	dprintf("ZFS: %s:%d: cluster_copy_upl_data done OK, handing off to zfs_pageout,"
 	    " %lld @ file %s\n",  __func__, __LINE__, upl_f_off, zp->z_name_cache);
 
 	int poflags = (ioflags & IO_SYNC) ? UPL_IOSYNC : 0;
