@@ -104,7 +104,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
-	kstat_named_t reclaim_mapped;
 	kstat_named_t zfs_ubc_msync_cv_waits;
 	kstat_named_t zfs_ubc_msync_sleeps;
 	kstat_named_t bluster_pageout_calls;
@@ -138,7 +137,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
-	{ "reclaim_mapped",                    KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_cv_waits",            KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_sleeps",              KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
@@ -4877,10 +4875,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
 	ZFS_EXIT(zfsvfs);
-	if (zp->z_mod_while_mapped != 0) {
-		printf("ZFS: %s:%d: mnomap: z_mod_while_mapped set file %s\n",
-		    __func__, __LINE__, zp->z_name_cache);
-	}
 
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	dprintf("-vnop_mnomap\n");
@@ -4992,11 +4986,6 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 
 	off_t ubcsize = ubc_getsize(vp);
 	ASSERT3S(ubcsize, >=, 0);
-	if (zp->z_mod_while_mapped != 0) {
-		printf("ZFS: %s:%d: z_mod_while_mapped set, ubc size %lld, file %s\n",
-		    __func__, __LINE__, ubcsize, zp->z_name_cache);
-	}
-	VNOPS_OSX_STAT_BUMP(reclaim_mapped);
 	if (ubcsize == 0)
 		ASSERT0(ubc_pages_resident(vp));
 	if (ubcsize > 0) {

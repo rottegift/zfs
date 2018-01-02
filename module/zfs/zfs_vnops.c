@@ -754,10 +754,6 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		}
 	}
 
-
-	if (spl_ubc_is_mapped(vp, NULL))
-		zp->z_mod_while_mapped = 1;
-
 	err = dmu_read_dbuf(sa_get_db(zp->z_sa_hdl),
 	    upl_start, upl_size, (caddr_t)vaddr, DMU_READ_PREFETCH);
 

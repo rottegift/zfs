@@ -228,7 +228,6 @@ typedef struct znode {
 	boolean_t	z_is_ctldir;	/* are we .zfs entry */
 #ifdef __APPLE__
 	uint32_t	z_sync_cnt;	/* synchronous open count */
-	_Atomic uint8_t	z_mod_while_mapped;	/* while mapped, did we have a page dirtied? */
 	krwlock_t       z_map_lock;             /* page map lock */
 	const char      *z_map_lock_holder;     /* function that holds the rw_lock */
 

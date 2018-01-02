@@ -276,7 +276,6 @@ zfs_znode_move_impl(znode_t *ozp, znode_t *nzp)
 	nzp->z_no_fsync = ozp->z_no_fsync;
 	ASSERT0(ozp->z_in_pager_op);
 	nzp->z_in_pager_op = ozp->z_in_pager_op;
-	nzp->z_mod_while_mapped = ozp->z_mod_while_mapped;
 	ASSERT3P(ozp->z_syncer_active, ==, NULL);
 	nzp->z_syncer_active = ozp->z_syncer_active;
 
@@ -759,8 +758,6 @@ zfs_znode_alloc(zfsvfs_t *zfsvfs, dmu_buf_t *db, int blksz,
 	zp->z_finder_hardlink = FALSE;
 
 	vp = ZTOV(zp); /* Does nothing in OSX */
-
-	zp->z_mod_while_mapped = 0;
 
 	zfs_znode_sa_init(zfsvfs, zp, db, obj_type, hdl);
 
