@@ -1249,7 +1249,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	const hrtime_t t_start = gethrtime();
 
 	kern_return_t uplret = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl,
-	    UPL_PRECIOUS | UPL_SET_LITE | UPL_COPYOUT_FROM); // UPL_NOBLOCK?
+	    UPL_SET_LITE | UPL_COPYOUT_FROM); // UPL_NOBLOCK?
 
 	const hrtime_t dt_after_upl = gethrtime() - t_start;
 
