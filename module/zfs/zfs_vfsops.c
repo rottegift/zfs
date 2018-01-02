@@ -271,8 +271,10 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		off_t resid_off = 0;
 		off_t ubcsize = ubc_getsize(vp);
 		int flags = UBC_PUSHALL;
+#if 0
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;
+#endif
 		/* See if we are colliding with other ZPL activity, hang here rather than below */
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		rl_t *rl = NULL;
