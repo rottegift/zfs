@@ -228,7 +228,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			return (VNODE_RETURNED);
 		}
 		if (spl_ubc_is_mapped(vp, NULL)) {
-			printf("ZFS: %s:%d: spl_ubc_is_mapped true (writeable? %d) for file %s\n",
+			/* this is fairly frequent */
+			dprintf("ZFS: %s:%d: spl_ubc_is_mapped true (writeable? %d) for file %s\n",
 			    __func__, __LINE__, spl_ubc_is_mapped_writable(vp), zp->z_name_cache);
 			return (VNODE_CLAIMED);
 		}
@@ -277,7 +278,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		int flags = UBC_PUSHDIRTY;
 		if (waitfor || zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 			flags |= UBC_SYNC;
-		/* See if we are colliding with other ZPL activity, hang here rather than below */
+		/* See if we are colliding with other ZPL activity, abort if so */
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		rl_t *rl = NULL;
 		if ((rl = zfs_try_range_lock(zp, 0, ubcsize, RL_WRITER)) == NULL) {
