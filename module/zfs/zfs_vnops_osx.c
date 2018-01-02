@@ -3851,7 +3851,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 					    (zp->z_map_lock_holder != NULL)
 					    ? zp->z_map_lock_holder
 					    : "(null holder!)");
-					goto already_acquired_locks;
+					goto skip_lock_acquisition;
 				}
 			}
 		}
@@ -3904,7 +3904,7 @@ acquire_locks:
 				    (zp->z_map_lock_holder != NULL)
 				    ? zp->z_map_lock_holder
 				    : "(null holder!)");
-				goto already_acquired_locks;
+				goto skip_lock_acquisition;
 			}
 		}
 		drop_rl = B_TRUE;
@@ -3958,7 +3958,7 @@ acquire_locks:
 					    (zp->z_map_lock_holder != NULL)
 					    ? zp->z_map_lock_holder
 					    : "(null holder!)");
-					goto already_acquired_locks;
+					goto skip_lock_acquisition;
 				}
 			}
 			drop_rl = B_TRUE;
