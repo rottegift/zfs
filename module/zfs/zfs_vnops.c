@@ -1246,8 +1246,12 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	upl_t upl = NULL;
 	upl_page_info_t *pl = NULL;
 
+	const hrtime_t t_start = gethrtime();
+
 	kern_return_t uplret = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl,
 	    UPL_PRECIOUS | UPL_SET_LITE | UPL_NOBLOCK);
+
+	const hrtime_t dt_after_upl = gethrtime() - t_start;
 
 	if (uplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld sz %ld fs %s file %s\n",
@@ -1264,6 +1268,8 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 		ASSERT3S(uplfullabort, ==, KERN_SUCCESS);
 		return (maperr);
 	}
+
+	const hrtime_t dt_after_map = gethrtime() - t_start;
 
 	/* get page list info after mapping for COPYOUT semantic goodness */
 	if (!pl) {
@@ -1346,6 +1352,22 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	ASSERT3S(abortret, ==, KERN_SUCCESS);
 	if (error == 0 && abortret != KERN_SUCCESS)
 		error = abortret;
+
+	const hrtime_t dt_final = gethrtime() - t_start;
+	const hrtime_t MS_THRESHOLD = MSEC2NSEC(1);
+	const hrtime_t DAUS_THRESHOLD = USEC2NSEC(10);
+
+	if (dt_final > MS_THRESHOLD) {
+		printf("ZFS: %s:%d: very long UBC read time (> 1 ms) in nsec:"
+		    " dt_final %lld dt_after_map %lld dt_after_upl %lld off %lld sz %ld fs %s file %s\n",
+		    __func__, __LINE__, dt_final, dt_after_map, dt_after_upl,
+		    upl_file_offset, upl_size, fsname, fname);
+	} else if (dt_after_map > DAUS_THRESHOLD || dt_after_upl > DAUS_THRESHOLD) {
+		printf("ZFS: %s:%d: long UBC read time (> 10 microseconds) in nsec:"
+		    " dt_final %lld dt_after_map %lld dt_after_upl %lld off %lld sz %ld fs %s file %s\n",
+		    __func__, __LINE__, dt_final, dt_after_map, dt_after_upl,
+		    upl_file_offset, upl_size, fsname, fname);
+	}
 
 	return (error);
 }
