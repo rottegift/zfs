@@ -470,7 +470,7 @@ int ubc_invalidate_range_impl(znode_t *zp, rl_t *rl, off_t start, off_t end)
 
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-	retval_msync = zfs_ubc_msync(zp, rl, start, end, &resid_msync_off, UBC_PUSHALL | UBC_SYNC);
+	retval_msync = zfs_ubc_msync(zp, rl, start, end, &resid_msync_off, UBC_PUSHDIRTY);
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3S(tries, <=, 2);
 
@@ -5715,7 +5715,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 
 	off_t resid_off = 0;
-	int flags = UBC_PUSHALL | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
+	int flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
 	retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, flags);
 	if (retval != 0) {
 		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
