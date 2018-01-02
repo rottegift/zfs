@@ -2309,7 +2309,11 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	boolean_t need_rl_unlock;
 	boolean_t need_z_lock;
-	rl_t *rl;
+	rl_t *rl = NULL;
+
+	rl = zfs_try_range_lock(zp, off, len, RL_READER);
+	if (rl)
+		need_rl_unlock = B_TRUE;
 
 	if (zp->z_in_pager_op > 0) {
 		printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
@@ -2319,11 +2323,11 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
 		    fsname, fname, flags & UPL_NOCOMMIT);
-		need_rl_unlock = B_FALSE;
+		if (!rl) need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
 
 	} else if (rw_write_held(&zp->z_map_lock)) {
-		need_rl_unlock = B_FALSE;
+		if (!rl) need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
 		printf("ZFS: %s:%d: lock held on entry for [%lld..%lld] (size %ld uploff %u) fs %s file %s,"
 		    " avoiding rangelocking (nocommit? %d)\n",
@@ -2334,17 +2338,25 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		need_rl_unlock = B_TRUE;
 		need_z_lock = B_TRUE;
 		if (tsd_get(rl_key) != NULL) {
-			rl = tsd_get(rl_key);
+			rl_t *tsdrl = tsd_get(rl_key);
+			znode_t *tsdzp = tsdrl->r_zp;
 			printf("ZFS: %s:%d: recovered rl from TSD (type %d) (len %lld)[%lld..%lld],"
 			    " (write wanted? %d) (read wanted %d), (filesize %lld), fs %s, fn %s"
-			    " desired range (len %ld) [%lld..%lld]\n",  __func__, __LINE__,
-			    rl->r_type, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
-			    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
-			    len, off, off + len);
+			    " desired range (len %ld) [%lld..%lld] (rl held? %d)\n",
+			    __func__, __LINE__,
+			    tsdrl->r_type, tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
+			    tsdrl->r_write_wanted, tsdrl->r_read_wanted,
+			    (tsdzp != NULL) ? tsdzp->z_size : -1LL,
+			    fsname, fname,
+			    len, off, off + len, rl != NULL);
 			ASSERT3S(trunc_page_64(rl->r_off), <=, off);
 			ASSERT3S(trunc_page_64(rl->r_off)+ round_page_64(rl->r_len), >=, off + len);
-			need_rl_unlock = B_FALSE;
-		} else {
+			if (!rl) {
+				need_rl_unlock = B_FALSE;
+			}
+		} else if (!rl) {
+			printf("ZFS: %s:%d: waiting for zfs_range_lock off %lld len %ld fs %s fname %s\n",
+			    __func__, __LINE__, off, len, fsname, fname);
 			rl = zfs_range_lock(zp, off, len, RL_READER);
 		}
 	}
