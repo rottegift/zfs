@@ -7150,43 +7150,24 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 
 	/* So pageout can know if it is called recursively, add this thread to list*/
 
-	rl_t *rl = NULL;
+	rl_t *tsdrl = tsd_get(rl_key);
 
-	if (tsd_get(rl_key) == NULL) {
-		if ((rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER)) == NULL) {
-			printf("ZFS: %s:%d: waiting to acquire RL for whole file %s\n",
-			    __func__, __LINE__, zp->z_name_cache);
-			rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-		}
-		ASSERT3S(rl, !=, NULL);
-		tsd_set(rl_key, rl);
-		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
-		tsd_set(rl_key_zp_key_mismatch_key, zp);
-		tsd_set(rl_key_vp_from_getvnode, vp);
-	} else {
-		rl_t *tsdrl = tsd_get(rl_key);
+	if (tsdrl != NULL) {
 		znode_t *tsdzp = tsdrl->r_zp;
-		printf("ZFS: %s:%d: TSD RL exists! tsd type %d tsd len %lld tsd range [%lld..%lld]"
+		printf("ZFS: %s:%d: anomalous TSD RL exists! tsd type %d tsd len %lld tsd range [%lld..%lld]"
 		    " our zp == tsd zp? %d, tsd zp == NULL? %d, tsd file %s,"
-		    " our file %s",
+		    " our file %s, clearing for our children",
 		    __func__, __LINE__, tsdrl->r_type,
 		    tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
 		    zp == tsdzp, tsdzp == NULL,
 		    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null tsd zp)",
 		    zp->z_name_cache);
-		if (tsdzp != zp) {
-			rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-			if (rl != NULL) {
-				/* our zp is fresher, our range-lock is totaller */
-				printf("ZFS: %s:%d: replacing non-NULL tsdy with our RL for file %s\n",
-				    __func__, __LINE__, zp->z_name_cache);
-				tsd_set(rl_key, rl);
-				tsd_set(rl_key_vp_from_getvnode, vp);
-			} else {
-				printf("ZFS: %s:%d: no range lock, letting children deal with non-null RL TSD\n",
-				    __func__, __LINE__);
-			}
-		}
+		ASSERT3P(zp, !=, tsdzp);
+		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
+		ASSERT3P(tsd_get(rl_key_vp_from_getvnode), ==, vp);
+		tsd_set(rl_key_zp_key_mismatch_key, zp);
+		tsd_set(rl_key_vp_from_getvnode, vp);
+		tsd_set(rl_key, NULL);
 	}
 
 	zp->z_no_fsync = B_TRUE;
@@ -7226,13 +7207,14 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 		vnode_setmultipath(vp);
 
 	zp->z_no_fsync = B_FALSE;
-	if (rl) {
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
+
+	if (tsdrl) {
+		ASSERT3P(tsd_get(rl_key), !=, tsdrl);
+		tsd_set(rl_key, tsdrl);
+		ASSERT3P(tsd_get(rl_key_vp_from_getvnode), ==, vp);
 		tsd_set(rl_key_vp_from_getvnode, NULL);
+		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, zp);
 		tsd_set(rl_key_zp_key_mismatch_key, NULL);
-		zfs_range_unlock(rl);
 	}
 
 	return (0);
