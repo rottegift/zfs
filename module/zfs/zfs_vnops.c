@@ -2269,7 +2269,8 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			zfs_grow_blocksize(zp, newblksz, tx);
 
 		zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
-		ASSERT3P(tsd_get(rl_key), ==, rl);
+		if (tsd_get(rl_key) == NULL)
+			tsd_set(rl_key, rl));
 
 		/*
 		 * uint64_t pre = zp->z_size;
