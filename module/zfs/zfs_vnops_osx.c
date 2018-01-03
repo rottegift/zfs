@@ -1978,9 +1978,18 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 				rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_READER);
 				if (rl == NULL) {
 					printf("ZFS: %s:%d: failed to range lock file %s"
-					    " (z_map_lock held? %d)\n",
+					    " (z_map_lock held? %d) (will wait now? %d)\n",
 					    __func__, __LINE__, zp->z_name_cache,
-					    rw_write_held(&zp->z_map_lock));
+					    rw_write_held(&zp->z_map_lock),
+					    vap->va_size < ubc_getsize(ap->a_vp));
+					if (vap->va_size < ubc_getsize(ap->a_vp)) {
+						/*
+						 * we do not want to just chop down a file
+						 * that someone is relying on, or to fall
+						 * into the black hole of a memory_object lock
+						 */
+						rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_READER);
+					}
 				}
 				tsd_set(rl_key, rl);
 			}
