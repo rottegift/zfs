@@ -7179,9 +7179,10 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 	/* So pageout can know if it is called recursively, add this thread to list*/
 
 	rl_t *tsdrl = tsd_get(rl_key);
+	znode_t *tsdzp = NULL;
 
 	if (tsdrl != NULL) {
-		znode_t *tsdzp = tsdrl->r_zp;
+		tsdzp = tsdrl->r_zp;
 		printf("ZFS: %s:%d: anomalous TSD RL exists! tsd type %d tsd len %lld tsd range [%lld..%lld]"
 		    " our zp == tsd zp? %d, tsd zp == NULL? %d, tsd file %s,"
 		    " our file %s, clearing for our children\n",
@@ -7195,6 +7196,9 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 		ASSERT3P(tsd_get(rl_key_vp_from_getvnode), ==, vp);
 		tsd_set(rl_key_zp_key_mismatch_key, zp);
 		tsd_set(rl_key_vp_from_getvnode, vp);
+	}
+
+	if (tsdzp != zp) {
 		tsd_set(rl_key, NULL);
 	}
 
