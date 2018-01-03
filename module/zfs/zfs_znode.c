@@ -1429,9 +1429,10 @@ again:
 		rl_t *rl = NULL;
 
 		if (tsd_get(rl_key) == NULL) {
-			ASSERT0(zp->z_range_locks);
+			// this is extremely often 1 : ASSERT0(zp->z_range_locks);
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
 			rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+			ASSERT3P(rl, ==, NULL); // we want to see how often this is non-null
 			tsd_set(rl_key, rl);
 		} else {
 			ASSERT3P(tsd_get(rl_key), !=, NULL); // bleat about this
