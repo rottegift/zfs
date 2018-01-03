@@ -463,6 +463,7 @@ zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type)
 			VERIFY(zfs_range_lock_reader(zp, new, B_FALSE));
 	} else
 		VERIFY(zfs_range_lock_writer(zp, new, B_FALSE)); /* RL_WRITER or RL_APPEND */
+	zp->z_range_locks++;
 	mutex_exit(&zp->z_range_lock);
 	return (new);
 }
@@ -526,6 +527,7 @@ zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type)
 	/* return appropriate result */
 
 	if (acquired_lock) {
+		zp->z_range_locks++;
 		return (new);
 	} else {
 		zfs_range_free(new);
@@ -610,6 +612,8 @@ zfs_range_unlock(rl_t *rl)
 	list_t free_list;
 	rl_t *free_rl;
 
+	ASSERT3S(zp->z_range_locks, >, 0);
+
 	ASSERT(rl->r_type == RL_WRITER || rl->r_type == RL_READER);
 	ASSERT(rl->r_cnt == 1 || rl->r_cnt == 0);
 	ASSERT(!rl->r_proxy);
@@ -641,6 +645,8 @@ zfs_range_unlock(rl_t *rl)
 	}
 
 	list_destroy(&free_list);
+
+	zp->z_range_locks--;
 }
 
 /*
@@ -652,6 +658,8 @@ void
 zfs_range_reduce(rl_t *rl, uint64_t off, uint64_t len)
 {
 	znode_t *zp = rl->r_zp;
+
+	ASSERT3S(zp->z_range_locks, >, 0);
 
 	/* Ensure there are no other locks */
 	ASSERT(avl_numnodes(&zp->z_range_avl) == 1);

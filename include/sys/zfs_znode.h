@@ -237,6 +237,7 @@ typedef struct znode {
 
 	_Atomic hrtime_t        z_mr_sync;      /* most recent sync */
 	_Atomic int8_t  z_no_fsync;             /* it is unsafe to fsync when this is true */
+	_Atomic int32_t z_range_locks;          /* how many range locks are on this zp? */
 
 	_Atomic int32_t z_in_pager_op;           /* Are we doing something that will hit
 						  * memory_object_lock_request ?
