@@ -1935,54 +1935,73 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 		if (VATTR_IS_ACTIVE(vap, va_data_size)) {
 			dprintf("ZFS: setattr new size %llx %llx\n", vap->va_size,
 					ubc_getsize(ap->a_vp));
-			/* take a lock when calling ubc_setsize, to avoid
-			 * interfering with an in-progress update_pages,
-			 * mappedread, pagein, pageoutv2, or other caller
-			 * of ubc_setsize/vnode_pager_setsize
+
+			/*
+			 * do we have a lock when changing ubcsize here?
+			 *
+			 * we should not deadlock by insisting on one if we
+			 * already inherit one in our thread, but it is worth
+			 * doing a speculative RL if we can
 			 */
 
-			znode_t *zp = VTOZ(ap->a_vp);
-			rl_t *rl;
-			int i = 0;
-			const hrtime_t start_time = gethrtime();
-			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 
-			for (i = 0; i < INT32_MAX; i++) {
-				ASSERT3P(tsd_get(rl_key), ==, NULL);
-				rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-				tsd_set(rl_key, rl);
-				if (i > 10000) {
-					printf("ZFS: %s:%d: DEADLOCK AVOIDANCE i=%d\n",
-					    __func__, __LINE__, i);
-				}
-				if (!rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
-					ASSERT3P(tsd_get(rl_key), ==, rl);
-					tsd_set(rl_key, NULL);
-					zfs_range_unlock(rl);
-					extern void IOSleep(unsigned milliseconds);
-					IOSleep(1);
+			znode_t *zp = VTOZ(ap->a_vp);
+			ASSERT3P(zp, !=, NULL);
+
+			rl_t *tsdrl = tsd_get(rl_key);
+			rl_t *rl = NULL;
+			znode_t *tsdzp = NULL;
+
+			if (zp && tsdrl != NULL) {
+				tsdzp = tsdrl->r_zp;
+			        if (tsdzp != zp) {
+					printf("ZFS: %s:%d bogus tsd rl type %d off %lld len %lld"
+					    " file %s curubcsize %lld curfilesize %lld"
+					    " argfilesize %lld ourfile %s\n",
+					    __func__, __LINE__, tsdrl->r_type,
+					    tsdrl->r_off, tsdrl->r_len,
+					    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null zp)",
+					    ubc_getsize(ap->a_vp),
+					    zp->z_size, vap->va_size, zp->z_name_cache);
 				} else {
-					need_release = B_TRUE;
-					zp->z_map_lock_holder = zp->z_name_cache;
-					break;
+					printf("ZFS: %s:%d: RL for our zp in tsd: type %d"
+					    " off %lld len %lld curubcsize %lld curfilesize %lld"
+					    " argfilesize %lld ourfile %s\n",
+					    __func__, __LINE__, tsdrl->r_type,
+					    tsdrl->r_off, tsdrl->r_len,
+					    ubc_getsize(ap->a_vp), zp->z_size, vap->va_size,
+					    zp->z_name_cache);
 				}
 			}
-			const hrtime_t end_time = gethrtime();
-			if (NSEC2MSEC(end_time - start_time) > 10) {
-				printf("ZFS: %s:%d: number of milliseconds looking for a lock %lld,"
-				    " iters %d\n", __func__, __LINE__,
-				    NSEC2MSEC(end_time - start_time), i);
+
+			if (zp && tsdzp != zp) {
+				rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_READER);
+				if (rl == NULL) {
+					printf("ZFS: %s:%d: failed to range lock file %s"
+					    " (z_map_lock held? %d)\n",
+					    __func__, __LINE__, zp->z_name_cache,
+					    rw_write_held(&zp->z_map_lock));
+				}
+				tsd_set(rl_key, rl);
 			}
-			if (spl_ubc_is_mapped(ZTOV(zp), NULL)) {
-				ASSERT3S(vap->va_size, >=, ubc_getsize(ZTOV(zp)));
+
+			if (spl_ubc_is_mapped(ap->a_vp, NULL)) {
+				ASSERT3S(vap->va_size, >=, ubc_getsize(ap->a_vp));
 			}
+
 			int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
-			VATTR_SET_SUPPORTED(vap, va_data_size);
-			ASSERT3P(tsd_get(rl_key), ==, rl);
-			tsd_set(rl_key, NULL);
-			zfs_range_unlock(rl);
 			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+
+			if (zp) { ASSERT3S(zp->z_size, ==, ubc_getsize(ap->a_vp)); }
+
+			if (rl != NULL) {
+				zfs_range_unlock(rl);
+			}
+
+			tsd_set(rl_key, tsdrl);
+
+			VATTR_SET_SUPPORTED(vap, va_data_size);
+
 		}
 		if (VATTR_IS_ACTIVE(vap, va_mode))
 			VATTR_SET_SUPPORTED(vap, va_mode);

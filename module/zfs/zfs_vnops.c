@@ -1291,8 +1291,8 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 				ASSERT3S(abortall, ==, KERN_SUCCESS);
 				*bytes_to_copy = resid;
 				return (0);
-#endif
 			}
+#endif
 		}
 		if (upl_dirty_page(pl, pg_index)) {
 			/*
