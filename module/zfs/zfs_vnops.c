@@ -1283,6 +1283,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			    __func__, __LINE__,
 			    pg_index, upl_num_pgs, resid, uio_resid(uio), *bytes_to_copy,
 			    upl_file_offset, upl_size, fsname, fname);
+#ifdef DO_SHORT_READ
 			if (resid < *bytes_to_copy) {
 				int umapretval = ubc_upl_unmap(upl);
 				ASSERT3S(umapretval, ==, KERN_SUCCESS);
@@ -1290,6 +1291,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 				ASSERT3S(abortall, ==, KERN_SUCCESS);
 				*bytes_to_copy = resid;
 				return (0);
+#endif
 			}
 		}
 		if (upl_dirty_page(pl, pg_index)) {
