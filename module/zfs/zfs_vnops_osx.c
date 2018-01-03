@@ -7184,7 +7184,7 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 		znode_t *tsdzp = tsdrl->r_zp;
 		printf("ZFS: %s:%d: anomalous TSD RL exists! tsd type %d tsd len %lld tsd range [%lld..%lld]"
 		    " our zp == tsd zp? %d, tsd zp == NULL? %d, tsd file %s,"
-		    " our file %s, clearing for our children",
+		    " our file %s, clearing for our children\n",
 		    __func__, __LINE__, tsdrl->r_type,
 		    tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
 		    zp == tsdzp, tsdzp == NULL,
