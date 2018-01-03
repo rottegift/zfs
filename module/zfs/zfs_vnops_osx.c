@@ -7162,10 +7162,28 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 		tsd_set(rl_key_vp_from_getvnode, vp);
 	} else {
 		rl_t *tsdrl = tsd_get(rl_key);
-		printf("ZFS: %s:%d: TSD RL exists! len %lld [%lld..%lld] file %s"
-		    " so will let pageoutv2_helper deal with this\n",
-		    __func__, __LINE__, tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
+		znode_t *tsdzp = tsdrl->r_zp;
+		printf("ZFS: %s:%d: TSD RL exists! tsd type %d tsd len %lld tsd range [%lld..%lld]"
+		    " our zp == tsd zp? %d, tsd zp == NULL? %d, tsd file %s,"
+		    " our file %s",
+		    __func__, __LINE__, tsdrl->r_type,
+		    tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
+		    zp == tsdzp, tsdzp == NULL,
+		    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null tsd zp)",
 		    zp->z_name_cache);
+		if (tsdzp != zp) {
+			rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+			if (rl != NULL) {
+				/* our zp is fresher, our range-lock is totaller */
+				printf("ZFS: %s:%d: replacing non-NULL tsdy with our RL for file %s\n",
+				    __func__, __LINE__, zp->z_name_cache);
+				tsd_set(rl_key, rl);
+				tsd_set(rl_key_vp_from_getvnode, vp);
+			} else {
+				printf("ZFS: %s:%d: no range lock, letting children deal with non-null RL TSD\n",
+				    __func__, __LINE__);
+			}
+		}
 	}
 
 	zp->z_no_fsync = B_TRUE;
