@@ -4232,7 +4232,7 @@ skip_lock_acquisition:
 			break;
 		} else {
 			if (upl_valid_page(pl, page_index)) {
-				printf("ZFS: %s:%d: page index %d (of %d) not dirty but"
+				dprintf("ZFS: %s:%d: page index %d (of %d) not dirty but"
 				    " valid, dismissing anyway XXX, [%lld..%lld] in"
 				    " filesize %lld fs %s file %s\n",
 				    __func__, __LINE__, page_index, pages_in_upl - 1,
@@ -4244,7 +4244,7 @@ skip_lock_acquisition:
 	}
 
 	if (upl_pages_dismissed == pages_in_upl) {
-		printf("ZFS: %s:%d: entire UPL absent (%d pages)"
+		dprintf("ZFS: %s:%d: entire UPL absent (%d pages)"
 		    " [%lld..%lld] filesize %lld fs %s file %s\n",
 		    __func__, __LINE__, upl_pages_dismissed,
 		    f_start_of_upl, f_end_of_upl, zp->z_size,
