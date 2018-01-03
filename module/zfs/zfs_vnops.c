@@ -2269,8 +2269,9 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			zfs_grow_blocksize(zp, newblksz, tx);
 
 		zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
+		ASSERT3S(tsd_get(rl_key), ==, rl);
 		if (tsd_get(rl_key) == NULL)
-			tsd_set(rl_key, rl));
+			tsd_set(rl_key, rl);
 
 		/*
 		 * uint64_t pre = zp->z_size;
@@ -3079,9 +3080,9 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 				    __func__, __LINE__, aligned_locked_off, aligned_target_len,
 				    zp->z_name_cache);
 				continue;
-			}
-			if (zp->z_size == locked_off)
+			} else if (zp->z_size == locked_off) {
 				break;
+			}
 			printf("ZFS: %s:%d: after append EOF @ %lld, after writer EOF @ %lld,"
 			    " giving up off %lld len %lld, retrying append lock file %s\n", __func__, __LINE__,
 			    locked_off, zp->z_size, aligned_locked_off, aligned_target_len,
