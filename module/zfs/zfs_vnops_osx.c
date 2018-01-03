@@ -3714,7 +3714,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			if (rlzp == NULL
 			    || tsdzp == NULL
 			    || (tsdvp != NULL && tsdvp != ap->a_vp)) {
-				printf("ZFS: %s:%d: TSD RL possibly not for this file, acquring locks\n",
+				dprintf("ZFS: %s:%d: TSD RL possibly not for this file, acquring locks\n",
 				    __func__, __LINE__);
 				drop_rl = B_FALSE;
 				ASSERT3P(rl, !=, NULL);
