@@ -1283,11 +1283,11 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			    __func__, __LINE__,
 			    pg_index, upl_num_pgs, resid, uio_resid(uio), *bytes_to_copy,
 			    upl_file_offset, upl_size, fsname, fname);
-			int umapretval = ubc_upl_unmap(upl);
-			ASSERT3S(umapretval, ==, KERN_SUCCESS);
-			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
-			ASSERT3S(abortall, ==, KERN_SUCCESS);
 			if (resid < *bytes_to_copy) {
+				int umapretval = ubc_upl_unmap(upl);
+				ASSERT3S(umapretval, ==, KERN_SUCCESS);
+				int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+				ASSERT3S(abortall, ==, KERN_SUCCESS);
 				*bytes_to_copy = resid;
 				return (0);
 			}
