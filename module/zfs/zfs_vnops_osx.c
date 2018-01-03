@@ -2004,6 +2004,8 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			if (zp) { ASSERT3S(zp->z_size, ==, ubc_getsize(ap->a_vp)); }
 
 			if (rl != NULL) {
+				ASSERT3P(tsd_get(rl_key), ==, rl);
+				tsd_set(rl_key, NULL);
 				zfs_range_unlock(rl);
 			}
 
@@ -2340,8 +2342,10 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	rl_t *rl = NULL;
 
 	rl = zfs_try_range_lock(zp, off, len, RL_READER);
-	if (rl)
+	if (rl) {
+		tsd_set(rl_key, rl);
 		need_rl_unlock = B_TRUE;
+	}
 
 	if (zp->z_in_pager_op > 0) {
 		printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
@@ -2368,17 +2372,28 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		if (tsd_get(rl_key) != NULL) {
 			rl_t *tsdrl = tsd_get(rl_key);
 			znode_t *tsdzp = tsdrl->r_zp;
-			printf("ZFS: %s:%d: recovered rl from TSD (type %d) (len %lld)[%lld..%lld],"
-			    " (write wanted? %d) (read wanted %d), (filesize %lld), fs %s, fn %s"
-			    " desired range (len %ld) [%lld..%lld] (rl held? %d)\n",
-			    __func__, __LINE__,
-			    tsdrl->r_type, tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
-			    tsdrl->r_write_wanted, tsdrl->r_read_wanted,
-			    (tsdzp != NULL) ? tsdzp->z_size : -1LL,
-			    fsname, fname,
-			    len, off, off + len, rl != NULL);
-			ASSERT3S(trunc_page_64(rl->r_off), <=, off);
-			ASSERT3S(trunc_page_64(rl->r_off)+ round_page_64(rl->r_len), >=, off + len);
+			if (tsdzp == zp) {
+				printf("ZFS: %s:%d: recovered rl from TSD (type %d) (len %lld)[%lld..%lld],"
+				    " (write wanted? %d) (read wanted? %d), (filesize %lld), fs %s, fn %s"
+				    " desired range (len %ld) [%lld..%lld] (rl held? %d)\n",
+				    __func__, __LINE__,
+				    tsdrl->r_type, tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
+				    tsdrl->r_write_wanted, tsdrl->r_read_wanted,
+				    (tsdzp != NULL) ? tsdzp->z_size : -1LL,
+				    fsname, fname,
+				    len, off, off + len, rl != NULL);
+				need_rl_unlock = B_FALSE;
+				/* are we a subrange ? */
+				ASSERT3S(trunc_page_64(rl->r_off), <=, off);
+				ASSERT3S(trunc_page_64(rl->r_off)+ round_page_64(rl->r_len), >=, off + len);
+			} else {
+				printf("ZFS: %s:%d: TSD RL has mismatched zp, waiting for zfs_range_lock"
+				    " off %lld len %ld fs %s fsname %s\n", __func__, __LINE__,
+				    off, len, fsname, fname);
+				rl = zfs_range_lock(zp, off, len, RL_READER);
+				tsd_set(rl_key, rl);
+				need_rl_unlock = B_TRUE;
+			}
 			if (!rl) {
 				need_rl_unlock = B_FALSE;
 			}
@@ -2386,6 +2401,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 			printf("ZFS: %s:%d: waiting for zfs_range_lock off %lld len %ld fs %s fname %s\n",
 			    __func__, __LINE__, off, len, fsname, fname);
 			rl = zfs_range_lock(zp, off, len, RL_READER);
+			tsd_set(rl_key, rl);
+			need_rl_unlock = B_TRUE;
 		}
 	}
 
@@ -2531,7 +2548,11 @@ norwlock:
 	    }
 
 	if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
-	if (need_rl_unlock) { ASSERT3P(tsd_get(rl_key), ==, NULL);  zfs_range_unlock(rl); }
+	if (need_rl_unlock) {
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
+		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+	}
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 	ZFS_EXIT(zfsvfs);
 	if (error) {
@@ -2740,16 +2761,27 @@ top:
 	if (take_rlock) {
 		if (tsd_get(rl_key) != NULL) {
 			ASSERT0(zp->z_in_pager_op);
-			rl = tsd_get(rl_key);
-			printf("ZFS: %s:%d: recovered rl from TSD (type %d)(len %lld)[%lld..%lld],"
-			    " (write wanted? %d)(read wanted? %d), (filesize %lld), fs %s, fn %s"
-			    " desired range (len %ld) [%lld..%lld]\n", __func__, __LINE__,
-			    rl->r_type, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
-			    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
-			    len, off, off + len);
-			ASSERT3S(trunc_page_64(rl->r_off), <=, off);
-			ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len), >=, off + len);
-			ASSERT(rw_write_held(&zp->z_map_lock));
+			rl_t *tsdrl = tsd_get(rl_key);
+			znode_t *tsdzp = tsdrl->r_zp;
+
+			if (tsdzp == zp) {
+				printf("ZFS: %s:%d: recovered rl from TSD (type %d)(len %lld)[%lld..%lld],"
+				    " (write wanted? %d)(read wanted? %d), (filesize %lld), fs %s, fn %s"
+				    " desired range (len %ld) [%lld..%lld]\n", __func__, __LINE__,
+				    rl->r_type, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
+				    rl->r_write_wanted, rl->r_read_wanted, zp->z_size, fsname, fname,
+				    len, off, off + len);
+				ASSERT3S(trunc_page_64(rl->r_off), <=, off);
+				ASSERT3S(trunc_page_64(rl->r_off) + round_page_64(rl->r_len), >=, off + len);
+				ASSERT(rw_write_held(&zp->z_map_lock));
+			} else {
+				printf("ZFS: %s:%d: stale TSD rl_key (zp is not us), getting rangelock\n", \
+				    __func__, __LINE__);
+				ASSERT0(zp->z_in_pager_op);
+				rl = zfs_range_lock(zp, off, len, RL_WRITER);
+				tsd_set(rl_key, rl);
+				clear_tsd = B_TRUE;
+			}
 		} else {
 			ASSERT0(zp->z_in_pager_op);
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
@@ -2791,6 +2823,10 @@ top:
 				if (clear_tsd) {
 					ASSERT3P(tsd_get(rl_key), ==, rl);
 					tsd_set(rl_key, NULL);
+				} else {
+					printf("ZFS: %s:%d zfs_range_unlock with clear_tsd not set?!\n",
+					    __func__, __LINE__); // bleat but
+					tsd_set(rl_key, NULL); // do it anyway
 				}
 				zfs_range_unlock(rl);
 				dec_z_in_pager_op(zp, fsname, fname);
@@ -2886,6 +2922,10 @@ out:
 		if (clear_tsd) {
 			ASSERT3P(tsd_get(rl_key), ==, rl);
 			tsd_set(rl_key, NULL);
+		} else {
+			printf("ZFS: %s:%d: zfs_range_unlock while clear_tsd is false?!\n",
+			    __func__, __LINE__); // bleat
+			tsd_set(rl_key, NULL); // but clear TSD anyway
 		}
 		zfs_range_unlock(rl);
 		rl = NULL;
@@ -3972,6 +4012,8 @@ acquire_locks:
 			secs = 1;
 		if ((rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER))
 		    && rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+			ASSERT3P(tsd_get(rl_key), ==, NULL);
+			tsd_set(rl_key, rl);
 			drop_rl = B_TRUE;
 			break;
 		}
@@ -4066,6 +4108,8 @@ acquire_locks:
 			    ctr, rl != NULL);
 			print_time = cur_time + SEC2NSEC(1);
 			if (rl) {
+				ASSERT3P(tsd_get(rl_key), ==, rl);
+				tsd_set(rl_key, NULL);
 				zfs_range_unlock(rl);
 				printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
 				    " (z_in_pager_op %d)\n",
@@ -7183,22 +7227,21 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 
 	if (tsdrl != NULL) {
 		tsdzp = tsdrl->r_zp;
-		printf("ZFS: %s:%d: anomalous TSD RL exists! tsd type %d tsd len %lld tsd range [%lld..%lld]"
-		    " our zp == tsd zp? %d, tsd zp == NULL? %d, tsd file %s,"
-		    " our file %s, clearing for our children\n",
-		    __func__, __LINE__, tsdrl->r_type,
-		    tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
-		    zp == tsdzp, tsdzp == NULL,
-		    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null tsd zp)",
-		    zp->z_name_cache);
+		if (tsdzp == zp) {
+			printf("ZFS: %s:%d: anomalous TSD RL exists! tsd type %d tsd len %lld tsd range [%lld..%lld]"
+			    " our zp == tsd zp? %d, tsd zp == NULL? %d, tsd file %s,"
+			    " our file %s, clearing for our children\n",
+			    __func__, __LINE__, tsdrl->r_type,
+			    tsdrl->r_len, tsdrl->r_off, tsdrl->r_off + tsdrl->r_len,
+			    zp == tsdzp, tsdzp == NULL,
+			    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null tsd zp)",
+			    zp->z_name_cache);
+		}
 		ASSERT3P(zp, !=, tsdzp);
 		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
-		ASSERT3P(tsd_get(rl_key_vp_from_getvnode), ==, vp);
+		ASSERT3P(tsd_get(rl_key_vp_from_getvnode), ==, NULL);
 		tsd_set(rl_key_zp_key_mismatch_key, zp);
 		tsd_set(rl_key_vp_from_getvnode, vp);
-	}
-
-	if (tsdzp != zp) {
 		tsd_set(rl_key, NULL);
 	}
 
@@ -7241,8 +7284,8 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 	zp->z_no_fsync = B_FALSE;
 
 	if (tsdrl) {
-		ASSERT3P(tsd_get(rl_key), !=, tsdrl);
-		tsd_set(rl_key, tsdrl);
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
+		tsd_set(rl_key, NULL);
 		ASSERT3P(tsd_get(rl_key_vp_from_getvnode), ==, vp);
 		tsd_set(rl_key_vp_from_getvnode, NULL);
 		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, zp);
