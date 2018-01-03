@@ -4164,7 +4164,7 @@ skip_lock_acquisition:
 	a_pl_offset = 0;
 
 	if (a_flags & UPL_MSYNC) {
-	  request_flags = UPL_UBC_MSYNC | UPL_KEEPCACHED;
+	  request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY | UPL_KEEPCACHED;
 		VNOPS_OSX_STAT_BUMP(pageoutv2_msync);
 	}
 	else {
@@ -4227,14 +4227,13 @@ skip_lock_acquisition:
 	int upl_pages_dismissed = 0;
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
-		if (upl_valid_page(pl, --page_index)) {
+		if (upl_dirty_page(pl, --page_index)) {
 			ASSERT(upl_page_present(pl, page_index));
 			break;
 		} else {
-			ASSERT0(upl_dirty_page(pl, page_index));
-			if (upl_page_present(pl, page_index)) {
-				printf("ZFS: %s:%d: page index %d (of %d) not valid but"
-				    " present, dismissing anyway XXX, [%lld..%lld] in"
+			if (upl_valid_page(pl, page_index)) {
+				printf("ZFS: %s:%d: page index %d (of %d) not dirty but"
+				    " valid, dismissing anyway XXX, [%lld..%lld] in"
 				    " filesize %lld fs %s file %s\n",
 				    __func__, __LINE__, page_index, pages_in_upl - 1,
 				    f_start_of_upl, f_end_of_upl, zp->z_size,
@@ -4255,9 +4254,9 @@ skip_lock_acquisition:
 			int umapret_err = ubc_upl_unmap(upl);
 			ASSERT3S(umapret_err, ==, KERN_SUCCESS);
 		}
-		int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
-		ASSERT3S(abortall, ==, KERN_SUCCESS);
-		error = abortall;
+		int commit_all = ubc_upl_commit(upl);
+		ASSERT3S(commit_all, ==, KERN_SUCCESS);
+		error = commit_all;
 		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		goto pageout_done;
@@ -4267,17 +4266,21 @@ skip_lock_acquisition:
 		ASSERT3S(lowest_page_dismissed, >, 0);
 		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
 		const int end_of_tail = ap->a_size;
-		/*
-		 * The abort can return 5 (KERN_FAILURE) without
-		 * apparent problem We are not outright obliged to abort
-		 * empty pages, and they are "donated" to the vm map, which
-		 * disposes of them at unmap time.
-		 */
 		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
 		    " [%lld..%lld] fs %s file %s\n",
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    f_start_of_upl, f_end_of_upl, fsname, fname);
+		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail,
+		    UPL_COMMIT_FREE_ON_EMPTY);
+		if (commit_tail != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: error %d committing tail of upl (%d..%d),"
+			    " (%d of %d pages dismissed, lowest page left %d),"
+			    " of [%lld..%lld] fs %s file %s\n",
+			    __func__, __LINE__, commit_tail, start_of_tail, end_of_tail,
+			    upl_pages_dismissed, pages_in_upl, lowest_page_dismissed,
+			    f_start_of_upl, f_end_of_upl, fsname, fname);
+		}
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
 
@@ -4369,7 +4372,7 @@ skip_lock_acquisition:
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
 			if (page_past_end_of_range > upl_end_pg) {
-				if (xxxbleat) printf("ZFS: %s:%d: as aborting last UPL page, unmapping"
+				if (xxxbleat) printf("ZFS: %s:%d: as have reached last UPL page, unmapping"
 				    " fs %s file %s (unmapped %d)\n",
 				    __func__, __LINE__, fsname, fname, mapped);
 				ASSERT3S(mapped, !=, B_FALSE);
