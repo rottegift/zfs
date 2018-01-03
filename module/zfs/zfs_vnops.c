@@ -1633,12 +1633,37 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 */
 	ASSERT3S(uio_resid(uio), >, 0);
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
+
+	if (tsd_get(rl_key) != NULL) {
+		rl_t *tsdrl = tsd_get(rl_key);
+		znode_t *tsdzp = tsdrl->r_zp;
+		printf("ZFS: %s:%d: anomalous non-NULL TSD, type %d,  tsdoff %lld tsdlen %lld,"
+		    " tsdzp == ourzp? %d tsdzp == NULL? %d tsdzp->z_name_cache %s,"
+		    " our uiooff %lld uioresid %lld file %s\n", __func__, __LINE__,
+		    tsdrl->r_type, tsdrl->r_off, tsdrl->r_len,
+		    tsdzp == zp, tsdzp == NULL,
+		    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null zp)",
+		    uio_offset(uio), uio_resid(uio), zp->z_name_cache);
+	}
 	/*
 	 * we have to overlock here to make sure that we aren't underlocked
 	 * in pageoutv2
 	 */
-	rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)),
+	rl = zfs_try_range_lock(zp, trunc_page_64(uio_offset(uio)),
 			    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_READER);
+
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	if (rl == NULL) {
+		printf("ZFS: %s:%d: waiting to read lock (aligned) off %lld, len %lld, fs %s file %s\n",
+		    __func__, __LINE__, trunc_page_64(uio_offset(uio)),
+		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), fsname, fname);
+
+		rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)),
+		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_READER);
+	}
+
 	tsd_set(rl_key, rl);
 
 	/*

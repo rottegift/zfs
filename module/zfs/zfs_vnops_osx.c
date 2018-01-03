@@ -3695,8 +3695,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			znode_t *rlzp = rl->r_zp;
 			VERIFY3P(rlzp, !=, NULL);
 			printf("ZFS: %s:%d: mismatch zp: TSD rl_key != zp"
-			    " (TSD vp == NULL? %d) (TSD vp == ap->a_vp? %d) "
-			    "(TSD mm zp == NULL? %d)"
+			    " (TSD vp == NULL? %d) (TSD vp == ap->a_vp? %d)"
+			    " (TSD mm zp == NULL? %d)"
 			    " (TSD mm zp == zp? %d) (RL zp == zp? %d), fnamezp %s fnametsdrlzp %s fnametsdmmzp %s\n",
 			    __func__, __LINE__,
 			    tsdvp == NULL,  tsdvp == ap->a_vp,
