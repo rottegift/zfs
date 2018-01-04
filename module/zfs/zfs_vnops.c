@@ -3084,18 +3084,40 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	/* Now grab range locks */
 
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
 	/* if we are appending, bump woff to the end of file */
 	if (ioflag & FAPPEND) {
 		const off_t old_woff = woff;
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		const off_t target_len = n;
+		const hrtime_t start_time = gethrtime();
+		const hrtime_t print_interval = SEC2NSEC(1);
+		hrtime_t print_at = start_time + print_interval;
 		for ( ; ; ) {
 			const off_t zsize_start = zp->z_size;
 			const off_t a_zsize_start = trunc_page_64(zsize_start);
 			const off_t a_zsize_diff = zsize_start - a_zsize_start;
 			const off_t a_target_len = round_page_64(target_len + a_zsize_diff);
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
-			rl = zfs_range_lock(zp, 0, a_target_len, RL_APPEND);
+			rl = zfs_try_range_lock(zp, 0, a_target_len, RL_APPEND);
+			if (rl == NULL) {
+				const hrtime_t now = gethrtime();
+				if (now > print_at) {
+					const uint32_t secs = NSEC2SEC(now - start_time);
+					rl_t *tsdrl = tsd_get(rl_key);
+					printf("ZFS: %s:%d: waiting %u seconds for APPEND range lock,"
+					    " target len %llu, fs %s file %s (tsdrl? %d tsdzp is us? %d)\n",
+					    __func__, __LINE__, secs, a_target_len, fsname, fname,
+					    tsdrl != NULL,
+					    (tsdrl != NULL) ? tsdrl->r_zp == zp : 0);
+					print_at = now + print_interval;
+				}
+				extern void IOSleep(unsigned milliseconds);
+				IOSleep(1);
+				continue;
+			}
 			tsd_set(rl_key, rl);
 			/* we might luckily have locked a correctly page-aligned range */
 			if (((rl->r_off & PAGE_MASK_64) == 0
