@@ -3795,8 +3795,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				rl = NULL;
 				goto acquire_locks;
 			}
-			printf("ZFS: %s:%d: continuing with TSD RL len %lld [%lld..%lld]\n",
-			    __func__, __LINE__, rl->r_len, rl->r_off, rl->r_off + rl->r_len);
+			printf("ZFS: %s:%d: continuing with TSD RL len %lld [%lld..%lld], fs %s, fn %s\n",
+			    __func__, __LINE__, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
+			    fsname, fname);
 		}
 		if (rl->r_off <= ap->a_f_offset &&
 			   rl->r_off + rl->r_len >= ap->a_f_offset + ap->a_size) {
@@ -4726,7 +4727,7 @@ skip_lock_acquisition:
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
 		ASSERT3P(rl, ==, tsd_get(rl_key));
-		if (rl != tsd_get(rl_key)) {
+		if (rl != tsd_get(rl_key) && tsd_get(rl_key) != NULL) {
 		    zfs_range_unlock(rl);
 		    rl = NULL;
 		} else {
@@ -4735,7 +4736,10 @@ skip_lock_acquisition:
 		}
 	}
 
-	ASSERT3S(zp->z_range_locks, ==, range_locks_at_entry);
+	if (zp->z_range_locks != range_locks_at_entry) {
+		printf("ZFS: %s:%d: range locks now %d range locks at entry %d, fs %s fname %s\n",
+		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname);
+	}
 
 	dec_z_in_pager_op(zp, fsname, fname);
 
@@ -4790,7 +4794,7 @@ pageout_done:
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
 		ASSERT3P(rl, ==, tsd_get(rl_key));
-		if (rl != tsd_get(rl_key)) {
+		if (rl != tsd_get(rl_key) && tsd_get(rl_key) != NULL) {
 			zfs_range_unlock(rl);
 			rl = NULL;
 		} else {
@@ -4799,7 +4803,11 @@ pageout_done:
 		}
 	}
 
-	ASSERT3S(zp->z_range_locks, ==, range_locks_at_entry);
+	if (zp->z_range_locks != range_locks_at_entry) {
+		printf("ZFS: %s:%d: range locks now %d range locks at entry %d, fs %s fname %s\n",
+		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname);
+	}
+
 
 	dec_z_in_pager_op(zp, fsname, fname);
 
