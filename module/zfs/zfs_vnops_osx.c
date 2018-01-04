@@ -2345,6 +2345,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	boolean_t need_rl_unlock = B_FALSE;
 	boolean_t need_z_lock = B_FALSE;
 	rl_t *rl = NULL;
+	const rl_t *tsd_rl_on_entry = tsd_get(rl_key);
 
 	rl = zfs_try_range_lock(zp, off, len, RL_READER);
 	if (rl) {
@@ -2548,8 +2549,9 @@ norwlock:
 
 	if (need_z_lock == B_TRUE) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
 	if (need_rl_unlock == B_TRUE) {
+		VERIFY3P(rl, !=, NULL);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
+		tsd_set(rl_key, (rl_t *)tsd_rl_on_entry);
 		if (rl)
 			zfs_range_unlock(rl);
 	}
