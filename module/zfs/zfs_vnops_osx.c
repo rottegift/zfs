@@ -3748,9 +3748,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * Check to see if we have a range lock
 	 */
 
-	boolean_t drop_rl = B_FALSE;
+	boolean_t drop_rl; // uninitialized so compiler tells us if we missed a corner
+	boolean_t subrange; // ditto
 	boolean_t xxxbleat = B_FALSE;
-	boolean_t subrange = B_FALSE;
 	const rl_t *tsd_rl_at_entry = tsd_get(rl_key);
 	const uint32_t range_locks_at_entry = zp->z_range_locks;
 
@@ -3763,6 +3763,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    " zp mismatch: our zp fname %s tsd zp fname %s\n",
 			    __func__, __LINE__, zp->z_name_cache,
 			    (rl->r_zp != NULL) ? rl->r_zp->z_name_cache : "(no r_zp)");
+			drop_rl = B_FALSE;
 		} else if (rl->r_zp != zp) {
 			znode_t *tsdzp = tsd_get(rl_key_zp_key_mismatch_key);
 			struct vnode *tsdvp = tsd_get(rl_key_vp_from_getvnode);
@@ -3785,20 +3786,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 * But if the ZP/VP is truly a different file from what
 			 * we found in the TSD, then we can lock the whole range.
 			 */
-			if (rlzp == NULL
-			    || tsdzp == NULL
-			    || (tsdvp != NULL && tsdvp != ap->a_vp)) {
-				dprintf("ZFS: %s:%d: TSD RL possibly not for this file, acquring locks\n",
-				    __func__, __LINE__);
-				drop_rl = B_FALSE;
-				ASSERT3P(rl, !=, NULL);
-				rl = NULL;
-				goto acquire_locks;
-			}
-			printf("ZFS: %s:%d: continuing with TSD RL len %lld [%lld..%lld], fs %s, fn %s\n",
-			    __func__, __LINE__, rl->r_len, rl->r_off, rl->r_off + rl->r_len,
-			    fsname, fname);
+			tsd_set(rl_key, NULL);
+			drop_rl = B_FALSE;
+			rl = NULL;
+			goto acquire_locks;
 		}
+		/* rl is set from tsd */
 		if (rl->r_off <= ap->a_f_offset &&
 			   rl->r_off + rl->r_len >= ap->a_f_offset + ap->a_size) {
 			/* subrange  [rloff](aprange)[rloff+rllen] */
@@ -3950,6 +3943,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		ASSERT(rw_write_held(&zp->z_map_lock));
 		/* let our caller drop the range_lock */
 		goto already_acquired_locks;
+	} else {
+		drop_rl = B_FALSE;
 	}
 
 
@@ -3960,6 +3955,13 @@ acquire_locks:
 	VERIFY3S(drop_rl, ==, B_FALSE);
 
 	rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER);
+
+	if (rl != NULL) {
+		drop_rl = B_TRUE;
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
+		tsd_set(rl_key, rl);
+	}
+
 
 	if (rl == NULL) {
 		if (had_map_lock_at_entry) {
@@ -4010,6 +4012,8 @@ acquire_locks:
 
 	EQUIV(rl != NULL, rw_write_held(&zp->z_map_lock));
 
+	EQUIV(rl != NULL, drop_rl == B_TRUE);
+
 	hrtime_t print_time = gethrtime() + SEC2NSEC(1);
 	int secs = 0;
 
@@ -4025,6 +4029,8 @@ acquire_locks:
 			break;
 		}
 		if (rl != NULL) {
+			ASSERT3P(tsd_get(rl_key), ==, NULL);
+			tsd_set(rl_key, rl);
 			drop_rl = B_TRUE;
 			/*
 			 * as we have the range lock we can now safely wait on the
@@ -4061,6 +4067,8 @@ acquire_locks:
 		if (secs > 1
 		    && (rl = zfs_try_range_lock(zp, rloff, rllen, RL_READER)) != NULL) {
 			/* zfs_read may possess locks, leaving us stuck here */
+			ASSERT3P(tsd_get(rl_key), ==, NULL);
+			tsd_set(rl_key, rl);
 			drop_rl = B_TRUE;
 			printf("ZFS: %s:%d: acquired RL_READER for off %lld len %lld file %s, continuing\n",
 			    __func__, __LINE__, rloff, rllen, zp->z_name_cache);
@@ -4239,15 +4247,15 @@ already_acquired_locks:
 
 skip_lock_acquisition:
 
-	EQUIV(drop_rl == B_TRUE, rl != NULL);
+	EQUIV(drop_rl == B_TRUE, (rl != NULL && subrange == B_FALSE));
 
-	if (drop_rl == B_FALSE && rl != NULL) {
-		printf("ZFS: %s:%d: drop_rl F rl NULL, fs %s file %s\n",
+	if (drop_rl == B_FALSE && rl != NULL && subrange == B_FALSE) {
+		printf("ZFS: %s:%d: drop_rl F rl !NULL, fs %s file %s\n",
 		    __func__, __LINE__, fsname, fname);
 	}
 	if (drop_rl != B_FALSE && rl == NULL) {
-		printf("ZFS: %s:%d: drop_rl T, rl !NULL, fs %s file %s\n",
-		    __func__, __LINE__, fsname, fname);
+		printf("ZFS: %s:%d: drop_rl T, rl !NULL, subrange %d, fs %s file %s\n",
+		    __func__, __LINE__, subrange, fsname, fname);
 	}
 
 	/*
@@ -4727,6 +4735,7 @@ skip_lock_acquisition:
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
 		ASSERT3P(rl, ==, tsd_get(rl_key));
+		ASSERT3S(subrange, !=, B_TRUE);
 		if (rl != tsd_get(rl_key) && tsd_get(rl_key) != NULL) {
 		    zfs_range_unlock(rl);
 		    rl = NULL;
@@ -4745,24 +4754,32 @@ skip_lock_acquisition:
 
 	if (a_flags & UPL_IOSYNC
 	    && error == 0
-	    && !vnode_isrecycled(vp)
-	    && tsd_rl_at_entry == NULL
-	    && !rw_write_held(&zp->z_map_lock)
-	    && drop_rl == B_TRUE
 	    && rl == NULL
-	    && tsd_get(rl_key) == NULL) {
+	    && tsd_rl_at_entry == NULL
+	    && subrange == B_FALSE
+	    && drop_rl == B_TRUE
+	    && (tsd_get(rl_key) == NULL
+		|| ((rl_t *)tsd_get(rl_key))->r_zp != zp)) {
+		/* don't zil commit unless we are very sure we won't deadlock in its range lock */
 		if (xxxbleat) printf("ZFS: %s:%d zil_commit file %s\n", __func__, __LINE__, zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync);
 	} else if (a_flags & UPL_IOSYNC) {
 		/* cut down on logspam a bit with these two ifs */
-		if (subrange == B_FALSE && drop_rl == B_TRUE && !rw_write_held(&zp->z_map_lock))
-			if (!vnode_isrecycled(vp))
-				printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
-				    " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d)"
-				    " (error %d) (recycled? %d)\n",
-				    __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
-				    rl == NULL, tsd_get(rl_key) == NULL, error, vnode_isrecycled(vp));
+		if (subrange == B_FALSE && drop_rl == B_TRUE) {
+			rl_t *tsdrl = tsd_get(rl_key);
+			znode_t *tsdzp = NULL;
+			if (tsdrl)
+				tsdzp = tsdrl->r_zp;
+			printf("ZFS: %s:%d: zil_commit skipped because range lock may be held for"
+			    " [%lld..%lld] fs %s file %s (rl == NULL? %d) (tsd rl == NULL? %d) "
+			    " (tsdzp == zp? %d)"
+			    " (error %d) (recycled? %d) (rw_write_held? %d)\n",
+			    __func__, __LINE__, f_start_of_upl, f_end_of_upl, fsname, fname,
+			    rl == NULL, tsdrl == NULL, tsdzp == zp,
+			    error, vnode_isrecycled(vp),
+			    rw_write_held(&zp->z_map_lock));
+		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_upl_iosync_skipped);
 	}
 
@@ -4793,6 +4810,7 @@ pageout_done:
 	if (drop_rl == B_TRUE) {
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
+		ASSERT3S(subrange, !=, B_TRUE);
 		ASSERT3P(rl, ==, tsd_get(rl_key));
 		if (rl != tsd_get(rl_key) && tsd_get(rl_key) != NULL) {
 			zfs_range_unlock(rl);
