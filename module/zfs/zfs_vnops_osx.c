@@ -4321,6 +4321,7 @@ skip_lock_acquisition:
 	 */
 
 	int upl_pages_dismissed = 0;
+	boolean_t dismissed_valid = B_FALSE;
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
 		if (upl_dirty_page(pl, --page_index)) {
@@ -4334,6 +4335,7 @@ skip_lock_acquisition:
 				    __func__, __LINE__, page_index, pages_in_upl - 1,
 				    f_start_of_upl, f_end_of_upl, zp->z_size,
 				    fsname, fname);
+				dismissed_valid = B_TRUE;
 			}
 			upl_pages_dismissed++;
 		}
@@ -4356,7 +4358,7 @@ skip_lock_acquisition:
 		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		goto pageout_done;
-	} else if (upl_pages_dismissed > 0) {
+	} else if (upl_pages_dismissed > 0 && dismissed_valid == B_TRUE) {
 		ASSERT3S(pages_in_upl, >, 1);
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 		ASSERT3S(lowest_page_dismissed, >, 0);
