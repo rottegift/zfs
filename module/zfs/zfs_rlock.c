@@ -184,7 +184,7 @@ wait:
 			return (B_FALSE);
 
 		printf("ZFS: %s:%d: (%s:%d) want lock"
-		    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
+		    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu]\n",
 		    __func__, __LINE__,
 		    new->r_caller, new->r_line,
 		    new->r_off, new->r_len,  zp->z_name_cache,
@@ -396,7 +396,7 @@ retry:
 			if (try)
 				return (B_FALSE);
 			printf("ZFS: %s:%d: (%s:%d) want lock"
-			    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
+			    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu]\n",
 			    __func__, __LINE__,
 			    new->r_caller, new->r_line,
 			    new->r_off, new->r_len, zp->z_name_cache,
@@ -427,7 +427,7 @@ retry:
 			if (try)
 				return (B_FALSE);
 			printf("ZFS: %s:%d: (%s:%d) want lock"
-			    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
+			    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu]\n",
 			    __func__, __LINE__,
 			    new->r_caller, new->r_line,
 			    new->r_off, new->r_len, zp->z_name_cache,
