@@ -1426,39 +1426,11 @@ again:
 		 * -> vnode_getwithvid() -> deadlock. Unsure why vnode_getwithvid()
 		 * ends up sleeping in msleep() but vnode_get() does not.
 		 */
-		rl_t *rl = NULL;
-
-		if (tsd_get(rl_key) == NULL) {
-			// this is extremely often 1 : ASSERT0(zp->z_range_locks);
-			ASSERT3P(tsd_get(rl_key), ==, NULL);
-			rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-			ASSERT3P(rl, ==, NULL); // we want to see how often this is non-null
-			tsd_set(rl_key, rl);
-		} else {
-			ASSERT3P(tsd_get(rl_key), !=, NULL); // bleat about this
-		}
-
-		if (!vp || (rl == NULL && tsd_get(rl_key) == NULL) || (err=vnode_getwithvid(vp, vid) != 0)) {
-			if (rl != NULL) {
-				if (tsd_get(rl_key) == rl)
-					tsd_set(rl_key, NULL);
-				ASSERT3P(tsd_get(rl_key), ==, NULL);
-				if (tsd_get(rl_key)) { ASSERT3P(tsd_get(rl_key), !=, rl); }
-				zfs_range_unlock(rl);
-				rl = NULL;
-			}
-			ASSERT3S(zp->z_no_fsync, ==, B_TRUE);
+		if (!vp || (err=vnode_getwithvid(vp, vid) != 0)) {
 			//if ((err = vnode_get(vp)) != 0) {
 			dprintf("ZFS: vnode_get() returned %d\n", err);
 			kpreempt(KPREEMPT_SYNC);
 			goto again;
-		}
-
-		if (rl != NULL) {
-			ASSERT3P(tsd_get(rl_key), ==, rl);
-			tsd_set(rl_key, NULL);
-			zfs_range_unlock(rl);
-			rl = NULL;
 		}
 
 		/*

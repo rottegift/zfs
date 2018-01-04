@@ -1662,9 +1662,10 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 	if (rl == NULL) {
-		printf("ZFS: %s:%d: waiting to read lock (aligned) off %lld, len %lld, fs %s file %s\n",
+		printf("ZFS: %s:%d: waiting to read lock (aligned) off %lld, len %lld, fs %s file %s"
+		    " (z_range_locks %d)\n",
 		    __func__, __LINE__, trunc_page_64(uio_offset(uio)),
-		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), fsname, fname);
+		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), fsname, fname, zp->z_range_locks);
 
 		rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)),
 		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_READER);
