@@ -184,11 +184,11 @@ wait:
 			return (B_FALSE);
 
 		printf("ZFS: %s:%d: (%s:%d) want lock"
-		    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu]\n",
+		    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu] (append? %d)\n",
 		    __func__, __LINE__,
 		    new->r_caller, new->r_line,
 		    new->r_off, new->r_len,  zp->z_name_cache,
-		    rl->r_caller, rl->r_line, rl->r_len, rl->r_off);
+		    rl->r_caller, rl->r_line, rl->r_len, rl->r_off, new->r_type == RL_APPEND);
 
 		cv_wait(&rl->r_wr_cv, &zp->z_range_lock);
 
