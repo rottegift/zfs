@@ -4023,6 +4023,7 @@ acquire_locks:
 			break;
 		}
 		if (rl != NULL) {
+			drop_rl = B_TRUE;
 			/*
 			 * as we have the range lock we can now safely wait on the
 			 * z_map_lock
@@ -4053,11 +4054,12 @@ acquire_locks:
 					goto skip_lock_acquisition;
 				}
 			}
-			drop_rl = B_TRUE;
 			break;
 		}
-		if (secs > 1 && (rl = zfs_try_range_lock(zp, rloff, rllen, RL_READER))) {
+		if (secs > 1
+		    && (rl = zfs_try_range_lock(zp, rloff, rllen, RL_READER)) != NULL) {
 			/* zfs_read may possess locks, leaving us stuck here */
+			drop_rl = B_TRUE;
 			printf("ZFS: %s:%d: acquired RL_READER for off %lld len %lld file %s, continuing\n",
 			    __func__, __LINE__, rloff, rllen, zp->z_name_cache);
 			if (!rw_write_held(&zp->z_map_lock)) {
@@ -4083,6 +4085,7 @@ acquire_locks:
 				printf("ZFS: %s:%d: proceeding to pageout WITHOUT LOCKS"
 				    " off %lld len %lld for file %s\n", __func__, __LINE__,
 				    rloff, rllen, zp->z_name_cache);
+				ASSERT3P(rl, ==, NULL);
 				drop_rl = B_FALSE;
 				need_release = B_FALSE;
 				goto skip_lock_acquisition;
@@ -4090,6 +4093,7 @@ acquire_locks:
 				printf("ZFS: %s:%d: couldn't get RL off %lld len %lld for file %s,"
 				    " but acquired z_map_lock, proceeding\n", __func__, __LINE__,
 				    rloff, rllen, zp->z_name_cache);
+				ASSERT3P(rl, ==, NULL);
 				drop_rl = B_FALSE;
 				need_release = B_TRUE;
 				zp->z_map_lock_holder = __func__;
@@ -4232,6 +4236,8 @@ already_acquired_locks:
 	int request_flags;
 
 skip_lock_acquisition:
+
+	EQUIV(drop_rl == B_TRUE, rl != NULL);
 
 	/*
 	 * we're in control of any UPL we commit
@@ -4709,6 +4715,7 @@ skip_lock_acquisition:
 	if (drop_rl == B_TRUE) {
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
+		ASSERT3P(rl, ==, tsd_get(rl_key));
 		if (rl != tsd_get(rl_key)) {
 		    zfs_range_unlock(rl);
 		    rl = NULL;
@@ -4766,8 +4773,10 @@ pageout_done:
 		ASSERT(!rw_write_held(&zp->z_map_lock));
 	}
 
-	if (drop_rl) {
+	if (drop_rl == B_TRUE) {
 		VERIFY3P(rl, !=, NULL);
+		VERIFY3P(rl, !=, tsd_rl_at_entry);
+		ASSERT3P(rl, ==, tsd_get(rl_key));
 		if (rl != tsd_get(rl_key)) {
 			zfs_range_unlock(rl);
 			rl = NULL;
@@ -4776,9 +4785,13 @@ pageout_done:
 			    " for file %s\n", __func__, __LINE__, rl == tsd_get(rl_key), zp->z_name_cache);
 		}
 	}
+
 	dec_z_in_pager_op(zp, fsname, fname);
 
 exit_abort:
+
+	// rl is uninitialized at this point, confirmed by compiler,
+	// so we can ignore it.
 
 	if (error) {
 		printf("ZFS: %s:%d pageoutv2 returning ERROR %d, [%lld..%lld] file %s filesystem %s\n",
@@ -4791,6 +4804,7 @@ exit_abort:
 		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 
 	}
+
 	//VERIFY(ubc_create_upl(vp, off, len, &upl, &pl, flags) == 0);
 	//ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 
