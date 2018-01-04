@@ -3752,6 +3752,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	boolean_t xxxbleat = B_FALSE;
 	boolean_t subrange = B_FALSE;
 	const rl_t *tsd_rl_at_entry = tsd_get(rl_key);
+	const uint32_t range_locks_at_entry = zp->z_range_locks;
 
 	if (tsd_get(rl_key) != NULL) {
 		off_t fsize = zp->z_size;
@@ -4239,6 +4240,15 @@ skip_lock_acquisition:
 
 	EQUIV(drop_rl == B_TRUE, rl != NULL);
 
+	if (drop_rl == B_FALSE && rl != NULL) {
+		printf("ZFS: %s:%d: drop_rl F rl NULL, fs %s file %s\n",
+		    __func__, __LINE__, fsname, fname);
+	}
+	if (drop_rl != B_FALSE && rl == NULL) {
+		printf("ZFS: %s:%d: drop_rl T, rl !NULL, fs %s file %s\n",
+		    __func__, __LINE__, fsname, fname);
+	}
+
 	/*
 	 * we're in control of any UPL we commit
 	 * make sure someone hasn't accidentally passed in UPL_NOCOMMIT
@@ -4724,6 +4734,9 @@ skip_lock_acquisition:
 			    __func__, __LINE__, rl == tsd_get(rl_key), zp->z_name_cache);
 		}
 	}
+
+	ASSERT3S(zp->z_range_locks, ==, range_locks_at_entry);
+
 	dec_z_in_pager_op(zp, fsname, fname);
 
 	if (a_flags & UPL_IOSYNC
@@ -4785,6 +4798,8 @@ pageout_done:
 			    " for file %s\n", __func__, __LINE__, rl == tsd_get(rl_key), zp->z_name_cache);
 		}
 	}
+
+	ASSERT3S(zp->z_range_locks, ==, range_locks_at_entry);
 
 	dec_z_in_pager_op(zp, fsname, fname);
 

@@ -2263,7 +2263,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 	/* extend the file if necessary */
 	off_t end = woff + start_resid;
 
-	ASSERT3S(tsd_get(rl_key), ==, rl);
+	ASSERT3P(tsd_get(rl_key), ==, rl);
 	if (rl->r_len == UINT64_MAX ||
 	    (end > zp->z_blksz &&
 		(!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz))) ||
@@ -2307,7 +2307,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			zfs_grow_blocksize(zp, newblksz, tx);
 
 		zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
-		ASSERT3S(tsd_get(rl_key), ==, rl);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
 		if (tsd_get(rl_key) == NULL)
 			tsd_set(rl_key, rl);
 
