@@ -97,6 +97,10 @@
 
 #include <sys/zfs_rlock.h>
 
+#undef zfs_range_lock
+#undef zfs_try_range_lock
+#undef zfs_range_unlock
+
 /*
  * Check if a write lock can be grabbed, or wait and recheck until available.
  */
@@ -175,6 +179,13 @@ wait:
 			cv_init(&rl->r_wr_cv, NULL, CV_DEFAULT, NULL);
 			rl->r_write_wanted = B_TRUE;
 		}
+
+		printf("ZFS: %s:%d: (%s:%d) want lock"
+		    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
+		    __func__, __LINE__,
+		    new->r_caller, new->r_line,
+		    new->r_off, new->r_len,  zp->z_name_cache,
+		    rl->r_caller, rl->r_line, rl->r_len, rl->r_off);
 
 		if (try == B_TRUE)
 			return (B_FALSE);
@@ -382,6 +393,12 @@ retry:
 				cv_init(&prev->r_rd_cv, NULL, CV_DEFAULT, NULL);
 				prev->r_read_wanted = B_TRUE;
 			}
+			printf("ZFS: %s:%d: (%s:%d) want lock"
+			    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
+			    __func__, __LINE__,
+			    new->r_caller, new->r_line,
+			    new->r_off, new->r_len, zp->z_name_cache,
+			    prev->r_caller, prev->r_line, prev->r_off, prev->r_len);
 			if (try)
 				return (B_FALSE);
 			cv_wait(&prev->r_rd_cv, &zp->z_range_lock);
@@ -407,6 +424,12 @@ retry:
 				cv_init(&next->r_rd_cv, NULL, CV_DEFAULT, NULL);
 				next->r_read_wanted = B_TRUE;
 			}
+			printf("ZFS: %s:%d: (%s:%d) want lock"
+			    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
+			    __func__, __LINE__,
+			    new->r_caller, new->r_line,
+			    new->r_off, new->r_len, zp->z_name_cache,
+			    next->r_caller, next->r_line, next->r_off, next->r_len);
 			if (try)
 				return (B_FALSE);
 			cv_wait(&next->r_rd_cv, &zp->z_range_lock);
@@ -434,7 +457,7 @@ got_lock:
  * previously locked as RL_WRITER).
  */
 rl_t *
-zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type)
+zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type, const char *caller, const uint32_t line)
 {
 	rl_t *new;
 
@@ -451,6 +474,8 @@ zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type)
 	new->r_proxy = B_FALSE;
 	new->r_write_wanted = B_FALSE;
 	new->r_read_wanted = B_FALSE;
+	new->r_caller = (char *)caller;
+	new->r_line = line;
 
 	mutex_enter(&zp->z_range_lock);
 	if (type == RL_READER) {
@@ -488,7 +513,7 @@ zfs_range_free(void *arg)
  * or NULL having destroyed acquired resources.
  */
 rl_t *
-zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type)
+zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type, const char *caller, const uint32_t line)
 {
 	rl_t *new;
 
@@ -507,6 +532,8 @@ zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type)
 	new->r_proxy = B_FALSE;
 	new->r_write_wanted = B_FALSE;
 	new->r_read_wanted = B_FALSE;
+	new->r_caller = (char *)caller;
+	new->r_line = line;
 
 	mutex_enter(&zp->z_range_lock);
 	if (type == RL_READER) {

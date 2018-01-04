@@ -53,7 +53,10 @@ typedef struct rl {
 	uint8_t r_write_wanted;	/* writer wants to lock this range */
 	uint8_t r_read_wanted;	/* reader wants to lock this range */
 	list_node_t rl_node;	/* used for deferred release */
+	uint32_t r_line;
+        char *r_caller;
 } rl_t;
+
 
 /*
  * Lock a range (offset, length) as either shared (RL_READER)
@@ -61,13 +64,13 @@ typedef struct rl {
  * is converted to RL_WRITER that specified to lock from the start of the
  * end of file.  Returns the range lock structure.
  */
-rl_t *zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type);
+rl_t *zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type, const char *f, const uint32_t l);
 
 /*
  * Same as above, but returns NULL rather than waiting, if the range cannot
  * be locked immediately.
  */
-rl_t *zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type);
+rl_t *zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type, const char *f, const uint32_t l);
 
 /* Unlock range and destroy range lock structure. */
 void zfs_range_unlock(rl_t *rl);
@@ -83,6 +86,9 @@ void zfs_range_reduce(rl_t *rl, uint64_t off, uint64_t len);
  * Locks are ordered on the start offset of the range.
  */
 int zfs_range_compare(const void *arg1, const void *arg2);
+
+#define zfs_range_lock(zz, oo, ll, tt) (zfs_range_lock)(zz, oo, ll, tt, __func__, __LINE__)
+#define zfs_try_range_lock(zz, oo, ll, tt) (zfs_try_range_lock)(zz, oo, ll, tt, __func__, __LINE__)
 
 #endif /* _KERNEL */
 
