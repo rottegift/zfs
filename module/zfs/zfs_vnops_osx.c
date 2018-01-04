@@ -3749,7 +3749,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 
 	boolean_t drop_rl; // uninitialized so compiler tells us if we missed a corner
-	boolean_t subrange; // ditto
+	boolean_t subrange = B_FALSE;
 	boolean_t xxxbleat = B_FALSE;
 	const rl_t *tsd_rl_at_entry = tsd_get(rl_key);
 	const uint32_t range_locks_at_entry = zp->z_range_locks;
@@ -3822,8 +3822,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			 */
 			dprintf("ZFS: %s:%d: subrange (page-aligned) success!", __func__, __LINE__);
 			ASSERT3P(rl, !=, NULL);
-			subrange = B_TRUE;
 			drop_rl = B_FALSE;
+			subrange = B_TRUE;
 		} else if (ap->a_f_offset + ap->a_size < rl->r_off
 		    && trunc_page_64(ap->a_f_offset) != trunc_page_64(rl->r_off)) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
@@ -4735,19 +4735,20 @@ skip_lock_acquisition:
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
 		ASSERT3P(rl, ==, tsd_get(rl_key));
-		ASSERT3S(subrange, !=, B_TRUE);
-		if (rl != tsd_get(rl_key) && tsd_get(rl_key) != NULL) {
-		    zfs_range_unlock(rl);
-		    rl = NULL;
-		} else {
-			printf("ZFS: %s:%d: not dropping rl since rl == tsd_get(rl_key)? %d for file %s\n",
-			    __func__, __LINE__, rl == tsd_get(rl_key), zp->z_name_cache);
-		}
+		ASSERT3S(subrange, ==, B_FALSE);
+		tsd_set(rl_key, (rl_t *)tsd_rl_at_entry);
+		zfs_range_unlock(rl);
+		rl = NULL;
 	}
 
 	if (zp->z_range_locks != range_locks_at_entry) {
-		printf("ZFS: %s:%d: range locks now %d range locks at entry %d, fs %s fname %s\n",
-		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname);
+		printf("ZFS: %s:%d: range locks now %d range locks at entry %d, fs %s fname %s"
+		    " (drop_rl? %d) (rl == NULL? %d)\n",
+		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname,
+		    drop_rl, rl == NULL);
+		if (rl != NULL && zp->z_range_locks > range_locks_at_entry) {
+			zfs_range_unlock(rl);
+		}
 	}
 
 	dec_z_in_pager_op(zp, fsname, fname);
@@ -4810,20 +4811,21 @@ pageout_done:
 	if (drop_rl == B_TRUE) {
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
-		ASSERT3S(subrange, !=, B_TRUE);
+		ASSERT3S(subrange, ==, B_FALSE);
 		ASSERT3P(rl, ==, tsd_get(rl_key));
-		if (rl != tsd_get(rl_key) && tsd_get(rl_key) != NULL) {
-			zfs_range_unlock(rl);
-			rl = NULL;
-		} else {
-			printf("ZFS: %s:%d pageout_done: not dropping rl since rl == rl_get(rl_key)? %d"
-			    " for file %s\n", __func__, __LINE__, rl == tsd_get(rl_key), zp->z_name_cache);
-		}
+		tsd_set(rl_key, (rl_t *)tsd_rl_at_entry);
+		zfs_range_unlock(rl);
+		rl = NULL;
 	}
 
 	if (zp->z_range_locks != range_locks_at_entry) {
-		printf("ZFS: %s:%d: range locks now %d range locks at entry %d, fs %s fname %s\n",
-		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname);
+		printf("ZFS: %s:%d: range locks now %d range locks at entry %d, fs %s fname %s"
+		    " (drop_rl? %d) (rl == NULL? %d)\n",
+		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname,
+		    drop_rl, rl == NULL);
+		if (rl != NULL && zp->z_range_locks > range_locks_at_entry) {
+			zfs_range_unlock(rl);
+		}
 	}
 
 
