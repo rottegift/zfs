@@ -3166,7 +3166,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			    zp->z_name_cache);
 			continue;
 		}
-		ASSERT3P(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, rl);
 		if (rl->r_off != 0 || rl->r_len != UINT64_MAX)
 			ASSERT3U(trunc_page_64(zp->z_size), ==, rl->r_off);
