@@ -2345,6 +2345,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	boolean_t need_rl_unlock;
 	boolean_t need_z_lock;
 	rl_t *rl = NULL;
+	const rl_t *tsd_rl_on_entry = tsd_get(rl_key);
 
 	rl = zfs_try_range_lock(zp, off, len, RL_READER);
 	if (rl) {
@@ -2360,9 +2361,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
 		    fsname, fname, flags & UPL_NOCOMMIT);
-		if (!rl) need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
-
 	} else if (rw_write_held(&zp->z_map_lock)) {
 		if (!rl) need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
@@ -2372,9 +2371,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		    ap->a_size, ap->a_pl_offset,
 		    fsname, fname, flags & UPL_NOCOMMIT);
 	} else {
-		need_rl_unlock = B_TRUE;
 		need_z_lock = B_TRUE;
-		if (tsd_get(rl_key) != NULL) {
+		if (!rl && tsd_get(rl_key) != NULL) {
 			rl_t *tsdrl = tsd_get(rl_key);
 			znode_t *tsdzp = tsdrl->r_zp;
 			if (tsdzp == zp) {
@@ -2387,7 +2385,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    (tsdzp != NULL) ? tsdzp->z_size : -1LL,
 				    fsname, fname,
 				    len, off, off + len, rl != NULL);
-				need_rl_unlock = B_FALSE;
 				/* are we a subrange ? */
 				ASSERT3S(trunc_page_64(rl->r_off), <=, off);
 				ASSERT3S(trunc_page_64(rl->r_off)+ round_page_64(rl->r_len), >=, off + len);
@@ -2398,9 +2395,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				rl = zfs_range_lock(zp, off, len, RL_READER);
 				tsd_set(rl_key, rl);
 				need_rl_unlock = B_TRUE;
-			}
-			if (!rl) {
-				need_rl_unlock = B_FALSE;
 			}
 		} else if (!rl) {
 			printf("ZFS: %s:%d: waiting for zfs_range_lock off %lld len %ld fs %s fname %s\n",
@@ -2554,8 +2548,8 @@ norwlock:
 
 	if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
 	if (need_rl_unlock) {
-		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		tsd_set(rl_key, NULL);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, (rl_t *)tsd_rl_on_entry);
 		zfs_range_unlock(rl);
 	}
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
