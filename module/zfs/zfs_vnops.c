@@ -1639,13 +1639,17 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	if (tsd_get(rl_key) != NULL) {
 		rl_t *tsdrl = tsd_get(rl_key);
 		znode_t *tsdzp = tsdrl->r_zp;
-		printf("ZFS: %s:%d: anomalous non-NULL TSD, type %d,  tsdoff %lld tsdlen %lld,"
-		    " tsdzp == ourzp? %d tsdzp == NULL? %d tsdzp->z_name_cache %s,"
-		    " our uiooff %lld uioresid %lld file %s\n", __func__, __LINE__,
-		    tsdrl->r_type, tsdrl->r_off, tsdrl->r_len,
-		    tsdzp == zp, tsdzp == NULL,
-		    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null zp)",
-		    uio_offset(uio), uio_resid(uio), zp->z_name_cache);
+		if (tsdzp == zp) {
+			printf("ZFS: %s:%d: anomalous non-NULL TSD for this zp, type %d,"
+			    " tsdoff %lld tsdlen %lld,"
+			    " tsdzp == ourzp? %d tsdzp == NULL? %d tsdzp->z_name_cache %s,"
+			    " our uiooff %lld uioresid %lld file %s\n", __func__, __LINE__,
+			    tsdrl->r_type, tsdrl->r_off, tsdrl->r_len,
+			    tsdzp == zp, tsdzp == NULL,
+			    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null zp)",
+			    uio_offset(uio), uio_resid(uio), zp->z_name_cache);
+			tsd_set(rl_key, NULL);
+		}
 	}
 	/*
 	 * we have to overlock here to make sure that we aren't underlocked
