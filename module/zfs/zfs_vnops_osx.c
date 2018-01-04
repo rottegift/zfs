@@ -2373,7 +2373,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 			rl_t *tsdrl = tsd_get(rl_key);
 			znode_t *tsdzp = tsdrl->r_zp;
 			if (tsdzp == zp) {
-				printf("ZFS: %s:%d: recovered rl from TSD (type %d) (len %lld)[%lld..%lld],"
+				dprintf("ZFS: %s:%d: recovered rl from TSD (type %d) (len %lld)[%lld..%lld],"
 				    " (write wanted? %d) (read wanted? %d), (filesize %lld), fs %s, fn %s"
 				    " desired range (len %ld) [%lld..%lld] (rl held? %d)\n",
 				    __func__, __LINE__,
@@ -2520,7 +2520,7 @@ norwlock:
 			} else if (need_rl_unlock == B_FALSE
 			    || need_z_lock == B_FALSE
 			    || zp->z_in_pager_op > 0) {
-				printf("ZFS: %s:%d: successfully committed (uploff %u sz %ld)"
+				dprintf("ZFS: %s:%d: successfully committed (uploff %u sz %ld)"
 				    " at [%lld..%lld] fs %s file %s (no locks case)\n",
 				    __func__, __LINE__, upl_offset, ap->a_size,
 				    off, off+ap->a_size, fsname, fname);
