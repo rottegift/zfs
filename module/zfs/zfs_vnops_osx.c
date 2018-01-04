@@ -2342,14 +2342,16 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	 * zfs_vnop_mnomap(), since those may update the file as well.
 	 */
 
-	boolean_t need_rl_unlock;
-	boolean_t need_z_lock;
+	boolean_t need_rl_unlock = B_FALSE;
+	boolean_t need_z_lock = B_FALSE;
 	rl_t *rl = NULL;
 
 	rl = zfs_try_range_lock(zp, off, len, RL_READER);
 	if (rl) {
 		tsd_set(rl_key, rl);
 		need_rl_unlock = B_TRUE;
+	} else {
+		need_rl_unlock = B_FALSE;
 	}
 
 	if (zp->z_in_pager_op > 0) {
@@ -2370,7 +2372,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		    ap->a_size, ap->a_pl_offset,
 		    fsname, fname, flags & UPL_NOCOMMIT);
 	} else {
-		need_z_lock = B_TRUE;
 		if (!rl && tsd_get(rl_key) != NULL) {
 			rl_t *tsdrl = tsd_get(rl_key);
 			znode_t *tsdzp = tsdrl->r_zp;
@@ -2545,11 +2546,12 @@ norwlock:
 		    error = EFAULT;
 	    }
 
-	if (need_z_lock) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
-	if (need_rl_unlock) {
+	if (need_z_lock == B_TRUE) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
+	if (need_rl_unlock == B_TRUE) {
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, NULL);
-		zfs_range_unlock(rl);
+		if (rl)
+			zfs_range_unlock(rl);
 	}
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 	ZFS_EXIT(zfsvfs);
@@ -3741,7 +3743,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * Check to see if we have a range lock
 	 */
 
-	boolean_t drop_rl; // uninitialized so compiler tells us if we missed a corner
+	boolean_t drop_rl = B_FALSE;
 	boolean_t subrange = B_FALSE;
 	boolean_t xxxbleat = B_FALSE;
 	const rl_t *tsd_rl_at_entry = tsd_get(rl_key);
