@@ -1936,82 +1936,87 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			dprintf("ZFS: setattr new size %llx %llx\n", vap->va_size,
 					ubc_getsize(ap->a_vp));
 
-			/*
-			 * do we have a lock when changing ubcsize here?
-			 *
-			 * we should not deadlock by insisting on one if we
-			 * already inherit one in our thread, but it is worth
-			 * doing a speculative RL if we can
-			 */
-
-
-			znode_t *zp = VTOZ(ap->a_vp);
-			ASSERT3P(zp, !=, NULL);
-
-			rl_t *tsdrl = tsd_get(rl_key);
-			rl_t *rl = NULL;
-			znode_t *tsdzp = NULL;
-
-			if (zp && tsdrl != NULL) {
-				tsdzp = tsdrl->r_zp;
-			        if (tsdzp != zp) {
-					printf("ZFS: %s:%d bogus tsd rl type %d off %lld len %lld"
-					    " file %s curubcsize %lld curfilesize %lld"
-					    " argfilesize %lld ourfile %s\n",
-					    __func__, __LINE__, tsdrl->r_type,
-					    tsdrl->r_off, tsdrl->r_len,
-					    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null zp)",
-					    ubc_getsize(ap->a_vp),
-					    zp->z_size, vap->va_size, zp->z_name_cache);
-				} else {
-					printf("ZFS: %s:%d: RL for our zp in tsd: type %d"
-					    " off %lld len %lld curubcsize %lld curfilesize %lld"
-					    " argfilesize %lld ourfile %s\n",
-					    __func__, __LINE__, tsdrl->r_type,
-					    tsdrl->r_off, tsdrl->r_len,
-					    ubc_getsize(ap->a_vp), zp->z_size, vap->va_size,
-					    zp->z_name_cache);
-				}
-			}
-
-			if (zp && tsdzp != zp) {
-				rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_READER);
-				if (rl == NULL) {
-					printf("ZFS: %s:%d: failed to range lock file %s"
-					    " (z_map_lock held? %d) (will wait now? %d)\n",
-					    __func__, __LINE__, zp->z_name_cache,
-					    rw_write_held(&zp->z_map_lock),
-					    vap->va_size < ubc_getsize(ap->a_vp));
-					if (vap->va_size < ubc_getsize(ap->a_vp)) {
-						/*
-						 * we do not want to just chop down a file
-						 * that someone is relying on, or to fall
-						 * into the black hole of a memory_object lock
-						 */
-						rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_READER);
-					}
-				}
-				tsd_set(rl_key, rl);
-			}
-
-			if (spl_ubc_is_mapped(ap->a_vp, NULL)) {
-				ASSERT3S(vap->va_size, >=, ubc_getsize(ap->a_vp));
-			}
-
-			int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
-			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
-
-			if (zp) { ASSERT3S(zp->z_size, ==, ubc_getsize(ap->a_vp)); }
-
-			if (rl != NULL) {
-				ASSERT3P(tsd_get(rl_key), ==, rl);
-				tsd_set(rl_key, NULL);
-				zfs_range_unlock(rl);
-			}
-
-			tsd_set(rl_key, tsdrl);
+			ASSERT3S(vap->va_size, ==, ubc_getsize(ap->a_vp));
 
 			VATTR_SET_SUPPORTED(vap, va_data_size);
+
+			if (vap->va_size != ubc_getsize(ap->a_vp)) {
+
+				/*
+				 * do we have a lock when changing ubcsize here?
+				 *
+				 * we should not deadlock by insisting on one if we
+				 * already inherit one in our thread, but it is worth
+				 * doing a speculative RL if we can
+				 */
+
+
+				znode_t *zp = VTOZ(ap->a_vp);
+				ASSERT3P(zp, !=, NULL);
+
+				rl_t *tsdrl = tsd_get(rl_key);
+				rl_t *rl = NULL;
+				znode_t *tsdzp = NULL;
+
+				if (zp && tsdrl != NULL) {
+					tsdzp = tsdrl->r_zp;
+					if (tsdzp != zp) {
+						printf("ZFS: %s:%d bogus tsd rl type %d off %lld len %lld"
+						    " file %s curubcsize %lld curfilesize %lld"
+						    " argfilesize %lld ourfile %s\n",
+						    __func__, __LINE__, tsdrl->r_type,
+						    tsdrl->r_off, tsdrl->r_len,
+						    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null zp)",
+						    ubc_getsize(ap->a_vp),
+						    zp->z_size, vap->va_size, zp->z_name_cache);
+					} else {
+						printf("ZFS: %s:%d: RL for our zp in tsd: type %d"
+						    " off %lld len %lld curubcsize %lld curfilesize %lld"
+						    " argfilesize %lld ourfile %s\n",
+						    __func__, __LINE__, tsdrl->r_type,
+						    tsdrl->r_off, tsdrl->r_len,
+						    ubc_getsize(ap->a_vp), zp->z_size, vap->va_size,
+						    zp->z_name_cache);
+					}
+				}
+
+				if (zp && tsdzp != zp) {
+					rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_READER);
+					if (rl == NULL) {
+						printf("ZFS: %s:%d: failed to range lock file %s"
+						    " (z_map_lock held? %d) (will wait now? %d)\n",
+						    __func__, __LINE__, zp->z_name_cache,
+						    rw_write_held(&zp->z_map_lock),
+						    vap->va_size < ubc_getsize(ap->a_vp));
+						if (vap->va_size < ubc_getsize(ap->a_vp)) {
+							/*
+							 * we do not want to just chop down a file
+							 * that someone is relying on, or to fall
+							 * into the black hole of a memory_object lock
+							 */
+							rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_READER);
+						}
+					}
+					tsd_set(rl_key, rl);
+				}
+
+				if (spl_ubc_is_mapped(ap->a_vp, NULL)) {
+					ASSERT3S(vap->va_size, >=, ubc_getsize(ap->a_vp));
+				}
+
+				int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
+				ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+
+				if (zp) { ASSERT3S(zp->z_size, ==, ubc_getsize(ap->a_vp)); }
+
+				if (rl != NULL) {
+					ASSERT3P(tsd_get(rl_key), ==, rl);
+					tsd_set(rl_key, NULL);
+					zfs_range_unlock(rl);
+				}
+
+				tsd_set(rl_key, tsdrl);
+			}
 
 		}
 		if (VATTR_IS_ACTIVE(vap, va_mode))

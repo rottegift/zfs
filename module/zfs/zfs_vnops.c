@@ -5689,9 +5689,9 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		if (rl != NULL) {
 			tsd_set(rl_key, rl);
 		} else {
-			printf("ZFS: %s:%d: unable to get range lock, skipping ubc_msync for file %s\n",
+			printf("ZFS: %s:%d: unable to get range lock, skipping fsync for file %s\n",
 			    __func__, __LINE__, zp->z_name_cache);
-			goto skip_ubc_msync;
+			goto zero;
 		}
 	} else {
 		rl_t *trl = tsd_get(rl_key);
@@ -5718,12 +5718,22 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 				goto zero;
                        }
 		} else {
-			printf("ZFS: %s:%d: TSD RL off %lld len %lld versus our RL off %lld len %lld,"
-			    "file %s, SKIPPING sync\n", __func__, __LINE__,
-			    trl->r_off, trl->r_len, 0LL, ubc_getsize(vp), zp->z_name_cache);
-
-			have_trl = B_TRUE;
-			do_zil_commit = B_FALSE;
+			if (trl->r_off == 0 && trl->r_len >= ubc_getsize(vp)) {
+				printf("ZFS: %s:%d: TSD RL off %lld len %lld too small"
+				    " versus our RL off %lld len %lld,"
+				    "file %s, SKIPPING zil_commit\n", __func__, __LINE__,
+				    trl->r_off, trl->r_len, 0LL, ubc_getsize(vp), zp->z_name_cache);
+				have_trl = B_TRUE;
+				do_zil_commit = B_FALSE;
+				have_trl = B_TRUE;
+			} else {
+				printf("ZFS: %s:%d: TSD RL off %lld len %lld overlaps"
+				    " our RL off %lld len %lld,"
+				    "file %s, but still skipping zil_commit\n", __func__, __LINE__,
+				    trl->r_off, trl->r_len, 0LL, ubc_getsize(vp), zp->z_name_cache);
+				do_zil_commit = B_FALSE;
+				have_trl = B_TRUE;
+			}
 		}
 	}
 
@@ -5751,8 +5761,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
-
-skip_ubc_msync:
 
 	if (do_zil_commit == B_TRUE && have_trl == B_FALSE) {
 		VNOPS_STAT_BUMP(zfs_fsync_zil_commit_reg_vn);
