@@ -2040,6 +2040,7 @@ zfs_write_sync_range(void *arg)
 	ASSERT3S(end_range - woff, >, woff);
 	ASSERT3S(range_lock, ==, B_TRUE);
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
+
 	rl_t *rl = zfs_range_lock(zp, trunc_page_64(woff),
 				  round_page_64(end_range - woff + PAGE_SIZE_64), RL_WRITER);
 	tsd_set(rl_key, rl);
@@ -2887,12 +2888,18 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 				zfs_panic_recover("cannot sync as kmem_zalloc returned NULL"
 				    " to %s:%d file %s\n",
 				    __func__, __LINE__, zp->z_name_cache);
-				goto skip_sync;
+				ASSERT3P(tsd_get(rl_key), ==, rl);
+				tsd_set(rl_key, NULL);
+				zfs_range_unlock(rl);
+				goto skip_sync_out;
 			} else {
 				printf("ZFS: %s:%d: kmem_zalloc returned NULL!"
 				    " could not push file %s\n",
 				    __func__, __LINE__, zp->z_name_cache);
-				goto skip_sync;
+				ASSERT3P(tsd_get(rl_key), ==, rl);
+				tsd_set(rl_key, NULL);
+				zfs_range_unlock(rl);
+				goto skip_sync_out;
 			}
 		}
 
@@ -2911,9 +2918,9 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, NULL);
 		zfs_range_unlock(rl);
+		rl = NULL;
 	}
 
-skip_sync:
 	if (is_safe) {
 		error = zfs_write_sync_range_helper(vp, woff, woff + sync_resid,
 		    sync_resid, do_sync, rl, need_release, need_upgrade);
@@ -2930,12 +2937,19 @@ skip_sync:
 				    woff, woff+sync_resid, zp->z_name_cache);
 			}
 		}
+		rl = NULL;
 	}
+
+skip_sync_out:
+
+	ASSERT3P(rl, ==, NULL);
+
 	/* zfs_write_sync_range_helper takes responsibility for the range lock and the z_map_lock */
 
 	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 
 	ZFS_EXIT(zfsvfs);
+
 	/*
 	 * strictly speaking, in the do_sync == TRUE case we
 	 * should not return here until the zfs_write_sync_range
