@@ -180,15 +180,15 @@ wait:
 			rl->r_write_wanted = B_TRUE;
 		}
 
+		if (try == B_TRUE)
+			return (B_FALSE);
+
 		printf("ZFS: %s:%d: (%s:%d) want lock"
 		    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
 		    __func__, __LINE__,
 		    new->r_caller, new->r_line,
 		    new->r_off, new->r_len,  zp->z_name_cache,
 		    rl->r_caller, rl->r_line, rl->r_len, rl->r_off);
-
-		if (try == B_TRUE)
-			return (B_FALSE);
 
 		cv_wait(&rl->r_wr_cv, &zp->z_range_lock);
 
@@ -393,14 +393,14 @@ retry:
 				cv_init(&prev->r_rd_cv, NULL, CV_DEFAULT, NULL);
 				prev->r_read_wanted = B_TRUE;
 			}
+			if (try)
+				return (B_FALSE);
 			printf("ZFS: %s:%d: (%s:%d) want lock"
 			    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
 			    __func__, __LINE__,
 			    new->r_caller, new->r_line,
 			    new->r_off, new->r_len, zp->z_name_cache,
 			    prev->r_caller, prev->r_line, prev->r_off, prev->r_len);
-			if (try)
-				return (B_FALSE);
 			cv_wait(&prev->r_rd_cv, &zp->z_range_lock);
 			goto retry;
 		}
@@ -424,14 +424,14 @@ retry:
 				cv_init(&next->r_rd_cv, NULL, CV_DEFAULT, NULL);
 				next->r_read_wanted = B_TRUE;
 			}
+			if (try)
+				return (B_FALSE);
 			printf("ZFS: %s:%d: (%s:%d) want lock"
 			    " off %lld len %lld file %s held by (%s:%d) [%lld, %lld]\n",
 			    __func__, __LINE__,
 			    new->r_caller, new->r_line,
 			    new->r_off, new->r_len, zp->z_name_cache,
 			    next->r_caller, next->r_line, next->r_off, next->r_len);
-			if (try)
-				return (B_FALSE);
 			cv_wait(&next->r_rd_cv, &zp->z_range_lock);
 			goto retry;
 		}
