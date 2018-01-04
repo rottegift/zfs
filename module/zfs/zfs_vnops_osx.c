@@ -4747,7 +4747,7 @@ skip_lock_acquisition:
 		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname,
 		    drop_rl, rl == NULL);
 		if (rl != NULL && zp->z_range_locks > range_locks_at_entry) {
-			zfs_range_unlock(rl);
+			//zfs_range_unlock(rl);
 		}
 	}
 
@@ -4824,10 +4824,9 @@ pageout_done:
 		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname,
 		    drop_rl, rl == NULL);
 		if (rl != NULL && zp->z_range_locks > range_locks_at_entry) {
-			zfs_range_unlock(rl);
+			//zfs_range_unlock(rl);
 		}
 	}
-
 
 	dec_z_in_pager_op(zp, fsname, fname);
 
