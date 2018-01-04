@@ -7222,8 +7222,6 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 
 	/* So pageout can know if it is called recursively, add this thread to list*/
 
-	ASSERT0(zp->z_range_locks);
-
 	rl_t *tsdrl = tsd_get(rl_key);
 	znode_t *tsdzp = NULL;
 
@@ -7252,8 +7250,6 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 		kpreempt(KPREEMPT_SYNC);
 	}
 	atomic_inc_64(&vnop_num_vnodes);
-
-	ASSERT0(zp->z_range_locks);
 
 	dprintf("Assigned zp %p with vp %p\n", zp, vp);
 
