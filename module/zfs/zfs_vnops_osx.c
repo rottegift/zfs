@@ -2364,6 +2364,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		    ap->a_size, ap->a_pl_offset,
 		    fsname, fname, flags & UPL_NOCOMMIT);
 		need_z_lock = B_FALSE;
+		goto norwlock;
 	} else if (rw_write_held(&zp->z_map_lock)) {
 		if (!rl) need_rl_unlock = B_FALSE;
 		need_z_lock = B_FALSE;
@@ -2372,6 +2373,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
 		    fsname, fname, flags & UPL_NOCOMMIT);
+		goto norwlock;
 	} else {
 		if (!rl && tsd_get(rl_key) != NULL) {
 			rl_t *tsdrl = tsd_get(rl_key);
@@ -2408,7 +2410,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
-	if (need_z_lock) {
+	if (need_z_lock == B_TRUE) {
 		hrtime_t print_time = gethrtime() + SEC2NSEC(1);
 		int secs = 0;
 		extern void IOSleep(unsigned milliseconds); // yields thread
