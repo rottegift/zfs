@@ -250,6 +250,19 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			cv_broadcast(&zp->z_ubc_msync_cv);
 			return (VNODE_CLAIMED);
 		}
+		if (zp->z_mr_sync == 0) {
+			printf("ZFS: %s:%d: unwilling to be the first ubc_msync on file %s (waitfor %d)\n",
+			    __func__, __LINE__, zp->z_name_cache, waitfor);
+			return (VNODE_CLAIMED);
+		}
+		if (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1) > gethrtime()) {
+			const hrtime_t diff = gethrtime() - (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1));
+			const uint32_t secs = NSEC2SEC(diff);
+			printf("ZFS: %s:%d: zfs_ubc_msync returned for file %s only %u seconds ago,"
+			    " so unwilling to sync right now, wait until next txg or so (waitfor? %d)\n",
+			    __func__, __LINE__, zp->z_name_cache, secs, waitfor);
+			return (VNODE_CLAIMED);
+		}
 		ZFS_ENTER_NOERROR(zfsvfs);
 		ASSERT3P(zp->z_sa_hdl, !=, NULL);
 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
