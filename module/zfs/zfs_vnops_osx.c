@@ -2004,7 +2004,14 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 					ASSERT3S(vap->va_size, >=, ubc_getsize(ap->a_vp));
 				}
 
+				boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+				uint64_t tries = z_map_rw_lock(zp, &need_release,
+				    &need_upgrade, __func__, __LINE__);
+
 				int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
+
+				z_map_drop_lock(zp, &need_release, &need_upgrade);
+				ASSERT3S(tries, <=, 2);
 				ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 
 				if (zp) { ASSERT3S(zp->z_size, ==, ubc_getsize(ap->a_vp)); }
