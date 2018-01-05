@@ -354,6 +354,8 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 		atomic_inc_32(&zp->z_sync_cnt);
 	}
 
+	ASSERT3S(zp->z_size, ==, ubc_getsize(*vpp));
+
 	ZFS_EXIT(zfsvfs);
 	return (0);
 }
@@ -1226,6 +1228,8 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 
 	upl_t upl = NULL;
 	upl_page_info_t *pl = NULL;
+
+	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 
 	const hrtime_t t_start = gethrtime();
 

@@ -7345,6 +7345,8 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 
 	zp->z_no_fsync = B_FALSE;
 
+	ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
+
 	if (tsdrl) {
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		tsd_set(rl_key, NULL);
