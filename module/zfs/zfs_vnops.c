@@ -1230,6 +1230,15 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	upl_page_info_t *pl = NULL;
 
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
+	if (zp->z_size > ubc_getsize(vp)) {
+		printf("ZFS: %s:%d: boosting ubc size %lld to znode size %lld fs %s file %s\n",
+		    __func__, __LINE__, ubc_getsize(vp), zp->z_size, fsname, fname);
+		int setsize_retval = ubc_setsize(vp, zp->z_size);
+		if (setsize_retval == 0) { // ubc_setsize returns TRUE on success
+			printf("ZFS: %s:%d: ubc_setsize(vp, %lld) failed for fs %s file %s\n",
+			    __func__, __LINE__, zp->z_size, fsname, fname);
+		}
+	}
 
 	const hrtime_t t_start = gethrtime();
 
