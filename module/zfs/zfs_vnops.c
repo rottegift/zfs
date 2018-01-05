@@ -5640,11 +5640,9 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 /* otherwise proceed to try to sync */
 
-
 	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED) {
 		VNOPS_STAT_BUMP(zfs_fsync_disabled);
-		ZFS_EXIT(zfsvfs);
-		return (0);
+		goto zero;
 	}
 
 	if (vfs_isrdonly(zfsvfs->z_vfs) ||
@@ -5665,8 +5663,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		dprintf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
 		    zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
-		ZFS_EXIT(zfsvfs);
-		return (0);
+		goto zero;
 	}
 
 	/*
@@ -5680,17 +5677,16 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	    || zp->z_in_pager_op > 0
 	    || zp->z_syncer_active != NULL) {
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
-		VNOPS_STAT_BUMP(zfs_fsync_skipped);
-		ZFS_EXIT(zfsvfs);
-		return (0);
+		goto zero;
 	}
 
 	if (spl_ubc_is_mapped(vp, NULL) && is_file_clean(vp, ubc_getsize(vp))) {
-		printf("ZFS: %s:%d: fsync called on mapped file (writable? %d) (dirty? %d)"
+		printf("ZFS: %s:%d: skipping fsync called on mapped file (writable? %d) (dirty? %d)"
 		    " (size %lld) %s\n",
 		    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
 		    is_file_clean(vp, ubc_getsize(vp)),
 		    zp->z_size, zp->z_name_cache);
+		goto zero;
 	}
 
 	boolean_t do_zil_commit = B_FALSE;
@@ -5805,6 +5801,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
         return (retval);
 
 zero:
+	ZFS_EXIT(zfsvfs);
 	VNOPS_STAT_BUMP(zfs_fsync_skipped);
 	return (0);
 }
