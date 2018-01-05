@@ -7346,15 +7346,17 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 	zp->z_no_fsync = B_FALSE;
 
 	if (vnode_isreg(vp)) {
+		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+
 		if (ubc_getsize(vp) != 0 && ubc_getsize(vp) != zp->z_size) {
 			printf("ZFS: %s:%d: ubc_getsize %lld zp->z_size %lld file %s\n",
 			    __func__, __LINE__, ubc_getsize(vp),
 			    zp->z_size, zp->z_name_cache);
 		}
 
-		if (ubc_getsize(vp) != zp->z_size) {
+		if (ubc_getsize(vp) < zp->z_size) {
 			int set_initial_size_retval = ubc_setsize(vp, zp->z_size);
-
 			if (set_initial_size_retval == 0) {
 				// ubc_setsize returns TRUE on success, 0 on failure
 				printf("ZFS: %s:%d: unable to do initial"
@@ -7362,6 +7364,8 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 				    __func__, __LINE__, zp->z_size, zp->z_name_cache);
 			}
 		}
+		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		ASSERT3S(tries, <=, 2);
 	}
 
 	if (tsdrl) {
