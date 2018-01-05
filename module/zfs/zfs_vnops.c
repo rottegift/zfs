@@ -354,7 +354,7 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 		atomic_inc_32(&zp->z_sync_cnt);
 	}
 
-	ASSERT3S(zp->z_size, ==, ubc_getsize(*vpp));
+	if (vnode_isreg(*vpp)) { ASSERT3S(zp->z_size, ==, ubc_getsize(*vpp)); }
 
 	ZFS_EXIT(zfsvfs);
 	return (0);
