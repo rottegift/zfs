@@ -244,9 +244,9 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    zp->z_in_pager_op, zp->z_name_cache);
 			return (VNODE_CLAIMED);
 		}
-		if (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
-			printf("ZFS: %s:%d: another thread has z_syncer_active for file %s\n",
-			    __func__, __LINE__, zp->z_name_cache);
+		if (zp->z_syncer_active != NULL) {
+			printf("ZFS: %s:%d: a thread has z_syncer_active for file %s (us? %d)\n",
+			    __func__, __LINE__, zp->z_name_cache, zp->z_syncer_active == curthread);
 			cv_broadcast(&zp->z_ubc_msync_cv);
 			return (VNODE_CLAIMED);
 		}
@@ -289,7 +289,20 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		tsd_set(rl_key, rl);
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+		if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+			need_release = B_TRUE;
+			zp->z_map_lock_holder = __func__;
+		} else {
+			printf("ZFS: %s:%d: could not get z_map_lock (holder %s) for file %s\n",
+			    __func__, __LINE__,
+			    (zp->z_map_lock_holder != NULL) ? zp->z_map_lock_holder : "(null holder)",
+			    zp->z_name_cache);
+			ZFS_EXIT(zfsvfs);
+			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rl);
+			return (VNODE_CLAIMED);
+		}
+
 		/* do the msync */
 		int msync_retval = 0;
 		if (zp->z_in_pager_op == 0) {
@@ -298,11 +311,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		} else {
 			claim = B_TRUE;
 		}
+
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		tsd_set(rl_key, NULL);
 		zfs_range_unlock(rl);
-		ASSERT3S(tries, <=, 2);
 		/* error checking, unlocking, and returning */
 		if (msync_retval != 0 &&
 		    !(msync_retval == EINVAL && resid_off == ubcsize)) {
