@@ -195,7 +195,7 @@ int
 zfs_vfs_umcallback(vnode_t *vp, void * arg)
 {
 	int *waitfor_arg = arg;
-	int waitfor = (*waitfor_arg & MNT_WAIT) == MNT_WAIT;
+	int waitfor = (*waitfor_arg & (MNT_WAIT | MNT_DWAIT)) != 0;
 	int err = 0;
 	boolean_t disclaim = B_FALSE;
 	int disclaim_err = 0;
@@ -235,8 +235,9 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		if (vnode_isinuse(vp, 0)) {
 			if (waitfor)
-				printf("ZFS: %s:%d WAITFOR when vnode_isinuse(vp, 0) for file %s\n",
-				    __func__, __LINE__, zp->z_name_cache);
+				printf("ZFS: %s:%d WAITFOR when vnode_isinuse(vp, 0) for file %s"
+				    " waitfor_arg %d\n",
+				    __func__, __LINE__, zp->z_name_cache, *waitfor_arg);
 			return (VNODE_CLAIMED);
 		}
 		if (zp->z_in_pager_op > 0) {
@@ -250,11 +251,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			cv_broadcast(&zp->z_ubc_msync_cv);
 			return (VNODE_CLAIMED);
 		}
-		if (zp->z_mr_sync == 0) {
-			printf("ZFS: %s:%d: unwilling to be the first ubc_msync on file %s (waitfor %d)\n",
-			    __func__, __LINE__, zp->z_name_cache, waitfor);
-			return (VNODE_CLAIMED);
-		}
 		if (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1) > gethrtime()) {
 			const hrtime_t diff = gethrtime() - (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1));
 			const uint32_t secs = NSEC2SEC(diff);
@@ -262,6 +258,15 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    " so unwilling to sync right now, wait until next txg or so (waitfor? %d)\n",
 			    __func__, __LINE__, zp->z_name_cache, secs, waitfor);
 			return (VNODE_CLAIMED);
+		}
+		if (zp->z_mr_sync == 0) {
+			printf("ZFS: %s:%d: unwilling to be the first ubc_msync on file %s"
+			    " (waitfor %d, waitfor arg %d)\n",
+			    __func__, __LINE__, zp->z_name_cache, waitfor, *waitfor_arg);
+			if (waitfor)
+				return (VNODE_CLAIMED);
+			else
+				return (VNODE_RETURNED);
 		}
 		ZFS_ENTER_NOERROR(zfsvfs);
 		ASSERT3P(zp->z_sa_hdl, !=, NULL);
@@ -415,7 +420,7 @@ zfs_vfs_sync(struct mount *vfsp, int waitfor, __unused vfs_context_t context)
 	int vnode_iter_ret = vnode_iterate(vfsp, VNODE_ALWAYS | VNODE_DRAINO, zfs_vfs_umcallback, &waitfor);
 	ASSERT0(vnode_iter_ret);
 
-        if (zfsvfs->z_log != NULL)
+        if (zfsvfs->z_log != NULL && (waitfor & MNT_WAIT))
             zil_commit(zfsvfs->z_log, 0);
 
         ZFS_EXIT(zfsvfs);
