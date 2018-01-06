@@ -1981,6 +1981,9 @@ zfs_write_sync_range_helper(vnode_t *vp, const off_t woff, const off_t end_range
 	error = zfs_ubc_msync(zp, rl, woff, end_range, &msync_resid, msync_flags);
 #endif
 
+	if (!error)
+	  zp->z_mr_sync = gethrtime();
+
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	ASSERT3P(tsd_get(rl_key), ==, rl);
