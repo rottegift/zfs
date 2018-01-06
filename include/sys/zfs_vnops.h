@@ -195,6 +195,7 @@ extern int    zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t
 extern int    zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 				offset_t off, size_t size, int flags, boolean_t take_rlock,
 				boolean_t inactivate, boolean_t clear_flags);
+extern int    zfs_vnop_pageoutv2(struct vnop_pageout_args *ap);
 
 extern int    zfs_znode_getvnode( znode_t *zp, zfsvfs_t *zfsvfs);
 

@@ -1933,8 +1933,8 @@ typedef struct sync_range {
 } sync_range_t;
 
 static int
-zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
-    size_t start_resid, boolean_t do_sync,
+zfs_write_sync_range_helper(vnode_t *vp, const off_t woff, const off_t end_range,
+    const size_t start_resid, const boolean_t do_sync,
     rl_t *rl, boolean_t need_release, boolean_t need_upgrade)
 {
 	znode_t  *zp = VTOZ(vp);
@@ -1949,6 +1949,24 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	 */
 	ASSERT(rw_write_held(&zp->z_map_lock));
 
+	struct vnop_pageout_args ap = {
+		.a_vp = vp,
+		.a_pl = NULL,
+		.a_pl_offset = 0,
+		.a_f_offset = trunc_page_64(woff),
+		.a_size = round_page_64(end_range) - trunc_page_64(woff),
+		.a_flags = UPL_MSYNC,
+		.a_context = NULL,
+	};
+
+	if (do_sync)
+		ap.a_flags |= UPL_IOSYNC;
+
+	ASSERT3U(ap.a_size, <=, MAX_UPL_SIZE_BYTES);
+
+	error = zfs_vnop_pageoutv2(&ap);
+
+#if 0
 	off_t ubcsize = ubc_getsize(vp);
 	off_t msync_resid = 0;
 
@@ -1961,6 +1979,7 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	}
 
 	error = zfs_ubc_msync(zp, rl, woff, end_range, &msync_resid, msync_flags);
+#endif
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
@@ -1968,6 +1987,7 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 	tsd_set(rl_key, NULL);
 	zfs_range_unlock(rl);
 
+#if 0
 	if (error != 0) {
 		printf("ZFS: %s:%d: ubc_msync error %d msync_resid %lld"
 		    " woff %lld start_resid %ld end_range %lld"
@@ -1977,6 +1997,20 @@ zfs_write_sync_range_helper(vnode_t *vp, off_t woff, off_t end_range,
 		    ubcsize, msync_flags, zp->z_name_cache);
 	} else if (do_sync) {
 	  zil_commit(zfsvfs->z_log, zp->z_id);
+	}
+#endif
+
+	if (error != 0) {
+		printf("ZFS: %s:%d: zfs_vnop_pageoutv2 error %d"
+		    " woff %lld end_range %lld"
+		    " called with a_f_offset %lld and a_size %ld flags %d"
+		    " file %s\n", __func__, __LINE__, error,
+		    woff, end_range,
+		    trunc_page_64(woff),
+		    (size_t)(round_page_64(end_range) - trunc_page_64(woff)),
+		    ap.a_flags, zp->z_name_cache);
+	} else if (do_sync) {
+		zil_commit(zfsvfs->z_log, zp->z_id);
 	}
 
 	ZFS_EXIT(zfsvfs);
