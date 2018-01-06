@@ -692,7 +692,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	int err = 0;
 
-	int upl_flags = UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT | UPL_SET_INTERRUPTIBLE;
+	int upl_flags = UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT;
 
 	boolean_t unset_syncer = B_FALSE;
 
@@ -905,7 +905,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags = UPL_FILE_IO | UPL_SET_LITE | UPL_SET_INTERRUPTIBLE;
+		int uplcflags = UPL_FILE_IO | UPL_SET_LITE;
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
@@ -1249,7 +1249,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	const hrtime_t t_start = gethrtime();
 
 	kern_return_t uplret = ubc_create_upl(vp, upl_file_offset, upl_size, &upl, &pl,
-	    UPL_SET_LITE | UPL_COPYOUT_FROM | UPL_SET_INTERRUPTIBLE); // UPL_NOBLOCK?
+	    UPL_SET_LITE | UPL_COPYOUT_FROM); // UPL_NOBLOCK?
 
 	const hrtime_t dt_after_upl = gethrtime() - t_start;
 
@@ -2426,7 +2426,7 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	 */
 	upl_t mupl = NULL;
 	kern_return_t muplret = ubc_create_upl(vp, upl_f_off, PAGE_SIZE, &mupl, NULL,
-	    UPL_WILL_MODIFY | UPL_SET_INTERRUPTIBLE);
+	    UPL_WILL_MODIFY);
 	ASSERT3S(muplret, ==, KERN_SUCCESS);
 	if (muplret != KERN_SUCCESS) {
 		printf("ZFS: %s:%d: failed to create UPL error %d! foff %lld file %s\n",
