@@ -5293,6 +5293,24 @@ zfs_vnop_allocate(struct vnop_allocate_args *ap)
 	};
 #endif
 {
+#if 1
+	/*
+	 * zfs_freesp calls zfs_extend calls ubc_setsize (and in master, it
+	 * calls vnode_pager_setsize, which is just ubc_setsize.
+	 * vnode_if.h says, "If the file shrinks, its ubc size will be
+	 * modified accordingly, but if it grows, then the ubc size is
+	 * unchanged; space is set aside without being actively used by
+	 * the file.", so we are prima facie doing the wrong thing by
+	 * adjusting the ubc size.  moreover, doing a
+         * ubc_setsize(vp, veryslightlybigger) which results in the EOF advancing
+	 * within the same 4k page as it had been, will cause a
+	 * cluster_zero on the tail of the page.  this dirties the page
+	 * and appears to confuse some applications that do very small
+	 * vnop_allocate calls on existing files.
+	 */
+
+	return (0);
+#else
 	struct vnode *vp = ap->a_vp;
 	znode_t *zp = VTOZ(vp);
 	zfsvfs_t *zfsvfs;
@@ -5352,6 +5370,7 @@ zfs_vnop_allocate(struct vnop_allocate_args *ap)
 	if (err != 0)
 		printf("ZFS: -%s:%d err %d\n", __func__, __LINE__, err);
 	return (err);
+#endif
 }
 
 int
