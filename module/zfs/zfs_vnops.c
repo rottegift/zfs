@@ -2607,6 +2607,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 
 		const off_t ubcsize = ubc_getsize(vp);
+#if 0
 		off_t target_postwrite_ubcsize;
 		boolean_t reset_ubcsize = B_FALSE;
 
@@ -2634,6 +2635,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 				reset_ubcsize = B_TRUE;
 			}
 		}
+#endif
 
 		int vnode_get_error = vnode_get(vp);
 		ASSERT0(vnode_get_error);
@@ -2645,6 +2647,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		if (error == 0 && vnode_get_error != 0)
 			error = vnode_get_error;
 
+#if 0
 		if (reset_ubcsize) {
 			ASSERT(spl_ubc_is_mapped(vp, NULL));
 			ASSERT(unset_syncer);
@@ -2660,6 +2663,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 				    zp->z_name_cache);
 			}
 		}
+#endif
 
 		ASSERT3S(ubc_getsize(vp), ==, ubcsize);
 
