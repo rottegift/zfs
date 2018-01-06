@@ -4390,6 +4390,7 @@ skip_lock_acquisition:
 			    __func__, __LINE__, commit_tail, start_of_tail, end_of_tail,
 			    upl_pages_dismissed, pages_in_upl, lowest_page_dismissed,
 			    f_start_of_upl, f_end_of_upl, fsname, fname);
+			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
 		}
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
