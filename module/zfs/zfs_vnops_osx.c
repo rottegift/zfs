@@ -1793,13 +1793,14 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	 * Alternatively, if the file has never been through zfs_ubc_msync,
 	 * and is not dirty, then just return.
 	 */
-	if (zp->z_mr_sync == 0) {
+	if (zp->z_mr_sync < 1024LL) {
 		if (0 == is_file_clean(ap->a_vp, ubc_getsize(ap->a_vp))) {
 			goto zero;
 		} else {
-			printf("ZFS: %s:%d: z_mr_sync is 0 but file is dirty at time of fsync vnop"
+			printf("ZFS: %s:%d: z_mr_sync is small @ %lld"
+			    " but file is dirty at time of fsync vnop"
 			    " ubcsz %lld filesz %lld file %s\n",
-			    __func__, __LINE__, ubc_getsize(ap->a_vp),
+			    __func__, __LINE__, zp->z_mr_sync, ubc_getsize(ap->a_vp),
 			    zp->z_size, zp->z_name_cache);
 		}
 	}
@@ -2295,6 +2296,9 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	ZFS_ENTER(zfsvfs);
 
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
+
 	file_sz = zp->z_size;
 	ASSERT3S(file_sz, ==, ubc_getsize(vp));
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
@@ -2682,6 +2686,7 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 	 * non-error version.
 	 */
 	ZFS_ENTER_NOERROR(zfsvfs);
+
 	if (zfsvfs->z_unmounted) {
 		printf("ZFS: %s:%d: dumping pages on z_unmounted, uploff %ld foff %lld sz %ld file %s\n",
 		    __func__, __LINE__, upl_offset, off, size, zp->z_name_cache);
@@ -2702,6 +2707,9 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		ZFS_EXIT(zfsvfs);
 		return (EIO);
 	}
+
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
 
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
@@ -3693,6 +3701,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
+
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
 
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
@@ -4989,6 +5000,9 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	if (!spl_ubc_is_mapped(vp, NULL))
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
 
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
+
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	ZFS_EXIT(zfsvfs);
@@ -5033,6 +5047,9 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	}
 
 	ASSERT(spl_ubc_is_mapped(vp, NULL));
+
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 

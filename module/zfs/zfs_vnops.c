@@ -356,6 +356,9 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 
 	if (vnode_isreg(*vpp)) { ASSERT3S(zp->z_size, ==, ubc_getsize(*vpp)); }
 
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
+
 	ZFS_EXIT(zfsvfs);
 	return (0);
 }
@@ -391,6 +394,9 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	    !(zp->z_pflags & ZFS_AV_QUARANTINED) && zp->z_size > 0)
 		VERIFY(fs_vscan(vp, cr, 1) == 0);
 #endif
+
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
 
 	ZFS_EXIT(zfsvfs);
 	return (0);
@@ -1561,6 +1567,9 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	const size_t initial_z_size = zp->z_size;
 	const size_t initial_u_size = ubc_getsize(vp);
 	ASSERT3U(initial_z_size, ==, initial_u_size);
+
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
 
 	os = zfsvfs->z_os;
 
@@ -5640,13 +5649,14 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * Alternatively, if the file has never been through zfs_ubc_msync,
 	 * and is not dirty, then just return.
 	 */
-	if (zp->z_mr_sync == 0) {
+	if (zp->z_mr_sync < 1024LL) {
+		zp->z_mr_sync = 0; // reset here to keep zfs_vfs_sync out of our hair
 		if (0 == is_file_clean(vp, ubc_getsize(vp))) {
 			goto zero;
 		} else {
-			printf("ZFS: %s:%d: z_mr_sync is 0 but file is dirty at this time"
+			printf("ZFS: %s:%d: z_mr_sync is small @ %lld but file is dirty at this time"
 			    " ubcsz %lld filesz %lld file %s\n",
-			    __func__, __LINE__, ubc_getsize(vp),
+			    __func__, __LINE__, zp->z_mr_sync, ubc_getsize(vp),
 			    zp->z_size, zp->z_name_cache);
 		}
 	}
