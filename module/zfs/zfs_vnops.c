@@ -2574,12 +2574,14 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		const uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
 
+#if 0
 		/* fill any holes */
 		int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, FILL_FOR_WRITE);
 		if (fill_err) {
 			printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
 			    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
 		}
+#endif
 
 		ASSERT3S(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
 		int xfer_resid = (int) this_chunk;
@@ -2602,6 +2604,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		zp->z_syncer_active = curthread;
 		mutex_exit(&zp->z_ubc_msync_lock);
 		unset_syncer = B_TRUE;
+
 
 		const off_t ubcsize = ubc_getsize(vp);
 		off_t target_postwrite_ubcsize;
