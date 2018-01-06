@@ -5655,9 +5655,11 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			goto zero;
 		} else {
 			printf("ZFS: %s:%d: z_mr_sync is small @ %lld but file is dirty at this time"
-			    " ubcsz %lld filesz %lld file %s\n",
+			    " ubcsz %lld filesz %lld file %s (mapped? %d write? %d)\n",
 			    __func__, __LINE__, zp->z_mr_sync, ubc_getsize(vp),
-			    zp->z_size, zp->z_name_cache);
+			    zp->z_size, zp->z_name_cache,
+			    spl_ubc_is_mapped(vp, NULL),
+			    spl_ubc_is_mapped_writable(vp));
 		}
 	}
 
