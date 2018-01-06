@@ -2307,12 +2307,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
-	if (!vn_has_cached_data(vp)) {
-		printf("ZFS: %s:%d: file without vn_has_cached_data(vp) (is_mapped %d) (file_sz %lld):"
-		    " fs %s file %s\n",
-		    __func__, __LINE__, spl_ubc_is_mapped(vp, NULL), file_sz,
-		    fsname, fname);
-	}
 	/* ASSERT(zp->z_dbuf_held && zp->z_phys); */
 	/* can't fault passed EOF */
 	if ((off < 0) || (off >= file_sz) ||
