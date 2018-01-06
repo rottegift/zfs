@@ -104,6 +104,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
+	kstat_named_t zfs_ubc_msync_calls;
 	kstat_named_t zfs_ubc_msync_cv_waits;
 	kstat_named_t zfs_ubc_msync_sleeps;
 	kstat_named_t bluster_pageout_calls;
@@ -137,6 +138,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
+	{ "zfs_ubc_msync_calls",               KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_cv_waits",            KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_sleeps",              KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
@@ -3402,6 +3404,8 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
 	vnode_t *vp = ZTOV(zp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 	boolean_t release_my_rl = B_FALSE;
+
+	VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_calls);
 
 	if (vnode_isrecycled(vp)) {
 		return (0);
