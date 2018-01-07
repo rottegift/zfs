@@ -41,6 +41,7 @@
 #define round_page_64(x) (((uint64_t)(x) + PAGE_MASK_64) & ~((uint64_t)PAGE_MASK_64))
 #define trunc_page_64(x) ((uint64_t)(x) & ~((uint64_t)PAGE_MASK_64))
 const int MAX_UPL_SIZE_BYTES = 16*1024*1024;
+const int MAX_UPL_TRANSFER_BYTES = 1024*1024;
 
 #endif
 
@@ -542,7 +543,7 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
 
     ASSERT3U(zp->z_size, ==, ubc_getsize(vp));
 
-    ASSERT3S(upl_size, <=, MAX_UPL_SIZE_BYTES);
+    ASSERT3S(upl_size, <=, MAX_UPL_TRANSFER_BYTES);
     ASSERT3S(upl_size, >, 0);
 
     const off_t eof_page = trunc_page_64(zp->z_size) / PAGE_SIZE_64;
@@ -831,7 +832,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 	ASSERT3S((upl_file_offset % PAGE_SIZE), ==, 0);
 	ASSERT3S((upl_size % PAGE_SIZE), ==, 0);
 	ASSERT3S(upl_size, >, 0);
-	ASSERT3S(upl_size, <=, MAX_UPL_SIZE_BYTES);
+	ASSERT3S(upl_size, <=, MAX_UPL_TRANSFER_BYTES);
 
 	znode_t *zp = VTOZ(vp);
 	const char *filename = zp->z_name_cache;
@@ -954,7 +955,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		const int upl_num_pages = round_page_64(cur_upl_size) / PAGE_SIZE_64;
 		ASSERT3S(upl_num_pages, >, 0);
-		ASSERT3S(upl_num_pages, <=, MAX_UPL_SIZE_BYTES/PAGE_SIZE_64);
+		ASSERT3S(upl_num_pages, <=, MAX_UPL_TRANSFER_BYTES/PAGE_SIZE_64);
 
 		int page_index = 0, page_index_hole_start, page_index_hole_end;
 
@@ -1166,7 +1167,7 @@ ubc_fill_holes_in_range(vnode_t *vp, off_t start_byte, off_t end_byte, fill_hole
 
 	for (int i = 0; size_done < total_size; i++) {
 		const off_t todo = total_size - size_done;
-		const off_t cur_size = MIN(todo, MAX_UPL_SIZE_BYTES);
+		const off_t cur_size = MIN(todo, MAX_UPL_TRANSFER_BYTES);
 
 		int err = fill_holes_in_range(vp, cur_off, cur_size, who_for);
 		if (err) {
@@ -1214,7 +1215,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	ASSERT3S((upl_file_offset % PAGE_SIZE), ==, 0);
 	ASSERT3S((upl_size % PAGE_SIZE), ==, 0);
 	ASSERT3S(upl_size, >, 0);
-	ASSERT3S(upl_size, <=, MAX_UPL_SIZE_BYTES);
+	ASSERT3S(upl_size, <=, MAX_UPL_TRANSFER_BYTES);
 
 	/* the range should fit within the UPL */
 	ASSERT3S(upl_file_offset, <=, uio_offset(uio));
@@ -1395,7 +1396,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
         VERIFY3P(zp->z_zfsvfs, !=, NULL);
         VERIFY3P(zp->z_zfsvfs->z_os, !=, NULL);
 
-	ASSERT3S(arg_bytes, <=, MAX_UPL_SIZE_BYTES);
+	ASSERT3S(arg_bytes, <=, MAX_UPL_TRANSFER_BYTES);
 
 	objset_t *os = zp->z_zfsvfs->z_os;
         uint64_t object = zp->z_id;
@@ -1426,8 +1427,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 
         ASSERT3S(orig_resid, >=, 0);
         ASSERT3S(inbytes_remaining, <=, orig_resid + orig_offset);
-        const int MAX_UPL_SIZE_BYTES = 64*1024*1024;
-        ASSERT3S(inbytes_remaining, <=, MAX_UPL_SIZE_BYTES);
+        ASSERT3S(inbytes_remaining, <=, MAX_UPL_TRANSFER_BYTES);
 
         /* check against file size */
         if (orig_resid + orig_offset > filesize &&
@@ -1529,7 +1529,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 	return (err);
 }
 
-offset_t zfs_read_chunk_size = MAX_UPL_TRANSFER * PAGE_SIZE; /* Tunable */
+offset_t zfs_read_chunk_size = MAX_UPL_TRANSFER_BYTES; /* Tunable */
 
 /*
  * Read bytes from specified file into supplied buffer.
@@ -1962,7 +1962,7 @@ zfs_write_sync_range_helper(vnode_t *vp, const off_t woff, const off_t end_range
 	if (do_sync)
 		ap.a_flags |= UPL_IOSYNC;
 
-	ASSERT3U(ap.a_size, <=, MAX_UPL_SIZE_BYTES);
+	ASSERT3U(ap.a_size, <=, MAX_UPL_TRANSFER_BYTES);
 
 	error = zfs_vnop_pageoutv2(&ap);
 
@@ -3440,7 +3440,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 				new_blksz = MIN(end_size, max_blksz);
 			}
 			if (vnode_isreg(vp)) {
-				off_t max_max_n = MIN(SPA_MAXBLOCKSIZE, MAX_UPL_SIZE_BYTES);
+				off_t max_max_n = MIN(SPA_MAXBLOCKSIZE, MAX_UPL_TRANFER_BYTES);
 				off_t max_n = MIN(n, max_max_n);
 				off_t safe_write_n = zfs_safe_dbuf_write_size(zp, uio, max_n);
 				nbytes = MIN(safe_write_n, max_max_n - P2PHASE(woff, max_max_n));
@@ -3473,7 +3473,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			 * can write any size chunk we like less than
 			 * SPA_MAXBLOCKSIZE
 			 */
-			off_t max_max_n = MIN(SPA_MAXBLOCKSIZE, MAX_UPL_SIZE_BYTES);
+			off_t max_max_n = MIN(SPA_MAXBLOCKSIZE, MAX_UPL_TRANSFER_BYTES);
 			off_t max_n = MIN(n, max_max_n);
 			safe_write_n = zfs_safe_dbuf_write_size(zp, uio, max_n);
 			nbytes = MIN(safe_write_n, max_max_n - P2PHASE(woff, max_max_n));

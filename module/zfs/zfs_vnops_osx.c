@@ -98,6 +98,7 @@ uint_t rl_key_zp_key_mismatch_key;
 uint_t rl_key_vp_from_getvnode;
 
 extern const size_t MAX_UPL_SIZE_BYTES;
+extern const size_t MAX_UPL_TRANSFER_BYTES;
 
 typedef struct vnops_osx_stats {
 	kstat_named_t vnop_fsync_skipped;
@@ -4289,7 +4290,8 @@ skip_lock_acquisition:
 		VNOPS_OSX_STAT_BUMP(pageoutv2_pageout);
 	}
 
-	ASSERT3S(ap->a_size, <=, MAX_UPL_SIZE_BYTES);
+	ASSERT3S(ap->a_size, <=, MAX_UPL_TRANSFER_BYTES);
+	ASSERT3S(ap->a_size, <=, MAX_UPL_TRANSFER_BYTES);
 
 	const off_t f_start_of_upl = ap->a_f_offset;
 	const off_t f_end_of_upl = f_start_of_upl + ap->a_size;
@@ -4888,7 +4890,7 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 		vfs_context_t	a_context;
 #endif
 {
-	if (ap->a_size <= MAX_UPL_SIZE_BYTES || ap->a_pl != NULL)
+	if (ap->a_size <= MAX_UPL_TRANSFER_BYTES || ap->a_pl != NULL)
 		return(pageoutv2_helper(ap));
 
 	/*
@@ -4912,15 +4914,15 @@ zfs_vnop_pageoutv2(struct vnop_pageout_args *ap)
 	ASSERT3P(cur_ap->a_pl, ==, NULL);
 
 	size_t cur_size = cur_ap->a_size;
-	const int proj_calls = howmany(cur_size, MAX_UPL_SIZE_BYTES);
+	const int proj_calls = howmany(cur_size, MAX_UPL_TRANSFER_BYTES);
 	int error = 0;
 
 	for (int c = proj_calls; cur_size > 0; c--) {
 		ASSERT3S(c, >=, 0);
 		const off_t  call_offset = cur_ap->a_f_offset;
 		const size_t call_size = MIN(cur_size,
-		    MAX_UPL_SIZE_BYTES - P2PHASE(call_offset, MAX_UPL_SIZE_BYTES));
-		ASSERT3S(call_size, <=, MAX_UPL_SIZE_BYTES);
+		    MAX_UPL_TRANSFER_BYTES - P2PHASE(call_offset, MAX_UPL_TRANSFER_BYTES));
+		ASSERT3S(call_size, <=, MAX_UPL_TRANSFER_BYTES);
 		ASSERT3S(call_size, >, 0);
 		cur_ap->a_size = call_size;
 		int cur_error = pageoutv2_helper(cur_ap);
