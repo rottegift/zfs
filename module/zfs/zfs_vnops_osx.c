@@ -4255,8 +4255,10 @@ already_acquired_locks:
 		  const off_t rlsize = rloff + rllen;
 		  const off_t rlsize_or_fsize = MIN(rlsize, zp->z_size);
 		  const off_t rlsize_not_past_eof = rlsize_or_fsize - rloff;
-		  ASSERT3S(round_page_64(rl->r_len) + PAGE_SIZE_64, >=, rlsize_not_past_eof);
-		  ASSERT3S(trunc_page_64(rl->r_off), <=, rloff);
+		  if (rl->r_len != UINT64_MAX) {
+			  ASSERT3U(round_page_64(rl->r_len) + PAGE_SIZE_64, >=, rlsize_not_past_eof);
+		  }
+		  ASSERT3U(trunc_page_64(rl->r_off), <=, rloff);
 		}
 	}
 
