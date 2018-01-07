@@ -1993,8 +1993,6 @@ zfs_extend(znode_t *zp, uint64_t end)
 		ASSERT3S(shrink_to_old_retval, !=, 0);
 	}
 	const int grow_to_new_retval = ubc_setsize(vp, end);
-	if (!vnode_get_error)
-		vnode_put(vp);
 	if (grow_to_new_retval == 0) {
 		printf("ZFS: %s:%d: error setting ubc size to %lld from %lld (delta %lld) for file %s\n",
 		    __func__, __LINE__, end, oldsize, end - oldsize, zp->z_name_cache);
@@ -2003,6 +2001,9 @@ zfs_extend(znode_t *zp, uint64_t end)
 	ASSERT3S(tries, <=, 2);
 
 	zfs_range_unlock(rl);
+
+	if (!vnode_get_error)
+		vnode_put(vp);
 
 	return (0);
 }
@@ -2215,6 +2216,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 
+	int vnode_get_error = 1;
+
 	if (vnode_isreg(vp) || vn_has_cached_data(vp) || ubc_pages_resident(vp)) {
 		// note: 10a286 says "This work is accomplished
 		//       "by ubc_setsize()"  but does not call
@@ -2232,11 +2235,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			    ubc_getsize(vp), end, zp->z_name_cache,
 			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 		}
-		int vnode_get_error = vnode_get(vp);
+		vnode_get_error = vnode_get(vp);
 		ASSERT0(vnode_get_error);
 		int setsize_retval = ubc_setsize(vp, end);
-		if (vnode_get_error == 0)
-			vnode_put(vp);
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
 	}
 
@@ -2245,6 +2246,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	ASSERT3S(tries, <=, 2);
 
 	zfs_range_unlock(rl);
+
+	if (vnode_get_error == 0)
+		vnode_put(vp);
 
 	return (0);
 }
