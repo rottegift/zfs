@@ -5490,7 +5490,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	boolean_t have_trl = B_FALSE;
 	rl_t *rl = NULL;
 	if (tsd_get(rl_key) == NULL) {
-		rl = zfs_try_range_lock(zp, 0, ubc_getsize(vp), RL_WRITER);
+		rl = zfs_try_range_lock(zp, 0, round_page_64(ubc_getsize(vp)), RL_WRITER);
 		if (rl != NULL) {
 			tsd_set(rl_key, rl);
 		} else {
