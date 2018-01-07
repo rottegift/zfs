@@ -980,9 +980,20 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 					 * the pages
 					 */
 					printf("ZFS: %s:%d: (FILL_FOR_READ pass %d)"
-					    " skipping DIRTY,!VALID page %d in range"
+					    " skipping DIRTY page %d in range"
 					    " [off %lld len %ld] of file %s uplcflags %d"
 					    " mapped %d mapped_write %d\n", __func__, __LINE__, i,
+					    page_index, cur_upl_file_offset, cur_upl_size,
+					    zp->z_name_cache, uplcflags,
+					    spl_ubc_is_mapped(vp, NULL),
+					    spl_ubc_is_mapped_writable(vp));
+					page_index++;
+				} else {
+					printf("ZFS: %s:%d: (FILL_FOR_WRITE %d pass %d)"
+					    " skipping DIRTY page %d in range"
+					    " [off %lld len %ld] of file %s uplcflags %d"
+					    " mapped %d mapped_write %d\n", __func__, __LINE__,
+					    who_for, i,
 					    page_index, cur_upl_file_offset, cur_upl_size,
 					    zp->z_name_cache, uplcflags,
 					    spl_ubc_is_mapped(vp, NULL),
