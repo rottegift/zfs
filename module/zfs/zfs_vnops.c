@@ -2605,35 +2605,6 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 
 		const off_t ubcsize = ubc_getsize(vp);
-#if 0
-		off_t target_postwrite_ubcsize;
-		boolean_t reset_ubcsize = B_FALSE;
-
-		if (spl_ubc_is_mapped(vp, NULL)) {
-			/* round the ubc size up to a multiple of PAGE_SIZE */
-			const off_t cur_woff = uio_offset(uio);
-			const off_t cur_wend = cur_woff + uio_resid(uio);
-			target_postwrite_ubcsize = cur_wend;
-			const off_t round_cur_wend = round_page_64(cur_wend);
-			if (ubc_getsize(vp) < round_cur_wend) {
-				dprintf("ZFS: %s:%d: mapped file, ends before end of page, rounding:"
-				    " ubcsize %lld cur_woff %lld cur_wend %lld round_cur_wend %lld,"
-				    " ioflag %d file %s\n",
-				    __func__, __LINE__,
-				    ubcsize, cur_woff, cur_wend, round_cur_wend,
-				    ioflag, zp->z_name_cache);
-				int setsize_retval = ubc_setsize(vp, round_cur_wend);
-				if (setsize_retval == 0) {
-					// ubc_setsize returns TRUE on success, 0 on failure
-					printf("ZFS: %s:%d rounding up: ubc_setsize(vp, %lld)"
-					    " from %lld failed for file %s\n",
-					    __func__, __LINE__, round_cur_wend, ubcsize,
-					    zp->z_name_cache);
-				}
-				reset_ubcsize = B_TRUE;
-			}
-		}
-#endif
 
 		int vnode_get_error = vnode_get(vp);
 		ASSERT0(vnode_get_error);
@@ -2644,24 +2615,6 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		}
 		if (error == 0 && vnode_get_error != 0)
 			error = vnode_get_error;
-
-#if 0
-		if (reset_ubcsize) {
-			ASSERT(spl_ubc_is_mapped(vp, NULL));
-			ASSERT(unset_syncer);
-			int setsize_retval = ubc_setsize(vp, target_postwrite_ubcsize);
-			if (setsize_retval == 0) {
-				// ubc_setsize returns TRUE on success, 0 on failure
-				printf("ZFS: %s:%d resetting from round up: ubc_setsize(vp, %lld)"
-				    " from cur ubc_getsize %lld"
-				    " ubcsize before copy %lld"
-				    " failed for file %s\n",
-				    __func__, __LINE__, target_postwrite_ubcsize, ubc_getsize(vp),
-				    ubcsize,
-				    zp->z_name_cache);
-			}
-		}
-#endif
 
 		ASSERT3S(ubc_getsize(vp), ==, ubcsize);
 
