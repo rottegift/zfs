@@ -3793,18 +3793,6 @@ top:
 		/* modify this under the lock to avoid interfering
 		 * with mappedread_new etc
 		 */
-#if 0
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__);
-		int setsize_retval;
-		if (ubc_getsize(vp) != 0)
-			setsize_retval = ubc_setsize(vp, 0);
-		else
-			setsize_retval = 1;
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-		ASSERT3S(tries, <=, 2);
-		ASSERT3S(setsize_retval, !=, 0); // setsize returns true on success
-#endif
 		VN_RELE(vp);
 		/*
 		 * Call recycle which will call vnop_reclaim directly if it can

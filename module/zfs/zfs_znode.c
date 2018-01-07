@@ -1637,7 +1637,11 @@ zfs_rezget(znode_t *zp)
 		off_t zsize = zp->z_size;
 		vn_pages_remove(vp, 0, 0); // does nothing in O3X
 		if (zp->z_size != size || zp->z_size != ubcsize) {
-			setsize_retval = vnode_pager_setsize(vp, zp->z_size);
+			int vnode_get_error = vnode_get(vp);
+			ASSERT0(vnode_get_error);
+			setsize_retval = ubc_setsize(vp, zp->z_size);
+			if (!vnode_get_error)
+				vnode_put(vp);
 			did_setsize = B_TRUE;
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
@@ -1980,11 +1984,17 @@ zfs_extend(znode_t *zp, uint64_t end)
 		    " end %lld file %s\n", __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
 		    end, ubc_getsize(vp), end, zp->z_name_cache);
 	}
-	const int grow_first_time_retval = ubc_setsize(vp, end);
-	ASSERT3S(grow_first_time_retval, !=, 0); // ubc_setsize returns true on success
-	const int shrink_to_old_retval = ubc_setsize(vp, oldsize);
-	ASSERT3S(shrink_to_old_retval, !=, 0);
+	int vnode_get_error = vnode_get(vp);
+	ASSERT0(vnode_get_error);
+	if (vnode_get_error == 0) {
+		const int grow_first_time_retval = ubc_setsize(vp, end);
+		ASSERT3S(grow_first_time_retval, !=, 0); // ubc_setsize returns true on success
+		const int shrink_to_old_retval = ubc_setsize(vp, oldsize);
+		ASSERT3S(shrink_to_old_retval, !=, 0);
+	}
 	const int grow_to_new_retval = ubc_setsize(vp, end);
+	if (!vnode_get_error)
+		vnode_put(vp);
 	if (grow_to_new_retval == 0) {
 		printf("ZFS: %s:%d: error setting ubc size to %lld from %lld (delta %lld) for file %s\n",
 		    __func__, __LINE__, end, oldsize, end - oldsize, zp->z_name_cache);
@@ -2222,7 +2232,11 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			    ubc_getsize(vp), end, zp->z_name_cache,
 			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 		}
+		int vnode_get_error = vnode_get(vp);
+		ASSERT0(vnode_get_error);
 		int setsize_retval = ubc_setsize(vp, end);
+		if (vnode_get_error == 0)
+			vnode_put(vp);
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
 	}
 
