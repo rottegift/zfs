@@ -2309,7 +2309,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 	VNOPS_STAT_INCR(update_pages_want_lock, tries);
 
 	/* break the work into reasonable sized chunks */
-	const off_t chunk_size = (off_t)SPA_MAXBLOCKSIZE;
+	const off_t chunk_size = (off_t)MAX_UPL_TRANSFER_BYTES;
 	const int proj_chunks = howmany(start_resid, chunk_size);
 
 	for (int c = proj_chunks ; uio_resid(uio) > 0; c--) {
@@ -2322,7 +2322,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		const size_t this_chunk = MIN(uio_resid(uio),
 		    chunk_size - P2PHASE(this_off, chunk_size));
-		ASSERT3S(this_chunk, <=, SPA_MAXBLOCKSIZE);
+		ASSERT3S(this_chunk, <=, MAX_UPL_TRANSFER_BYTES);
 		ASSERT3S(this_chunk, >, 0);
 
 		/* increase ubc size if we are growing the file */
