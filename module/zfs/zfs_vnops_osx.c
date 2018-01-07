@@ -5000,7 +5000,9 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	if (!spl_ubc_is_mapped(vp, NULL))
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
 
-	if (zp->z_mr_sync < 1024LL)
+	if (spl_ubc_is_mapped_writable(vp))
+		zp->z_mr_sync = 0;
+	else if (zp->z_mr_sync < 1024LL)
 		zp->z_mr_sync = 0;
 
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
@@ -5048,7 +5050,9 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 
 	ASSERT(spl_ubc_is_mapped(vp, NULL));
 
-	if (zp->z_mr_sync < 1024LL)
+	if (spl_ubc_is_mapped_writable(vp))
+		zp->z_mr_sync = 0;
+	else if (zp->z_mr_sync < 1024LL)
 		zp->z_mr_sync = 0;
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);

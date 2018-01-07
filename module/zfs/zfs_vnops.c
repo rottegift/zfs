@@ -357,7 +357,9 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 
 	if (vnode_isreg(*vpp)) { ASSERT3S(zp->z_size, ==, ubc_getsize(*vpp)); }
 
-	if (zp->z_mr_sync < 1024LL)
+	if (flag & (FWRITE | FAPPEND))
+		zp->z_mr_sync = 0;
+	else if (zp->z_mr_sync < 1024LL)
 		zp->z_mr_sync = 0;
 
 	ZFS_EXIT(zfsvfs);
@@ -2707,6 +2709,9 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 	if (do_sync)
 		zil_commit(zfsvfs->z_log, zp->z_id);
 
+	if (error == 0)
+		zp->z_mr_sync = gethrtime();
+
 	ZFS_EXIT(zfsvfs);
 
 	return (error);
@@ -2772,6 +2777,9 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
+
+	// don't let fsync step on us
+	zp->z_mr_sync = 0;
 
 	*file_name = zp->z_name_cache;
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
@@ -4253,6 +4261,8 @@ out:
 
 	if (zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 		zil_commit(zilog, 0);
+
+	zp->z_mr_sync = 0;
 
 	ZFS_EXIT(zfsvfs);
 	return (error);
