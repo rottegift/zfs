@@ -2526,6 +2526,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		ASSERT0(error);
 		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, woff, start_resid, 0,
 		    NULL, NULL);
+		dmu_tx_commit(tx);
 	}
 
 	ASSERT3S(error, ==, 0);
