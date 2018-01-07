@@ -1966,21 +1966,6 @@ zfs_write_sync_range_helper(vnode_t *vp, const off_t woff, const off_t end_range
 
 	error = zfs_vnop_pageoutv2(&ap);
 
-#if 0
-	off_t ubcsize = ubc_getsize(vp);
-	off_t msync_resid = 0;
-
-	int msync_flags = 0;
-
-
-	msync_flags |= UBC_PUSHDIRTY;
-	if (do_sync) {
-		msync_flags |= UBC_SYNC;
-	}
-
-	error = zfs_ubc_msync(zp, rl, woff, end_range, &msync_resid, msync_flags);
-#endif
-
 	if (!error)
 	  zp->z_mr_sync = gethrtime();
 
@@ -1989,19 +1974,6 @@ zfs_write_sync_range_helper(vnode_t *vp, const off_t woff, const off_t end_range
 	ASSERT3P(tsd_get(rl_key), ==, rl);
 	tsd_set(rl_key, NULL);
 	zfs_range_unlock(rl);
-
-#if 0
-	if (error != 0) {
-		printf("ZFS: %s:%d: ubc_msync error %d msync_resid %lld"
-		    " woff %lld start_resid %ld end_range %lld"
-		    " ubcsize %lld msync_flasg 0x%x file %s\n",
-		    __func__, __LINE__, error, msync_resid,
-		    woff, start_resid, end_range,
-		    ubcsize, msync_flags, zp->z_name_cache);
-	} else if (do_sync) {
-	  zil_commit(zfsvfs->z_log, zp->z_id);
-	}
-#endif
 
 	if (error != 0) {
 		printf("ZFS: %s:%d: zfs_vnop_pageoutv2 error %d"
