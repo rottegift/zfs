@@ -218,9 +218,9 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			return (VNODE_RETURNED);
 		}
 		if (zfsvfs && zfsvfs->z_unmounted) {
-			printf("ZFS: %s:%d: zfvfs is not mounted file %s\n", __func__, __LINE__,
-			    zp->z_name_cache);
-			return (VNODE_RETURNED);
+			printf("ZFS: %s:%d: zfvfs is not mounted file %s (unmounting? %d)\n",
+			    __func__, __LINE__,
+			    zp->z_name_cache, zfsvfs->z_is_unmounting);
 		}
 		if (vnode_isrecycled(vp)) {
 			printf("ZFS: %s:%d: vnode_isrecyled for file %s\n", __func__, __LINE__,
@@ -260,7 +260,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			cv_broadcast(&zp->z_ubc_msync_cv);
 			return (VNODE_CLAIMED);
 		}
-		if (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1) > gethrtime()) {
+		if (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1) > gethrtime()
+		    && !(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
 			const hrtime_t diff = gethrtime() - (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1));
 			const uint32_t secs = NSEC2SEC(diff);
 			printf("ZFS: %s:%d: zfs_ubc_msync returned for file %s only %u seconds ago,"
@@ -277,7 +278,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			ZFS_EXIT(zfsvfs);
 			return (VNODE_RETURNED);
 		}
-		if (zp->z_mr_sync < 30LL) {
+		if (zp->z_mr_sync < 30LL
+		    && !(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
 			/*
 			 * this is the only code that, via the ++
 			 * below, can generate a small nonzero z_mr_sync
@@ -288,7 +290,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    waitfor, *waitfor_arg);
 			zp->z_mr_sync++;
 			ZFS_EXIT(zfsvfs);
-			if (waitfor)
+			if (waitfor || zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)
 				return (VNODE_CLAIMED);
 			else
 				return (VNODE_RETURNED);
@@ -298,8 +300,10 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			 * but too small to be a realistic gethrtime() value
 			 */
 			printf("ZFS: %s:%d: attempting to sync probably-orphaned fs %s file %s"
-			    " (%lld prev tries) (waitfor %d, waitfor arg %d)\n", __func__, __LINE__,
-			    fsname, fname, zp->z_mr_sync, waitfor, *waitfor_arg);
+			    " (%lld prev tries) (waitfor %d, waitfor arg %d) (unmounting? %d -ed? %d)\n",
+			    __func__, __LINE__,
+			    fsname, fname, zp->z_mr_sync, waitfor, *waitfor_arg,
+			    zfsvfs->z_is_unmounting, zfsvfs->z_unmounted);
 		}
 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
 		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
@@ -1317,6 +1321,7 @@ zfsvfs_init(zfsvfs_t *zfsvfs, objset_t *os)
 	zfsvfs->z_freespace_notify_warninglimit = 0;
 	zfsvfs->z_freespace_notify_dangerlimit = 0;
 	zfsvfs->z_freespace_notify_desiredlevel = 0;
+	zfsvfs->z_is_unmounting = B_FALSE;
 
 	error = zfs_get_zplprop(os, ZFS_PROP_VERSION, &zfsvfs->z_version);
 	if (error != 0)
@@ -3304,6 +3309,7 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 			return (ret);
 #endif
         dprintf("vflush 1\n");
+
         ret = vflush(zfsvfs->z_vfs, zfsvfs->z_ctldir, (mntflags & MNT_FORCE) ? FORCECLOSE : 0|SKIPSYSTEM);
 		//ret = vflush(zfsvfs->z_vfs, NULLVP, 0);
 		//ASSERT(ret == EBUSY);
@@ -3335,6 +3341,7 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
         }
     }
 #endif
+	zfsvfs->z_is_unmounting = B_TRUE;
 
 	ret = vflush(mp, NULLVP, SKIPSYSTEM);
 

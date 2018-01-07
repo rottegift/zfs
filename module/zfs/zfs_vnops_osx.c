@@ -3692,20 +3692,18 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
 
-	if (zfsvfs->z_unmounted) {
-		printf("ZFS: vnop_pageoutv2: abort on z_unmounted\n");
-		error = EIO;
-		goto exit_abort;
-
-	}
-
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
-
-	if (zp->z_mr_sync < 1024LL)
-		zp->z_mr_sync = 0;
 
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	if (zfsvfs->z_unmounted) {
+		printf("ZFS: %s:%d: WARNING! fs %s z_unmounted, file %s (sa_hdl? %d)\n",
+		    __func__, __LINE__, fsname, fname, zp->z_sa_hdl != NULL);
+	}
+
+	if (zp->z_mr_sync < 1024LL)
+		zp->z_mr_sync = 0;
 
 	ASSERT(ubc_pages_resident(vp));
 
