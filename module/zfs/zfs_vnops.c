@@ -979,7 +979,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 					 * when our parent tries to read
 					 * the pages
 					 */
-					printf("ZFS: %s:%d: (FILL_FOR_READ pass %d)"
+					dprintf("ZFS: %s:%d: (FILL_FOR_READ pass %d)"
 					    " skipping DIRTY page %d in range"
 					    " [off %lld len %ld] of file %s uplcflags %d"
 					    " mapped %d mapped_write %d\n", __func__, __LINE__, i,
@@ -989,7 +989,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 					    spl_ubc_is_mapped_writable(vp));
 					page_index++;
 				} else {
-					printf("ZFS: %s:%d: (FILL_FOR_WRITE %d pass %d)"
+					dprintf("ZFS: %s:%d: (FILL_FOR_WRITE %d pass %d)"
 					    " skipping DIRTY page %d in range"
 					    " [off %lld len %ld] of file %s uplcflags %d"
 					    " mapped %d mapped_write %d\n", __func__, __LINE__,
