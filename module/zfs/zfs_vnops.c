@@ -2131,8 +2131,6 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 	for (int c = proj_chunks ; uio_resid(uio) > 0; c--) {
 		ASSERT3S(c, >=, 0);
 
-		const off_t this_z_size_start = zp->z_size;
-
 		const off_t this_off = uio_offset(uio);
 		ASSERT3S(this_off, >=, 0);
 
@@ -2491,30 +2489,6 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 				ASSERT3S(zp->z_size, >=, ubcsize_at_entry);
 				int setsize_retval = ubc_setsize(vp, zp->z_size);
 				ASSERT3S(setsize_retval, !=, 0);
-			}
-		}
-
-		/*  as we have completed a uio_move, commit the size change */
-
-		/* commit the znode change */
-		if (zp->z_size > this_z_size_start) {
-			tx = dmu_tx_create(zfsvfs->z_os);
-			dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-			zfs_sa_upgrade_txholds(tx, zp);
-			error = dmu_tx_assign(tx, TXG_WAIT);
-			if (error) {
-				printf("ZFS: %s:%d: error %d from dmu_tx_assign\n",
-				    __func__, __LINE__, error);
-				dmu_tx_abort(tx);
-			} else {
-				ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
-				error = sa_update(zp->z_sa_hdl, SA_ZPL_SIZE(zfsvfs),
-				    (void *)&zp->z_size, sizeof (uint64_t), tx);
-				if (error) {
-					printf("ZFS: %s:%d sa_update returned error %d\n",
-					    __func__, __LINE__, error);
-				}
-				dmu_tx_commit(tx);
 			}
 		}
 	} // for
