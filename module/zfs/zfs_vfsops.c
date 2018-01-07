@@ -262,7 +262,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		if (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1) > gethrtime()
 		    && !(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
-			const hrtime_t diff = gethrtime() - (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1));
+			const hrtime_t diff = (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1)) - gethrtime();
 			const uint32_t secs = NSEC2SEC(diff);
 			printf("ZFS: %s:%d: zfs_ubc_msync returned for file %s only %u seconds ago,"
 			    " so unwilling to sync right now, wait until next txg or so (waitfor? %d)\n",
