@@ -3916,14 +3916,18 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		} else {
 			ASSERT3S(xxxbleat, ==, B_FALSE);
 			VERIFY3P(rl, !=, NULL);
-			printf("ZFS: %s:%d: setting subrange T drop_rl F because we recovered a range lock"
-			    " off %lld len %lld (setter: %s:%d) and our arguments are foff %lld size %ld"
-			    " for fs %s file %s (lock at entry %d)\n", __func__, __LINE__,
-			    rl->r_off, rl->r_len,
-			    (rl->r_caller != NULL) ? rl->r_caller : "(null r_caller)",
-			    rl->r_line,
-			    ap->a_f_offset, ap->a_size,
-			    fsname, fname, had_map_lock_at_entry);
+			if (rl->r_off != trunc_page_64(ap->a_f_offset)
+			    || rl->r_len != round_page_64(rl->r_len)) {
+				printf("ZFS: %s:%d: setting subrange T drop_rl F because we recovered a range lock"
+				    " off %lld len %lld (setter: %s:%d) and our arguments are foff %lld size %ld"
+				    " for fs %s file %s (lock at entry %d)\n", __func__, __LINE__,
+				    rl->r_off, rl->r_len,
+				    (rl->r_caller != NULL) ? rl->r_caller : "(null r_caller)",
+				    rl->r_line,
+				    ap->a_f_offset, ap->a_size,
+				    fsname, fname, had_map_lock_at_entry);
+			}
+			/* otherwise it's a correct match, and we continue, setting subrange flag */
 			subrange = B_TRUE;
 			drop_rl = B_FALSE;
 		}

@@ -330,9 +330,9 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* See if we are colliding with other ZPL activity, abort if so */
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		rl_t *rl = NULL;
-		if ((rl = zfs_try_range_lock(zp, 0, ubcsize, RL_WRITER)) == NULL) {
+		if ((rl = zfs_try_range_lock(zp, 0, round_page_64(ubcsize), RL_WRITER)) == NULL) {
 			printf("ZFS: %s:%d: could not get range lock [0..%lld] for file %s\n",
-			    __func__, __LINE__, ubcsize, zp->z_name_cache);
+			    __func__, __LINE__, round_page_64(ubcsize), zp->z_name_cache);
 			ZFS_EXIT(zfsvfs);
 			return (VNODE_CLAIMED);
 		}

@@ -2893,12 +2893,19 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 				continue;
 			}
 			tsd_set(rl_key, rl);
+			/* we might have locked the entire file */
+			if (rl->r_len == UINT64_MAX && rl->r_off == 0)
+				break;
+			/* otherwise */
+			ASSERT3U(rl->r_off, <=, zp->z_size);
+			ASSERT3U(rl->r_len, >, 0);
 			/* we might luckily have locked a correctly page-aligned range */
-			if (((rl->r_off & PAGE_MASK_64) == 0
-				&& ((rl->r_off + rl->r_len) & PAGE_MASK_64) == 0)
-			    || (rl->r_len == UINT64_MAX && rl->r_off == 0)) {
+			if ((rl->r_off & PAGE_MASK_64) == 0
+			    && ((rl->r_off + rl->r_len) & PAGE_MASK_64) == 0) {
+				ASSERT3U(rl->r_off, ==, zp->z_size);
 				break;
 			}
+			ASSERT3U(rl->r_off, ==, zp->z_size);
 			/* otherwise, try to grab one now */
 			const uint64_t locked_off = rl->r_off;
 			const uint64_t aligned_locked_off = trunc_page_64(locked_off);
