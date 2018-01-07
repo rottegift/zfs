@@ -537,6 +537,8 @@ update_pages(vnode_t *vp, int64_t nbytes, struct uio *uio,
     off_t upl_start;
     off_t upl_size;
 
+    panic("ZFS: %s:%d: should not have been called for file %s\n", __func__, __LINE__, filename);
+
     const off_t orig_offset = uio_offset(uio);
     upl_start = trunc_page_64(orig_offset);
     const off_t upl_start_align_offset = orig_offset - upl_start;
@@ -2991,6 +2993,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	}
 
 //////////// old style write follows for non-regular files (never taken, right? )/////////////
+
+	panic("ZFS: %s:%d: fell through for fs %s file %s", __func__, __LINE__, fsname, fname);
 
 	/*
 	 * If we are called with the old_style flag true, or if we are
