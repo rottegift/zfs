@@ -1922,199 +1922,6 @@ out:
 	return (error);
 }
 
-typedef struct sync_range {
-	vnode_t  *vp;
-	off_t     start;
-	off_t     end;
-	size_t    start_resid;
-	boolean_t sync;
-	boolean_t range_lock;
-	boolean_t safety_check;
-} sync_range_t;
-
-static int
-zfs_write_sync_range_helper(vnode_t *vp, const off_t woff, const off_t end_range,
-    const size_t start_resid, const boolean_t do_sync,
-    rl_t *rl, boolean_t need_release, boolean_t need_upgrade)
-{
-	znode_t  *zp = VTOZ(vp);
-	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
-	int       error = 0;
-
-	ZFS_ENTER(zfsvfs);
-	ZFS_VERIFY_ZP(zp);
-
-	/*
-	 * On entry we hold a range lock and z_map_lock
-	 */
-	ASSERT(rw_write_held(&zp->z_map_lock));
-
-	struct vnop_pageout_args ap = {
-		.a_vp = vp,
-		.a_pl = NULL,
-		.a_pl_offset = 0,
-		.a_f_offset = trunc_page_64(woff),
-		.a_size = round_page_64(end_range) - trunc_page_64(woff),
-		.a_flags = UPL_MSYNC,
-		.a_context = NULL,
-	};
-
-	if (do_sync)
-		ap.a_flags |= UPL_IOSYNC;
-
-	ASSERT3U(ap.a_size, <=, MAX_UPL_TRANSFER_BYTES);
-
-	error = zfs_vnop_pageoutv2(&ap);
-
-	if (!error)
-	  zp->z_mr_sync = gethrtime();
-
-	z_map_drop_lock(zp, &need_release, &need_upgrade);
-
-	ASSERT3P(tsd_get(rl_key), ==, rl);
-	tsd_set(rl_key, NULL);
-	zfs_range_unlock(rl);
-
-	if (error != 0) {
-		printf("ZFS: %s:%d: zfs_vnop_pageoutv2 error %d"
-		    " woff %lld end_range %lld"
-		    " called with a_f_offset %lld and a_size %ld flags %d"
-		    " file %s\n", __func__, __LINE__, error,
-		    woff, end_range,
-		    trunc_page_64(woff),
-		    (size_t)(round_page_64(end_range) - trunc_page_64(woff)),
-		    ap.a_flags, zp->z_name_cache);
-	} else if (do_sync) {
-		zil_commit(zfsvfs->z_log, zp->z_id);
-	}
-
-	ZFS_EXIT(zfsvfs);
-	return (error);
-}
-
-static void
-zfs_write_sync_range(void *arg)
-{
-	sync_range_t *sync_range = arg;
-
-	off_t     woff         = sync_range->start;
-	off_t     end_range    = sync_range->end;
-	size_t    start_resid  = sync_range->start_resid;
-	vnode_t   *vp          = sync_range->vp;
-	boolean_t do_sync      = sync_range->sync;
-	boolean_t range_lock   = sync_range->range_lock;
-	boolean_t safety_check = sync_range->safety_check;
-
-	int error = 0;
-
-	/* we are here totally locklessly */
-
-	znode_t  *zp = VTOZ(vp);
-
-	ASSERT3P(zp, !=, NULL);
-	if (!zp) {
-		error = EIO;
-		goto get_out;
-	}
-	ASSERT3P(zp->z_sa_hdl, !=, NULL);
-	if (!zp->z_sa_hdl) {
-		error = EIO;
-		goto get_out;
-	}
-	ASSERT3P(zp->z_zfsvfs, !=, NULL);
-	if (!zp->z_zfsvfs) {
-		error = EIO;
-		goto get_out;
-	}
-
-	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
-
-	if (zfsvfs->z_unmounted) {
-		error = EIO;
-		goto get_out;
-	}
-
-	ZFS_ENTER_NOERROR(zfsvfs);
-
-	ASSERT(!rw_write_held(&zp->z_map_lock));
-
-	/* first make sure we bleat if someone else is paging this file */
-
-        if(zp->z_in_pager_op > 0) {
-                const hrtime_t start_time = gethrtime();
-                hrtime_t bleat_at = start_time + SEC2NSEC(1);
-                while (zp->z_in_pager_op > 0) {
-                        hrtime_t now = gethrtime();
-                        if (now > bleat_at) {
-                                bleat_at = now + SEC2NSEC(5);
-                                const hrtime_t ns_since = now - start_time;
-                                const uint32_t secs = NSEC2SEC(ns_since);
-                                printf("ZFS: %s:%d: %d seconds of waiting for"
-                                    " zp_in_pager_op to go to zero, is now %d"
-                                    " for [%lld..%lld] resid %ld file %s (range_lock %d)\n",
-                                    __func__, __LINE__, secs,
-                                    zp->z_in_pager_op,
-                                    woff, end_range, start_resid, zp->z_name_cache,
-                                    range_lock);
-                        }
-                        void IOSleep(unsigned milliseconds);
-                        IOSleep(1);
-                }
-        }
-
-	/*
-	 * next acquire the range lock.  make sure we overlock slightly to avoid
-	 * underlocking in pageoutv2
-	 */
-
-	ASSERT3S(end_range, >, woff);
-	ASSERT3S(end_range - woff, >, woff);
-	ASSERT3S(range_lock, ==, B_TRUE);
-	ASSERT3P(tsd_get(rl_key), ==, NULL);
-
-	rl_t *rl = zfs_range_lock(zp, trunc_page_64(woff),
-				  round_page_64(end_range - woff + PAGE_SIZE_64), RL_WRITER);
-	tsd_set(rl_key, rl);
-
-        if (safety_check) {
-                error = dmu_write_wait_safe(zp, woff, end_range);
-                printf("ZFS: %s:%d safety_check failed with error %d for file %s\n",
-                    __func__, __LINE__, error, zp->z_name_cache);
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		zfs_range_unlock(rl);
-		error = EDEADLK;
-		goto get_out;
-        }
-
-	/* next acquire the z_map_lock */
-
-	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-	ASSERT3S(tries, <=, 2);
-
-	/* zfs_write_sync_range_helper disposes of the rl and z_map_rw_lock */
-
-	error = zfs_write_sync_range_helper(vp, woff, end_range,
-	    start_resid, do_sync, rl, need_release, need_upgrade);
-
-	ZFS_EXIT(zfsvfs);
-
-get_out:
-
-	if (error != 0) {
-		znode_t *zp = VTOZ(vp);
-		if (do_sync) {
-			zfs_panic_recover("%s:%d failed with error %d file %s",
-			    __func__, __LINE__, error, zp->z_name_cache);
-		} else {
-			printf("ZFS: %s:%d sync failed, error %d file %s\n",
-			    __func__, __LINE__, error, zp->z_name_cache);
-		}
-	}
-
-	kmem_free(sync_range, sizeof(sync_range_t));
-}
 
 int
 zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
@@ -2575,14 +2382,41 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		mutex_exit(&zp->z_ubc_msync_lock);
 		unset_syncer = B_TRUE;
 
-
 		const off_t ubcsize = ubc_getsize(vp);
+
+		int cluster_copy_error = 0;
+		int pageoutv2_error = 0;
 
 		int vnode_get_error = vnode_get(vp);
 		ASSERT0(vnode_get_error);
+
 		if (!vnode_get_error) {
 			/* here we do the magic */
 			error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+
+			cluster_copy_error = error;
+			if (error == 0 && xfer_resid < this_chunk) {
+				const size_t to_sync = this_chunk - xfer_resid;
+				struct vnop_pageout_args ap = {
+					.a_vp = vp,
+					.a_pl = NULL,
+					.a_f_offset = this_off,
+					.a_size = round_page_64(to_sync),
+					.a_flags = UPL_MSYNC,
+					.a_context = NULL,
+				};
+				if (do_sync)
+					ap.a_flags |= UPL_IOSYNC;
+
+				ASSERT3U(ap.a_size, <=, MAX_UPL_TRANSFER_BYTES);
+
+				// tell fsync et al. to go away
+				zp->z_mr_sync = 0;
+
+				error = zfs_vnop_pageoutv2(&ap);
+
+				pageoutv2_error = error;
+			}
 			vnode_put(vp);
 		}
 		if (error == 0 && vnode_get_error != 0)
@@ -2762,9 +2596,12 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			}
 			VNOPS_STAT_INCR(zfs_write_cluster_copy_bytes, this_chunk - xfer_resid);
 		} else {
-			printf("ZFS: %s:%d: error %d from cluster_copy_ubc_data"
+			printf("ZFS: %s:%d: error %d from operation:"
+			    " vnode_get_error %d cluster_copy_error %d pageoutv2_error %d"
 			    " (woff %lld, resid %ld) (now %lld %lld) c %d file %s\n",
-			    __func__, __LINE__, error, woff, start_resid,
+			    __func__, __LINE__, error,
+			    vnode_get_error, cluster_copy_error, pageoutv2_error,
+			    woff, start_resid,
 			    uio_offset(uio), uio_resid(uio), c,
 			    zp->z_name_cache);
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
@@ -2855,110 +2692,23 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 	} // for
 
-	//ASSERT(!rw_write_held(&zp->z_map_lock));
+	/* we have now committed everything to the DMU layer, give up locks */
+
 	ASSERT3S(error, ==, 0);
-	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
+	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 
-	/*
-	 * The taskq task zfs_write_sync_range needs some information
-	 * in its *arg argument; it is responsible for freeing the
-	 * communications structure, not us.
-	 */
-	const boolean_t is_safe = dmu_write_is_safe(zp, woff, woff + sync_resid);
-	if (!is_safe) {
-		printf("ZFS: %s:%d: sending %s write [%lld, %lld] to task file %s\n",
-		    __func__, __LINE__,
-		    (do_sync) ? "sync" : "standard",
-		    woff, woff + sync_resid, zp->z_name_cache);
-		sync_range_t *sync_range = kmem_zalloc(sizeof(sync_range_t), KM_SLEEP);
+	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
-		if (sync_range == NULL) {
-			if (do_sync) {
-				zfs_panic_recover("cannot sync as kmem_zalloc returned NULL"
-				    " to %s:%d file %s\n",
-				    __func__, __LINE__, zp->z_name_cache);
-				ASSERT3P(tsd_get(rl_key), ==, rl);
-				tsd_set(rl_key, NULL);
-				zfs_range_unlock(rl);
-				goto skip_sync_out;
-			} else {
-				printf("ZFS: %s:%d: kmem_zalloc returned NULL!"
-				    " could not push file %s\n",
-				    __func__, __LINE__, zp->z_name_cache);
-				ASSERT3P(tsd_get(rl_key), ==, rl);
-				tsd_set(rl_key, NULL);
-				zfs_range_unlock(rl);
-				goto skip_sync_out;
-			}
-		}
+	ASSERT3P(tsd_get(rl_key), ==, rl);
+	tsd_set(rl_key, NULL);
+	zfs_range_unlock(rl);
+	rl = NULL;
 
-		sync_range->safety_check = B_TRUE;
-		sync_range->range_lock   = B_TRUE;
-		sync_range->sync         = do_sync;
-		sync_range->end          = woff + sync_resid;
-		sync_range->start        = woff;
-		sync_range->start_resid  = sync_resid;
-		sync_range->vp           = vp;
-
-		VERIFY3U(taskq_dispatch(system_taskq, zfs_write_sync_range, sync_range,
-			TQ_SLEEP), !=, 0);
-
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		zfs_range_unlock(rl);
-		rl = NULL;
-	}
-
-	if (is_safe) {
-		error = zfs_write_sync_range_helper(vp, woff, woff + sync_resid,
-		    sync_resid, do_sync, rl, need_release, need_upgrade);
-		if (error != 0) {
-			if (do_sync) {
-				printf("%s:%d BAD! ERROR! (do_sync) zfs_write_sync_range_helper"
-				    " returned error %d for range [%lld, %lld], file %s\n",
-				    __func__, __LINE__, error,
-				    woff, woff+sync_resid, zp->z_name_cache);
-			} else {
-				printf("%s:%d (not do_sync) zfs_write_sync_range_helper"
-				    " returned error %d for range [%lld, %lld], file %s\n",
-				    __func__, __LINE__, error,
-				    woff, woff+sync_resid, zp->z_name_cache);
-			}
-		}
-		rl = NULL;
-	}
-
-skip_sync_out:
-
-	ASSERT3P(rl, ==, NULL);
-
-	/* zfs_write_sync_range_helper takes responsibility for the range lock and the z_map_lock */
-
-	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
+	if (do_sync)
+		zil_commit(zfsvfs->z_log, zp->z_id);
 
 	ZFS_EXIT(zfsvfs);
 
-	/*
-	 * strictly speaking, in the do_sync == TRUE case we
-	 * should not return here until the zfs_write_sync_range
-	 * operation has completed successfully, which is not a given
-	 * if we handed off to the taskq.
-	 *
-	 * this could be done with e.g. a condvar, however we
-	 * could also wait on is_file_clean if we don't want to
-	 * worry about direct synchronization from the taskq
-	 * task, especially since it may be dropping and
-	 * reacquiring all sorts of locks.
-	 *
-	 * Another option is that we could turn the taskq_dispatch
-	 * into an in-this-thread call for the do_sync case (or inded
-	 * for both cases; it is also not clear that in the non-do_sync
-	 * case that we actually have to do a ubc_msync here (but we do
-	 * for the do_sync case!)).
-	 *
-	 * on the other hand, the taskq case may no longer be needed at all.
-	 */
 	return (error);
 }
 
