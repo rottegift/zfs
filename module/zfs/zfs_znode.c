@@ -2179,6 +2179,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
+	const off_t sync_eof = round_page_64(ubc_getsize(vp));
+	const off_t sync_new_eof = trunc_page_64(end);
+
 	/*
 	 * Clear any mapped pages in the truncated region.  This has to
 	 * happen outside of the transaction to avoid the possibility of
@@ -2186,34 +2189,36 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * about to invalidate.
 	 */
 
-	const off_t sync_eof = round_page_64(ubc_getsize(vp));
-	const off_t sync_new_eof = trunc_page_64(end);
-	const int msync_flags = UBC_PUSHDIRTY;
-
-	off_t msync_resid = 0;
-
-	int zfs_msync_err = zfs_ubc_msync(zp, rl,
-	    trunc_page_64(end), round_page_64(ubc_getsize(vp)), &msync_resid, msync_flags);
-
-	if (zfs_msync_err != 0) {
-		printf("ZFS: %s:%d: %s %d (resid %lld) synchronizing"
-		    " [%lld..%lld] (trunc to %lld)"
-		    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
-		    __func__, __LINE__,
-		    (msync_resid == 0) ? "ERROR" : "error",
-		    error, msync_resid,
-		    sync_eof, sync_new_eof, end,
-		    fsname, fname,
-		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-		    is_file_clean(vp, sync_new_eof) != 0);
-	}
+	/* First hold the vnode */
 
 	ASSERT3U(ubc_getsize(vp), >, end);
 
 	int vnode_get_error = vnode_get(vp);
 	int setsize_retval = 0;
 	ASSERT0(vnode_get_error);
+
 	if (!vnode_get_error) {
+
+		const int msync_flags = UBC_PUSHDIRTY;
+
+		off_t msync_resid = 0;
+
+		int zfs_msync_err = zfs_ubc_msync(zp, rl,
+		    trunc_page_64(end), round_page_64(ubc_getsize(vp)), &msync_resid, msync_flags);
+
+		if (zfs_msync_err != 0) {
+			printf("ZFS: %s:%d: %s %d (resid %lld) synchronizing"
+			    " [%lld..%lld] (trunc to %lld)"
+			    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
+			    __func__, __LINE__,
+			    (msync_resid == 0) ? "ERROR" : "error",
+			    error, msync_resid,
+			    sync_eof, sync_new_eof, end,
+			    fsname, fname,
+			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
+			    is_file_clean(vp, sync_new_eof) != 0);
+		}
+
 		setsize_retval = ubc_setsize(vp, end);
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
 	}
