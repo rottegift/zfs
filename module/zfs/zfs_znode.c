@@ -2150,7 +2150,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	struct vnode *vp = ZTOV(zp);
 	dmu_tx_t *tx;
 	rl_t *rl;
-	int error;
+	int error = 0;
 	sa_bulk_attr_t bulk[2];
 	int count = 0;
 	/*
@@ -2158,6 +2158,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 */
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
 	rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+	tsd_set(rl_key, rl);
 
 	/*
 	 * Nothing to do if file already at desired length.
@@ -2165,6 +2166,65 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	if (end >= zp->z_size) {
 		zfs_range_unlock(rl);
 		return (0);
+	}
+
+	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+	ASSERT3S(tries, <=, 2);
+
+	const off_t ubcsize_at_entry = ubc_getsize(vp);
+
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	/*
+	 * Clear any mapped pages in the truncated region.  This has to
+	 * happen outside of the transaction to avoid the possibility of
+	 * a deadlock with someone trying to push a page that we are
+	 * about to invalidate.
+	 */
+
+	const off_t sync_eof = round_page_64(ubc_getsize(vp));
+	const off_t sync_new_eof = trunc_page_64(end);
+	const int msync_flags = UBC_PUSHDIRTY;
+
+	off_t msync_resid = 0;
+
+	int zfs_msync_err = zfs_ubc_msync(zp, rl,
+	    trunc_page_64(end), round_page_64(ubc_getsize(vp)), &msync_resid, msync_flags);
+
+	if (zfs_msync_err != 0) {
+		printf("ZFS: %s:%d: %s %d (resid %lld) synchronizing"
+		    " [%lld..%lld] (trunc to %lld)"
+		    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
+		    __func__, __LINE__,
+		    (msync_resid == 0) ? "ERROR" : "error",
+		    error, msync_resid,
+		    sync_eof, sync_new_eof, end,
+		    fsname, fname,
+		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
+		    is_file_clean(vp, sync_new_eof) != 0);
+	}
+
+	ASSERT3U(ubc_getsize(vp), >, end);
+
+	int vnode_get_error = vnode_get(vp);
+	int setsize_retval = 0;
+	ASSERT0(vnode_get_error);
+	if (!vnode_get_error) {
+		setsize_retval = ubc_setsize(vp, end);
+		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
+	}
+
+	if (vnode_get_error != 0 || setsize_retval == 0) {
+		printf("ZFS: %s:%d: vnode_get_error %d (setsize_retval bad? %d)"
+		    " setting size to %lld from %lld (now ubcsize %lld, z_size %lld))"
+		    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
+		    __func__, __LINE__, vnode_get_error, setsize_retval,
+		    end, ubcsize_at_entry, ubc_getsize(vp), zp->z_size,
+		    fsname, fname,
+		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
+		    is_file_clean(vp, sync_new_eof) != 0);
 	}
 
 	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
@@ -2181,6 +2241,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	if (error) {
 		dmu_tx_abort(tx);
 		zfs_range_unlock(rl);
+		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		return (error);
 	}
 
@@ -2197,58 +2258,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	dmu_tx_commit(tx);
 
-	/*
-	 * Clear any mapped pages in the truncated region.  This has to
-	 * happen outside of the transaction to avoid the possibility of
-	 * a deadlock with someone trying to push a page that we are
-	 * about to invalidate.
-	 */
-
-	/*
-	 * OSX :  vnode_pager_setsize is a wrapper around ubc_setsize
-	 *        Also, we need to take the RW_WRITER lock here otherwise
-	 *        we will interfere with in-progress I/O.
-	 *        (notably, fsx failures without -L (no truncations) flag,
-	 *        if a range of pages is ubc_resident and is cut by the
-	 *        truncation).
-	 *
-	 *        Taking the z_map_lock also serializes the other vnops
-	 *        (notably pagein/pageoutv2/update_pages/mappedread_new).
-	 */
-
-	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-
-	int vnode_get_error = 1;
-
-	if (vnode_isreg(vp) || vn_has_cached_data(vp) || ubc_pages_resident(vp)) {
-		// note: 10a286 says "This work is accomplished
-		//       "by ubc_setsize()"  but does not call
-		// ubc_setsize, or anything in this rw_locked block,
-		// whereas we call it here:
-		/* first we grow the ubc size to the old size,
-		 * then we shrink it down; the shrinking will
-		 * guarantee ubc_setsize sees nsize < osize,
-		 * which causes it to cluster_zero out junk
-		 * as necessary
-		 */
-		if (spl_ubc_is_mapped(vp, NULL)) {
-			dprintf("ZFS: %s:%d: mapped file (write? %d) old: %lld new: %lld name: %s fs: %s\n",
-			    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
-			    ubc_getsize(vp), end, zp->z_name_cache,
-			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
-		}
-		vnode_get_error = vnode_get(vp);
-		ASSERT0(vnode_get_error);
-		if (!vnode_get_error) {
-			int setsize_retval = ubc_setsize(vp, end);
-			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
-		}
-	}
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
-
-	ASSERT3S(tries, <=, 2);
 
 	zfs_range_unlock(rl);
 
