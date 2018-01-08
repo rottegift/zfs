@@ -3359,8 +3359,10 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 		rrm_exit(&zfsvfs->z_teardown_lock, FTAG);
 	}
 
-	ret = zfs_vfs_sync(mp, (mntflags & MNT_FORCE) ? MNT_NOWAIT : MNT_WAIT, context);
-	ASSERT0(ret);
+	for (int i = 0; i < 50; i++) {
+		int sync_ret = zfs_vfs_sync(mp, MNT_NOWAIT, context);
+		ASSERT0(sync_ret);
+	}
 
 	/*
 	 * Flush all the files.
