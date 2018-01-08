@@ -3308,6 +3308,9 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 		if ((ret = zfsctl_umount_snapshots(zfsvfs->z_vfs, 0 /*fflag*/, cr)) != 0)
 			return (ret);
 #endif
+	ret = zfs_vfs_sync(mp, MNT_NOWAIT, context);
+	ASSERT0(ret);
+
         dprintf("vflush 1\n");
 
         ret = vflush(zfsvfs->z_vfs, zfsvfs->z_ctldir, (mntflags & MNT_FORCE) ? FORCECLOSE : 0|SKIPSYSTEM);
@@ -3355,6 +3358,9 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 		zfsvfs->z_unmounted = B_TRUE;
 		rrm_exit(&zfsvfs->z_teardown_lock, FTAG);
 	}
+
+	ret = zfs_vfs_sync(mp, (mntflags & MNT_FORCE) ? MNT_NOWAIT : MNT_WAIT, context);
+	ASSERT0(ret);
 
 	/*
 	 * Flush all the files.
