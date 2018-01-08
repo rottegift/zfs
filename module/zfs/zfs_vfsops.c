@@ -278,22 +278,29 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			ZFS_EXIT(zfsvfs);
 			return (VNODE_RETURNED);
 		}
-		if (zp->z_mr_sync < 10LL
-		    && !(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
-			/*
-			 * this is the only code that, via the ++
-			 * below, can generate a small nonzero z_mr_sync
-			 */
-			printf("ZFS: %s:%d: unwilling to be the first ubc_msync on fs %s file %s"
-			    " (prev attempts %lld) (waitfor %d, waitfor arg %d)\n",
-			    __func__, __LINE__, fsname, fname, zp->z_mr_sync,
-			    waitfor, *waitfor_arg);
-			zp->z_mr_sync++;
-			ZFS_EXIT(zfsvfs);
-			if (waitfor || zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)
-				return (VNODE_CLAIMED);
-			else
-				return (VNODE_RETURNED);
+		if (zp->z_mr_sync < 10LL) {
+			if(!(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
+				/*
+				 * this is the only code that, via the ++
+				 * below, can generate a small nonzero z_mr_sync
+				 */
+				printf("ZFS: %s:%d: unwilling to be the first ubc_msync on fs %s file %s"
+				    " (prev attempts %lld) (waitfor %d, waitfor arg %d)\n",
+				    __func__, __LINE__, fsname, fname, zp->z_mr_sync,
+				    waitfor, *waitfor_arg);
+				zp->z_mr_sync++;
+				ZFS_EXIT(zfsvfs);
+				if (waitfor || zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)
+					return (VNODE_CLAIMED);
+				else
+					return (VNODE_RETURNED);
+			} else {
+				printf("ZFS: %s:%d unmounting, so in spite of low mr_sync count %lld"
+				    " (waitfor %d, waitfor arg %d), proceeding"
+				    " to sync fs %s file %s\n", __func__, __LINE__,
+				    zp->z_mr_sync, waitfor, *waitfor_arg,
+				    fsname, fname);
+			}
 		} else if (zp->z_mr_sync < 8192LL) {
 			/*
 			 * 8192 is just a value bigger than the reset value in the vnops,
