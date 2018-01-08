@@ -2158,7 +2158,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 */
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
 	rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-	tsd_set(rl_key, rl);
 
 	/*
 	 * Nothing to do if file already at desired length.
@@ -2167,6 +2166,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		zfs_range_unlock(rl);
 		return (0);
 	}
+
+	ASSERT3P(tsd_get(rl_key), ==, NULL);
+	tsd_set(rl_key, rl);
 
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
@@ -2229,6 +2231,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
 	if (error) {
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
 		zfs_range_unlock(rl);
 		return (error);
 	}
@@ -2240,6 +2244,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	error = dmu_tx_assign(tx, TXG_WAIT);
 	if (error) {
 		dmu_tx_abort(tx);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
 		zfs_range_unlock(rl);
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		return (error);
@@ -2261,6 +2267,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
+	ASSERT3P(tsd_get(rl_key), ==, rl);
+	tsd_set(rl_key, NULL);
 	zfs_range_unlock(rl);
 
 	if (vnode_get_error == 0)
