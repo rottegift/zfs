@@ -434,7 +434,12 @@ zfs_vfs_sync(struct mount *vfsp, int waitfor, __unused vfs_context_t context)
         zfsvfs_t *zfsvfs = vfs_fsprivate(vfsp);
         dsl_pool_t *dp;
 
-        ZFS_ENTER(zfsvfs);
+	if (!POINTER_IS_VALID(zfsvfs)) {
+		printf("ZFS: %s:%d: invalid pointer\n", __func__, __LINE__);
+		return (EIO);
+	}
+
+        ZFS_ENTER_NOERROR(zfsvfs);
         dp = dmu_objset_pool(zfsvfs->z_os);
 
         /*
