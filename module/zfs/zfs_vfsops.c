@@ -196,10 +196,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 {
 	int *waitfor_arg = arg;
 	int waitfor = (*waitfor_arg & (MNT_WAIT | MNT_DWAIT)) != 0;
-	int err = 0;
 	boolean_t disclaim = B_FALSE;
 	int disclaim_err = 0;
 	boolean_t claim = B_FALSE;
+
+	boolean_t do_not_msync = B_FALSE;
 
 	if (vnode_isreg(vp) &&
 	    ubc_pages_resident(vp) &&
@@ -265,16 +266,16 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			const hrtime_t diff = (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1)) - gethrtime();
 			const uint32_t secs = NSEC2SEC(diff);
 			printf("ZFS: %s:%d: zfs_ubc_msync returned for file %s only %u seconds ago,"
-			    " so unwilling to sync right now, wait until next txg or so (waitfor? %d)\n",
+			    " so unwilling to msync right now, wait until next txg or so (waitfor? %d)"
+			    " but may zil_commit\n",
 			    __func__, __LINE__, zp->z_name_cache, secs, waitfor);
-			return (VNODE_CLAIMED);
+			do_not_msync = B_TRUE;
 		}
 		ZFS_ENTER_NOERROR(zfsvfs);
-		ZFS_VERIFY_ZP(zp);
 		const char *fname = zp->z_name_cache;
 		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
-		if (zp->z_sa_hdl == NULL) {
-			printf("ZFS: %s:%d: z_sa_hdl null for fs %s file %s (waitfor_arg %d)\n",
+		if (!POINTER_IS_VALID(zp) || zp->z_sa_hdl == NULL) {
+			printf("ZFS: %s:%d: invalid zp or z_sa_hdl null for fs %s file %s (waitfor_arg %d)\n",
 			    __func__, __LINE__, fsname, fname, *waitfor_arg);
 			ZFS_EXIT(zfsvfs);
 			return (VNODE_RETURNED);
@@ -286,15 +287,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 				 * below, can generate a small nonzero z_mr_sync
 				 */
 				printf("ZFS: %s:%d: unwilling to be the first ubc_msync on fs %s file %s"
-				    " (prev attempts %lld) (waitfor %d, waitfor arg %d)\n",
+				    " (prev attempts %lld) (waitfor %d, waitfor arg %d) (but may zil_commit)\n",
 				    __func__, __LINE__, fsname, fname, zp->z_mr_sync,
 				    waitfor, *waitfor_arg);
 				zp->z_mr_sync++;
-				ZFS_EXIT(zfsvfs);
-				if (waitfor || zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)
-					return (VNODE_CLAIMED);
-				else
-					return (VNODE_RETURNED);
+				do_not_msync = B_TRUE;
 			} else {
 				printf("ZFS: %s:%d unmounting, so in spite of low mr_sync count %lld"
 				    " (waitfor %d, waitfor arg %d), proceeding"
@@ -308,10 +305,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			 * but too small to be a realistic gethrtime() value
 			 */
 			printf("ZFS: %s:%d: attempting to sync probably-orphaned fs %s file %s"
-			    " (%lld prev tries) (waitfor %d, waitfor arg %d) (unmounting? %d -ed? %d)\n",
+			    " (%lld prev tries) (waitfor %d, waitfor arg %d) (unmounting? %d -ed? %d)"
+			    " (do_not_msync == %d)\n",
 			    __func__, __LINE__,
 			    fsname, fname, zp->z_mr_sync, waitfor, *waitfor_arg,
-			    zfsvfs->z_is_unmounting, zfsvfs->z_unmounted);
+			    zfsvfs->z_is_unmounting, zfsvfs->z_unmounted, do_not_msync);
 		}
 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
 		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
@@ -366,10 +364,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 
 		/* do the msync */
 		int msync_retval = 0;
-		if (zp->z_in_pager_op == 0) {
+
+		if (do_not_msync == B_FALSE && zp->z_in_pager_op == 0) {
 			claim = B_FALSE;
 			msync_retval = zfs_ubc_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
-		} else {
+		} else if (do_not_msync == B_FALSE) {
 			claim = B_TRUE;
 		}
 
@@ -408,13 +407,53 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    zp->z_name_cache);
 			return (VNODE_CLAIMED);
 		}
+		if (0 != is_file_clean(vp, ubc_getsize(vp)) && waitfor != B_TRUE)
+			return (VNODE_CLAIMED);
+		else
+			return (VNODE_RETURNED);
+	} else {
+		znode_t *zp = VTOZ(vp);
+		ASSERT3P(zp, !=, NULL);
+		if (!zp)
+			return (VNODE_CLAIMED);
+		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+		ASSERT3P(zfsvfs, !=, NULL);
+		if (!zfsvfs)
+			return (VNODE_RETURNED);
+		ZFS_ENTER_NOERROR(zfsvfs);
+		ASSERT3P(zp->z_sa_hdl, !=, NULL);
+		if (zp->z_sa_hdl == NULL) {
+			ZFS_EXIT(zfsvfs);
+			return (VNODE_CLAIMED);
+		}
+		ASSERT3P(zfsvfs->z_log, !=, NULL);
+		if (zfsvfs->z_log == NULL) {
+			ZFS_EXIT(zfsvfs);
+			return (VNODE_RETURNED);
+		}
+		const char *fname = zp->z_name_cache;
+		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+		if (vfs_isrdonly(zfsvfs->z_vfs) ||
+		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
+		    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+			printf("ZFS: %s:%d: attempting to zil_commit probably-orphaned fs %s file %s"
+			    " (%lld prev tries) (waitfor %d, waitfor arg %d) (unmounting? %d -ed? %d)\n",
+			    __func__, __LINE__,
+			    fsname, fname, zp->z_mr_sync, waitfor, *waitfor_arg,
+			    zfsvfs->z_is_unmounting, zfsvfs->z_unmounted);
+			ZFS_EXIT(zfsvfs);
+			return (VNODE_RETURNED);
+		}
+		zil_commit(zfsvfs->z_log, zp->z_id);
+		ZFS_EXIT(zfsvfs);
+		if (!vnode_isreg(vp) || !ubc_pages_resident(vp)) {
+			return (VNODE_RETURNED);
+		} else if (0 != is_file_clean(vp, ubc_getsize(vp)) && waitfor == B_TRUE) {
+			return (VNODE_CLAIMED);
+		} else {
+			return (VNODE_RETURNED);
+		}
 	}
-	if (claim == B_TRUE || (err != 0 && disclaim == B_FALSE)) {
-		printf("ZFS: %s:%d: VNODE_CLAIMED (err %d)(disclaim %d) for file %s\n",
-		    __func__, __LINE__, err, disclaim, VTOZ(vp)->z_name_cache);
-		return (VNODE_CLAIMED);
-	} else
-		return (VNODE_RETURNED);
 }
 
 int
@@ -468,8 +507,9 @@ zfs_vfs_sync(struct mount *vfsp, int waitfor, __unused vfs_context_t context)
 	int vnode_iter_ret = vnode_iterate(vfsp, VNODE_ALWAYS | VNODE_DRAINO, zfs_vfs_umcallback, &waitfor);
 	ASSERT0(vnode_iter_ret);
 
-        if (zfsvfs->z_log != NULL && (waitfor & MNT_WAIT))
-            zil_commit(zfsvfs->z_log, 0);
+        if (zfsvfs->z_log != NULL
+	    && ((waitfor & MNT_WAIT) || zfsvfs->z_is_unmounting))
+		zil_commit(zfsvfs->z_log, 0);
 
         ZFS_EXIT(zfsvfs);
 
@@ -3323,7 +3363,7 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 #endif
 	zfsvfs->z_is_unmounting = B_TRUE;
 
-	ret = zfs_vfs_sync(mp, MNT_NOWAIT, context);
+	ret = zfs_vfs_sync(mp, MNT_WAIT, context);
 	ASSERT0(ret);
 
         dprintf("vflush 1\n");
@@ -3373,8 +3413,8 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 		rrm_exit(&zfsvfs->z_teardown_lock, FTAG);
 	}
 
-	for (int i = 0; i < 50; i++) {
-		int sync_ret = zfs_vfs_sync(mp, MNT_NOWAIT, context);
+	for (int i = 0; i < 20; i++) {
+		int sync_ret = zfs_vfs_sync(mp, MNT_WAIT, context);
 		ASSERT0(sync_ret);
 	}
 
