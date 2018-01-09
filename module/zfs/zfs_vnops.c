@@ -970,8 +970,10 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			break;
 		}
 
-		if (err == EAGAIN && i < 16384)
+		if (err == EAGAIN && i < 16384) {
+			err = 0;
 			continue;
+		}
 
 		if (err != 0 || i >= 16384) {
 			// 16k is the maximum number of UPL pages possible, so
