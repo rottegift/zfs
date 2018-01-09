@@ -4622,10 +4622,10 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * syncer active, of if the file is already in pageout/pageoutv2.
 	 */
 
-	if (vnode_isrecycled(vp))
-		goto zero;
-
 	boolean_t zil_commit_only = B_FALSE;
+
+	if (vnode_isrecycled(vp))
+		zil_commit_only = B_TRUE;
 
 	if (zp->z_no_fsync != B_FALSE
 	    || zp->z_in_pager_op > 0
