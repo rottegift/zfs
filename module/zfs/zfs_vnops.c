@@ -609,7 +609,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		 *  RET_ONLY_ABSENT, this conditions should NEVER happen
 		 */
 		if (upl_dirty_page(pl, pg)) {
-			printf("ZFS: %s%d: (who_for: %d)"
+			printf("ZFS: %s%d: ERROR (who_for: %d)"
 			    " pg %d of (upl_size %lld upl_start %lld) file %s is DIRTY"
 			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, who_for, pg, upl_size, upl_start, filename,
@@ -620,15 +620,12 @@ fill_hole(vnode_t *vp, const off_t foffset,
 			return (EAGAIN);
 		}
 		if (upl_valid_page(pl, pg)) {
-			printf("ZFS: %s:%d (who_for %d)"
+			printf("ZFS: %s:%d warning (who_for %d)"
 			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
 			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, who_for, pg, upl_size, upl_start, filename,
 			    upl_flags, spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp));
-			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
-			(void) ubc_upl_unmap(upl);
-			return (EAGAIN);
 		}
 	}
 
