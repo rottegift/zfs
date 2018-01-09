@@ -2211,7 +2211,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const off_t sync_page_after_new_eof = sync_new_eof + PAGE_SIZE_64;
 	const off_t eof_pg_delta = trunc_page_64(zp->z_size) - sync_new_eof;
 
-	IMPLY(end < PAGE_SIZE_64, eof_pg_delta == 0);
+	IMPLY((end - zp->z_size) < PAGE_SIZE_64, eof_pg_delta == 0);
 
 	/*
 	 * Clear any mapped pages in the truncated region.  This has to
@@ -2236,7 +2236,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 		int zfs_msync_drop_ret = 0;
 
-		if (eof_pg_delta > 0)
+		if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64)
 			zfs_msync_drop_ret = zfs_ubc_msync(zp, rl,
 			    sync_page_after_new_eof, sync_eof, &msync_resid, UBC_INVALIDATE);
 
@@ -2255,14 +2255,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 		// step 2: ubc_setsize to trim the pages after the end of the new last page
 
-		int setsize_trim_pages = 0;
+		int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
-		if (eof_pg_delta > 0)
+		if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64)
 			setsize_trim_pages = zfs_trunc_tail_ubc_setsize(vp, round_page_64(end));
 
-		if (setsize_trim_pages == 0) { // TRUE on success
+		if (setsize_trim_pages == 0) { // TRUE on success or skip
 			printf("ZFS: %s:%d ubc_setsize error trimming pages"
-			    " [%lld..%lld] (trunc to %lld) (-pages %lld)"
+			    " %lld -> %lld (trunc to %lld) (-pages %lld)"
 			    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
 			    __func__, __LINE__,
 			    sync_eof, sync_new_eof, end, eof_pg_delta,
