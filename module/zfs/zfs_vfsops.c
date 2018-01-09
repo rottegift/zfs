@@ -3320,6 +3320,8 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 		if ((ret = zfsctl_umount_snapshots(zfsvfs->z_vfs, 0 /*fflag*/, cr)) != 0)
 			return (ret);
 #endif
+	zfsvfs->z_is_unmounting = B_TRUE;
+
 	ret = zfs_vfs_sync(mp, MNT_NOWAIT, context);
 	ASSERT0(ret);
 
@@ -3356,7 +3358,6 @@ zfs_vfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
         }
     }
 #endif
-	zfsvfs->z_is_unmounting = B_TRUE;
 
 	ret = vflush(mp, NULLVP, SKIPSYSTEM);
 
