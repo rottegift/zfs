@@ -412,21 +412,23 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		else
 			return (VNODE_RETURNED);
 	} else {
+		if (!vnode_isreg(vp) || vnode_isrecycled(vp))
+			return (VNODE_RETURNED);
+
 		znode_t *zp = VTOZ(vp);
 		ASSERT3P(zp, !=, NULL);
 		if (!zp)
 			return (VNODE_CLAIMED);
+		ASSERT3P(zp->z_sa_hdl, !=, NULL);
+		if (zp->z_sa_hdl == NULL) {
+			return (VNODE_CLAIMED);
+		}
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		ASSERT3P(zfsvfs, !=, NULL);
 		ASSERT0(!POINTER_IS_VALID(zfsvfs));
 		if (zfsvfs == NULL || !POINTER_IS_VALID(zfsvfs))
 			return (VNODE_RETURNED);
 		ZFS_ENTER_NOERROR(zfsvfs);
-		ASSERT3P(zp->z_sa_hdl, !=, NULL);
-		if (zp->z_sa_hdl == NULL) {
-			ZFS_EXIT(zfsvfs);
-			return (VNODE_CLAIMED);
-		}
 		ASSERT3P(zfsvfs->z_log, !=, NULL);
 		if (zfsvfs->z_log == NULL) {
 			ZFS_EXIT(zfsvfs);
