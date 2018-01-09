@@ -562,7 +562,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	int err = 0;
 
-	int upl_flags = UPL_SET_LITE | UPL_RET_ONLY_ABSENT;
+	int upl_flags = 0;
 
 	boolean_t unset_syncer = B_FALSE;
 
@@ -775,7 +775,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags = UPL_SET_LITE | UPL_RET_ONLY_ABSENT;
+		int uplcflags = 0;
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
