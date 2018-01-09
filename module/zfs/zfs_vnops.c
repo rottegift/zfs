@@ -4589,20 +4589,30 @@ ulong_t zfs_fsync_sync_cnt = 4;
 int
 zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 {
+
         znode_t *zp = VTOZ(vp);
+
+	if (zp == NULL || !POINTER_IS_VALID(zp)) {
+		printf("ZFS: %s:%d: invalid ZP!\n", __func__, __LINE__);
+		return (EIO);
+	}
+
         zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 
-       if (zp == NULL)
-		goto zero;
+	if (!zfsvfs) {
+		printf("ZFS: %s:%d: NULL zfsvfs!\n", __func__, __LINE__);
+		return (EIO);
+	}
 
 	ZFS_ENTER_NOERROR(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
 
 	const char *fname = zp->z_name_cache;
 
-	if (!zfsvfs) {
-		printf("ZFS: %s:%d: unmount(ed/ing) zfsvfs for file %s\n", __func__, __LINE__,
-		    fname);
+
+	if (zfsvfs->z_unmounted || zfsvfs->z_is_unmounting) {
+		printf("ZFS: %s:%d: unmount(ed/ing) [%d/%d] zfsvfs for file %s\n", __func__, __LINE__,
+		    zfsvfs->z_unmounted, zfsvfs->z_is_unmounting, fname);
 	}
 
 	/*
