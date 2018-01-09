@@ -7361,7 +7361,10 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 			    zp->z_size, zp->z_name_cache);
 		}
 
-		if (ubc_getsize(vp) < zp->z_size
+		int isclean = (is_file_clean(vp, ubc_getsize(vp)) == 0);
+
+		if (isclean
+		    && ubc_getsize(vp) < zp->z_size
 		    && trunc_page_64(ubc_getsize(vp)) < trunc_page_64(zp->z_size)) {
 			int set_initial_size_retval = ubc_setsize(vp, zp->z_size);
 			if (set_initial_size_retval == 0) {
@@ -7371,8 +7374,8 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 				    __func__, __LINE__, zp->z_size, zp->z_name_cache);
 			}
 		} else if (ubc_getsize(vp) < zp->z_size) {
-			printf("ZFS: %s:%d: setsize shrink %lld -> %lld skipped because in same page, file %s\n",
-			    __func__, __LINE__, ubc_getsize(vp), zp->z_size, zp->z_name_cache);
+			printf("ZFS: %s:%d: setsize shrink %lld -> %lld skipped because in same page (or dirty? %d), file %s\n",
+			    __func__, __LINE__, ubc_getsize(vp), zp->z_size, !isclean, zp->z_name_cache);
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
