@@ -418,7 +418,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			return (VNODE_CLAIMED);
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		ASSERT3P(zfsvfs, !=, NULL);
-		if (!zfsvfs)
+		ASSERT0(!POINTER_IS_VALID(zfsvfs));
+		if (zfsvfs == NULL || !POINTER_IS_VALID(zfsvfs))
 			return (VNODE_RETURNED);
 		ZFS_ENTER_NOERROR(zfsvfs);
 		ASSERT3P(zp->z_sa_hdl, !=, NULL);
