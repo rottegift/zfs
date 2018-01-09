@@ -101,7 +101,6 @@ extern const size_t MAX_UPL_SIZE_BYTES;
 extern const size_t MAX_UPL_TRANSFER_BYTES;
 
 typedef struct vnops_osx_stats {
-	kstat_named_t vnop_fsync_skipped;
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
@@ -135,7 +134,6 @@ typedef struct vnops_osx_stats {
 
 static vnops_osx_stats_t vnops_osx_stats = {
 	/* */
-	{ "vnop_fsync_skipped",                KSTAT_DATA_UINT64 },
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
@@ -1757,66 +1755,14 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	};
 #endif
 {
-	znode_t *zp = VTOZ(ap->a_vp);
-	zfsvfs_t *zfsvfs;
 	DECLARE_CRED_AND_CONTEXT(ap);
 	int err;
-
-	if (zp == NULL)
-		goto zero;
-
-	zfsvfs = zp->z_zfsvfs;
-
-	if (!zfsvfs)
-		goto zero;
-
-	/*
-	 * If vnode_create() puts us here, we deadlock in
-	 * memory_object_lock_request(). As vnode_isrecycled(vp) is a
-	 * snapshot indicating that the vnode is in the process of being
-	 * killed, we can use that to decide to just return 0.
-	 *
-	 * We should also not descend to zfs_ubc_msync if there is any
-	 * syncer active, of if the file is already in pageout/pageoutv2.
-	 */
-
-	if (vnode_isrecycled(ap->a_vp)
-	    || zp->z_no_fsync != B_FALSE
-	    || zp->z_in_pager_op > 0
-	    || zp->z_syncer_active != NULL)
-		goto zero;
-
-	/*
-	 * Alternatively, if it's a zero-size file, just return.
-	 */
-	if (ubc_getsize(ap->a_vp) == 0)
-		goto zero;
-
-	/*
-	 * Alternatively, if the file has never been through zfs_ubc_msync,
-	 * and is not dirty, then just return.
-	 */
-	if (zp->z_mr_sync < 1024LL) {
-		if (0 == is_file_clean(ap->a_vp, ubc_getsize(ap->a_vp))) {
-			goto zero;
-		} else {
-			printf("ZFS: %s:%d: z_mr_sync is small @ %lld"
-			    " but file is dirty at time of fsync vnop"
-			    " ubcsz %lld filesz %lld file %s\n",
-			    __func__, __LINE__, zp->z_mr_sync, ubc_getsize(ap->a_vp),
-			    zp->z_size, zp->z_name_cache);
-		}
-	}
 
 	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 
 	if (err) dprintf("%s err %d\n", __func__, err);
 
 	return (err);
-
-zero:
-	VNOPS_OSX_STAT_BUMP(vnop_fsync_skipped);
-	return (0);
 }
 
 int

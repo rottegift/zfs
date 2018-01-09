@@ -4595,11 +4595,15 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
        if (zp == NULL)
 		goto zero;
 
-	ZFS_ENTER(zfsvfs);
+	ZFS_ENTER_NOERROR(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
 
-	if (!zfsvfs)
-		goto zero;
+	const char *fname = zp->z_name_cache;
+
+	if (!zfsvfs) {
+		printf("ZFS: %s:%d: unmount(ed/ing) zfsvfs for file %s\n", __func__, __LINE__,
+		    fname);
+	}
 
 	/*
 	 * If vnode_create() puts us here, we deadlock in
@@ -4611,26 +4615,32 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * syncer active, of if the file is already in pageout/pageoutv2.
 	 */
 
-	if (vnode_isrecycled(vp)
-	    || zp->z_no_fsync != B_FALSE
-	    || zp->z_in_pager_op > 0
-	    || zp->z_syncer_active != NULL)
+	if (vnode_isrecycled(vp))
 		goto zero;
 
+	boolean_t zil_commit_only = B_FALSE;
+
+	if (zp->z_no_fsync != B_FALSE
+	    || zp->z_in_pager_op > 0
+	    || zp->z_syncer_active != NULL) {
+		zil_commit_only = B_TRUE;
+	}
+
 	/*
-	 * Alternatively, if it's a zero-size file, just return.
+	 * Alternatively, if it's a zero-size file, just zil_commit.
 	 */
 	if (ubc_getsize(vp) == 0)
-		goto zero;
+		zil_commit_only = B_TRUE;
 
 	/*
 	 * Alternatively, if the file has never been through zfs_ubc_msync,
-	 * and is not dirty, then just return.
+	 * and is not dirty, then just zil_commit.
 	 */
+
 	if (zp->z_mr_sync < 1024LL) {
 		zp->z_mr_sync = 0; // reset here to keep zfs_vfs_sync out of our hair
 		if (0 == is_file_clean(vp, ubc_getsize(vp))) {
-			goto zero;
+			zil_commit_only = B_TRUE;
 		} else {
 			printf("ZFS: %s:%d: z_mr_sync is small @ %lld but file is dirty at this time"
 			    " ubcsz %lld filesz %lld file %s (mapped? %d write? %d)\n",
@@ -4643,7 +4653,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 /* otherwise proceed to try to sync */
 
-	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED) {
+	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED || zfsvfs->z_log == NULL) {
 		VNOPS_STAT_BUMP(zfs_fsync_disabled);
 		goto zero;
 	}
@@ -4669,27 +4679,13 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		goto zero;
 	}
 
-	/*
-	 * We should not descend to zfs_ubc_msync if we are recycled,
-	 * or if the z_no_fsync flag is set, or if there is any syncer
-	 * active on the node.
-	 */
-
-	if (vnode_isrecycled(vp)
-	    || zp->z_no_fsync != B_FALSE
-	    || zp->z_in_pager_op > 0
-	    || zp->z_syncer_active != NULL) {
-		ASSERT3P(zp->z_syncer_active, !=, curthread);
-		goto zero;
-	}
-
 	if (spl_ubc_is_mapped(vp, NULL) && is_file_clean(vp, ubc_getsize(vp))) {
-		printf("ZFS: %s:%d: skipping fsync called on mapped file (writable? %d) (dirty? %d)"
+		printf("ZFS: %s:%d: skipping msync called on mapped file (writable? %d) (dirty? %d)"
 		    " (size %lld) %s\n",
 		    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
 		    is_file_clean(vp, ubc_getsize(vp)),
 		    zp->z_size, zp->z_name_cache);
-		goto zero;
+		zil_commit_only = B_TRUE;
 	}
 
 	boolean_t do_zil_commit = B_FALSE;
@@ -4705,6 +4701,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		// remember the semantics error = is_file_clean()
 		// in particular is_file_clean is EINVAL if the
 		// file has any dirty pages
+		zil_commit_only = B_TRUE;
 		do_zil_commit = B_TRUE;
 	}
 
@@ -4722,6 +4719,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		rl = zfs_try_range_lock(zp, 0, round_page_64(ubc_getsize(vp)), RL_WRITER);
 		if (rl != NULL) {
 			tsd_set(rl_key, rl);
+			do_zil_commit = B_TRUE;
 		} else {
 			printf("ZFS: %s:%d: unable to get range lock, skipping fsync for file %s\n",
 			    __func__, __LINE__, zp->z_name_cache);
@@ -4780,7 +4778,13 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	off_t resid_off = 0;
 	int flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
-	retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, flags);
+
+	// msync conditionally
+	if (zil_commit_only == B_FALSE)
+		retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, flags);
+	else
+		retval = 0;
+
 	if (retval != 0) {
 		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
 		    __func__, __LINE__, retval, zp->z_size, zp->z_name_cache);

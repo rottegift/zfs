@@ -270,6 +270,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			return (VNODE_CLAIMED);
 		}
 		ZFS_ENTER_NOERROR(zfsvfs);
+		ZFS_VERIFY_ZP(zp);
 		const char *fname = zp->z_name_cache;
 		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 		if (zp->z_sa_hdl == NULL) {
