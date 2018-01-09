@@ -562,7 +562,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	int err = 0;
 
-	int upl_flags = 0;
+	int upl_flags = UPL_WILL_MODIFY;
 
 	boolean_t unset_syncer = B_FALSE;
 
@@ -605,21 +605,40 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	for (int pg = 0; pg < upl_pages; pg++) {
 		/*
-		 *  as we hold the UPL map lock and said
-		 *  RET_ONLY_ABSENT, this conditions should NEVER happen
+		 * although we hold the mapping now and nothing will be
+		 * changed by another thread, our caller's range might
+		 * not be exact because of activity by a different
+		 * thread acting on the pages after it drops the map.
+		 *
+		 * dirty pages won't be in the DMU yet, and we should not
+		 * erase the dirtiness here by racing their cleaning with
+		 * our dmu read.
+		 *
+		 * however, we can just note clean pages, although we
+		 * could abort the UPL and send EAGAIN to our caller to
+		 * let it build a new hole for us to fill, which
+		 * presumably would exclude these pages.
+		 *
+		 * as we have said UPL_WILL_MODIFY, overwriting the clean
+		 * pages will protect COW semantics.
 		 */
+
 		if (upl_dirty_page(pl, pg)) {
-			printf("ZFS: %s%d: ERROR (who_for: %d)"
+			// we have lost a race to e.g. mmap
+			printf("ZFS: %s%d: WARNING (who_for: %d)"
 			    " pg %d of (upl_size %lld upl_start %lld) file %s is DIRTY"
 			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, who_for, pg, upl_size, upl_start, filename,
 			    upl_flags, spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp));
-			(void) ubc_upl_abort(upl, UPL_ABORT_RESTART | UPL_ABORT_FREE_ON_EMPTY);
-			(void) ubc_upl_unmap(upl);
+			int dirty_unmapret = ubc_upl_map(upl, &vaddr);
+			ASSERT0(dirty_unmapret);
+			int dirty_abortret = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+			ASSERT0(dirty_abortret);
 			return (EAGAIN);
 		}
 		if (upl_valid_page(pl, pg)) {
+			// we have lost a race to pagein
 			printf("ZFS: %s:%d warning (who_for %d)"
 			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
 			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
