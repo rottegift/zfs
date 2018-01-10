@@ -521,7 +521,11 @@ zfs_ubc_range_flag(znode_t *zp, vnode_t *vp, const off_t off, const off_t end, i
 	off_t f_offset;
 	int total_flagged = 0;
 	off_t filesize = ubc_getsize(vp);
-	off_t range_end = MIN(filesize, end);
+
+	ASSERT3U(off, >, filesize);
+
+	off_t range_end = round_page_64(MIN(filesize, end));
+	off_t range_start = trunc_page_64(off);
 	int flags;
 
 	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
@@ -531,7 +535,7 @@ zfs_ubc_range_flag(znode_t *zp, vnode_t *vp, const off_t off, const off_t end, i
 		    __func__, __LINE__, caller, filesize, off, end, zp->z_name_cache);
 	}
 
-	for (f_offset = 0; f_offset < range_end; f_offset += PAGE_SIZE_64) {
+	for (f_offset = range_start; f_offset < range_end; f_offset += PAGE_SIZE_64) {
 		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &flags);
 		if (pop_retval != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: (%s) error %d from ubc_page_op at offset %lld"
