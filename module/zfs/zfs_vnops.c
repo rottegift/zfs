@@ -513,6 +513,52 @@ ubc_invalidate_range(znode_t *zp, rl_t *rl, off_t start_byte, off_t end_byte)
 	return(ubc_invalidate_range_impl(zp, rl, start, end));
 }
 
+static int
+zfs_ubc_range_flag(znode_t *zp, vnode_t *vp, const off_t off, const off_t end, int flag, const char *caller)
+{
+	ASSERT3U(off, <, end);
+
+	off_t f_offset;
+	int total_flagged = 0;
+	off_t filesize = ubc_getsize(vp);
+	off_t range_end = MIN(filesize, end);
+	int flags;
+
+	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
+
+	if (filesize < end) {
+		printf("ZFS: %s:%d: (%s) bad range: ubcsize %lld off %lld end %lld file %s\n",
+		    __func__, __LINE__, caller, filesize, off, end, zp->z_name_cache);
+	}
+
+	for (f_offset = 0; f_offset < range_end; f_offset += PAGE_SIZE_64) {
+		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &flags);
+		if (pop_retval != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: (%s) error %d from ubc_page_op at offset %lld"
+			    " (filesize %lld, off %lld end %lld) file %s\n",
+			    __func__, __LINE__, caller, pop_retval, f_offset,
+			    filesize, off, end,
+			    zp->z_name_cache);
+		}
+		if (flags & flag)
+			total_flagged++;
+	}
+	return (total_flagged);
+}
+
+int
+zfs_ubc_range_dirty(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
+{
+	return(zfs_ubc_range_flag(zp, vp, off, end, UPL_POP_DIRTY, __func__));
+}
+
+// absent, precious, pageout (paged out)
+int
+zfs_ubc_range_busy(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
+{
+	return(zfs_ubc_range_flag(zp, vp, off, end, UPL_POP_BUSY, __func__));
+}
+
 /*
  * When a file is memory mapped, we must keep the IO data synchronized
  * between the DMU cache and the memory mapped pages.  What this means:
@@ -522,7 +568,6 @@ ubc_invalidate_range(znode_t *zp, rl_t *rl, off_t start_byte, off_t end_byte)
  */
 static int fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_size,
 	fill_holes_direction_t who_for);
-
 
 /* OSX UBC-aware implementation of zfs_read and mappedread follows */
 
@@ -2231,6 +2276,18 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		zp->z_syncer_active = curthread;
 		mutex_exit(&zp->z_ubc_msync_lock);
 		unset_syncer = B_TRUE;
+
+		const off_t rstart = uio_offset(uio);
+		const off_t rend = xfer_resid;
+		const int dirtypgs = zfs_ubc_range_dirty(zp, vp, rstart, rend);
+		const int busypgs  = zfs_ubc_range_busy (zp, vp, rstart, rend);
+
+		if (dirtypgs > 0 || busypgs > 0) {
+			printf("ZFS: %s:%d: WARNING busy %d dirty %d of %llu pages in range [%lld..%lld]"
+			    " of fs %s file %s before cluster copy\n",
+			    __func__, __LINE__, dirtypgs, busypgs, howmany(rend - rstart, PAGE_SIZE_64),
+			    rstart, rend, fsname, fname);
+		}
 
 		const off_t ubcsize = ubc_getsize(vp);
 
