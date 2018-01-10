@@ -562,7 +562,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 
 	int err = 0;
 
-	int upl_flags = UPL_WILL_MODIFY;
+	int upl_flags = UPL_RET_ONLY_ABSENT;
 
 	boolean_t unset_syncer = B_FALSE;
 
@@ -637,7 +637,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 			ASSERT0(dirty_abortret);
 			return (EAGAIN);
 		}
-		if (upl_valid_page(pl, pg)) {
+		if (upl_page_present(pl, pg)) {
 			// we have lost a race to pagein
 			printf("ZFS: %s:%d warning (who_for %d)"
 			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
@@ -645,6 +645,11 @@ fill_hole(vnode_t *vp, const off_t foffset,
 			    __func__, __LINE__, who_for, pg, upl_size, upl_start, filename,
 			    upl_flags, spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp));
+			int valid_unmapret = ubc_upl_map(upl, &vaddr);
+			ASSERT0(valid_unmapret);
+			int valid_abortret = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+			ASSERT0(valid_abortret);
+			return (EAGAIN);
 		}
 	}
 
@@ -791,7 +796,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags = 0;
+		int uplcflags = UPL_RET_ONLY_ABSENT | UPL_FILE_IO;
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
@@ -884,7 +889,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 					page_index++;
 				}
 				continue;
-			} else if (upl_valid_page(pl, page_index)) {
+			} else if (upl_page_present(pl, page_index)) {
 				page_index++;
 				/* count any present pages during first pass */
 				if (i == 0) present_pages_skipped++;
@@ -895,7 +900,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			for (page_index_hole_end = page_index + 1;
 			     page_index_hole_end < upl_num_pages;
 			     page_index_hole_end++) {
-				if (upl_valid_page(pl, page_index_hole_end) ||
+				if (upl_page_present(pl, page_index_hole_end) ||
 				    upl_dirty_page(pl, page_index_hole_end))
 					break;
 			}
