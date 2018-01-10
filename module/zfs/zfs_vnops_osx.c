@@ -3183,7 +3183,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	for (int64_t i = endpage; i >= stpage; i--) {
 		if (upl_valid_page(pl, i) ||
 		    upl_dirty_page(pl, i)) {
-			ASSERT(upl_page_present(pl, i));
 		} else {
 			printf("ZFS: %s:%d: bad page %lld (pgs %lld-%lld)"
 			    " [file bytes to write %lld-%lld] (size %lld)"
@@ -4324,7 +4323,6 @@ skip_lock_acquisition:
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
 		if (upl_dirty_page(pl, --page_index)) {
-			ASSERT(upl_page_present(pl, page_index));
 			break;
 		} else {
 			if (upl_valid_page(pl, page_index)) {
@@ -4491,7 +4489,6 @@ skip_lock_acquisition:
 		}
 		/* we found a present but not dirty page */
 		else if (upl_valid_page(pl, pg_index) && !upl_dirty_page(pl, pg_index)) {
-			ASSERT(upl_page_present(pl, pg_index));
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of present-but-not-dirty pages */
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
@@ -4502,7 +4499,6 @@ skip_lock_acquisition:
 					break;
 				}
 				ASSERT0(upl_dirty_page(pl, page_past_end_of_range));
-				ASSERT(upl_page_present(pl, page_past_end_of_range));
 				ASSERT(upl_valid_page(pl, page_past_end_of_range));
 			}
                         ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
@@ -4591,7 +4587,6 @@ skip_lock_acquisition:
 		}
 		/* we have found a dirty page */
 		else if (upl_dirty_page(pl, pg_index)) {
-			ASSERT(upl_page_present(pl, pg_index));
 			ASSERT(upl_valid_page(pl, pg_index));
 			int page_past_end_of_range = pg_index + 1;
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
