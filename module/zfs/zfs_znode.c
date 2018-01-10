@@ -1637,6 +1637,12 @@ zfs_rezget(znode_t *zp)
 		off_t zsize = zp->z_size;
 		vn_pages_remove(vp, 0, 0); // does nothing in O3X
 		if (zp->z_size != size || zp->z_size != ubcsize) {
+			if (zp->z_size < ubc_getsize(vp) && is_file_clean(vp, ubc_getsize(vp))) {
+				// is_file_clean returns nonzero if file is dirty
+				printf("ZFS: %s:%d: unclean file %s usize %lld zsize %lld\n",
+				    __func__, __LINE__,
+				    zp->z_name_cache, ubc_getsize(vp), zp->z_size);
+			}
 			int vnode_get_error = vnode_get(vp);
 			ASSERT0(vnode_get_error);
 			if (!vnode_get_error) {
@@ -2220,6 +2226,12 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * about to invalidate.
 	 */
 
+	if (is_file_clean(vp, ubc_getsize(vp))) {
+		// is_file_clean returns nonzero if file is dirty
+		printf("ZFS: %s:%d: unclean fs %s file %s usize %lld zsize %lld\n", __func__, __LINE__,
+		    fsname, fname, ubc_getsize(vp), zp->z_size);
+	}
+
 	/* First hold the vnode */
 
 	ASSERT3U(ubc_getsize(vp), >, end);
@@ -2270,7 +2282,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 			    is_file_clean(vp, sync_new_eof) != 0);
 		}
-
 
 		// step 3: ubc_setsize to the desired balue
 
