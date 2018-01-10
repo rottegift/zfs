@@ -2270,7 +2270,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		unset_syncer = B_TRUE;
 
 		const off_t rstart = uio_offset(uio);
-		const off_t rend = xfer_resid;
+		const off_t rend = uio_offset(uio) + xfer_resid;
 		const int dirtypgs = zfs_ubc_range_dirty(zp, vp, rstart, rend);
 		const int busypgs  = zfs_ubc_range_busy (zp, vp, rstart, rend);
 
