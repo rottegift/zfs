@@ -4805,6 +4805,12 @@ pageout_done:
 	}
 
 	if (drop_rl == B_TRUE) {
+		if (zp->z_range_locks != range_locks_at_entry + 1) {
+			printf("ZFS: %s:%d: range locks now %d range locks at entry %d, fs %s fname %s"
+			    " (rl == NULL? %d)\n",
+			    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname,
+			    rl == NULL);
+		}
 		VERIFY3P(rl, !=, NULL);
 		VERIFY3P(rl, !=, tsd_rl_at_entry);
 		ASSERT3S(subrange, ==, B_FALSE);
@@ -4812,16 +4818,6 @@ pageout_done:
 		tsd_set(rl_key, (rl_t *)tsd_rl_at_entry);
 		zfs_range_unlock(rl);
 		rl = NULL;
-	}
-
-	if (zp->z_range_locks != range_locks_at_entry) {
-		printf("ZFS: %s:%d: range locks now %d range locks at entry %d, fs %s fname %s"
-		    " (drop_rl? %d) (rl == NULL? %d)\n",
-		    __func__, __LINE__, zp->z_range_locks, range_locks_at_entry, fsname, fname,
-		    drop_rl, rl == NULL);
-		if (rl != NULL && zp->z_range_locks > range_locks_at_entry) {
-			//zfs_range_unlock(rl);
-		}
 	}
 
 	dec_z_in_pager_op(zp, fsname, fname);
