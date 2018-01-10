@@ -798,7 +798,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags = UPL_RET_ONLY_ABSENT;
+		int uplcflags = UPL_RET_ONLY_ABSENT | UPL_FILE_IO;
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
@@ -891,7 +891,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 					page_index++;
 				}
 				continue;
-			} else if (upl_page_present(pl, page_index)) {
+			} else if (upl_valid_page(pl, page_index)) {
 				page_index++;
 				/* count any present pages during first pass */
 				if (i == 0) present_pages_skipped++;
@@ -902,7 +902,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			for (page_index_hole_end = page_index + 1;
 			     page_index_hole_end < upl_num_pages;
 			     page_index_hole_end++) {
-				if (upl_page_present(pl, page_index_hole_end) ||
+				if (upl_valid_page(pl, page_index_hole_end) ||
 				    upl_dirty_page(pl, page_index_hole_end))
 					break;
 			}
