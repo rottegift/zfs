@@ -543,9 +543,9 @@ zfs_ubc_range_flag(znode_t *zp, vnode_t *vp, const off_t off, const off_t end, i
 			    __func__, __LINE__, caller, pop_retval, f_offset,
 			    filesize, off, end,
 			    zp->z_name_cache);
-		}
-		if (flags & flag)
+		} else if (flags & flag) {
 			total_flagged++;
+		}
 	}
 	return (total_flagged);
 }
@@ -2278,7 +2278,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		const int dirtypgs = zfs_ubc_range_dirty(zp, vp, rstart, rend);
 		const int busypgs  = zfs_ubc_range_busy (zp, vp, rstart, rend);
 
-		if (dirtypgs > 0) {
+		if (dirtypgs > 0 || busypages > 0) {
 			printf("ZFS: %s:%d: WARNING busy %d dirty %d of %llu pages in range [%lld..%lld]"
 			    " of fs %s file %s before cluster copy\n",
 			    __func__, __LINE__, dirtypgs, busypgs, howmany(rend - rstart, PAGE_SIZE_64),
