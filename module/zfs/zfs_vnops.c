@@ -798,7 +798,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags = UPL_RET_ONLY_ABSENT | UPL_FILE_IO;
+		int uplcflags = UPL_RET_ONLY_ABSENT;
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
