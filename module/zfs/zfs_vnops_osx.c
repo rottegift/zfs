@@ -2296,8 +2296,13 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	 * zfs_vnop_mnomap(), since those may update the file as well.
 	 */
 
+	const boolean_t rw_held_at_entry = rw_write_held(&zp->z_map_lock);
 	boolean_t need_rl_unlock = B_FALSE;
 	boolean_t need_z_lock = B_FALSE;
+
+	if (!rw_held_at_entry)
+		need_z_lock = B_TRUE;
+
 	rl_t *rl = NULL;
 	const rl_t *tsd_rl_on_entry = tsd_get(rl_key);
 
@@ -2309,24 +2314,35 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		need_rl_unlock = B_FALSE;
 	}
 
-	if (zp->z_in_pager_op > 0) {
+	if (rl == NULL && rw_held_at_entry == B_TRUE && zp->z_in_pager_op > 0) {
+		ASSERT(rw_write_held(&zp->z_map_lock));
+		rl_t *tsdrl = tsd_get(rl_key);
 		printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
-		    " skipping locking for"
-		    " [%lld..%lld] (size %ld uploff %u) fs %s file %s (nocommit? %d)\n",
+		    " SKIPPING LOCKING for"
+		    " [%lld..%lld] (size %ld uploff %u) fs %s file %s (nocommit? %d)"
+		    " tsd_rl? %d (r_type %d r_off %llu r_len %llu r_caller %s r_line %d\n",
 		    __func__, __LINE__, zp->z_in_pager_op, rw_write_held(&zp->z_map_lock),
 		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
-		    fsname, fname, flags & UPL_NOCOMMIT);
+		    fsname, fname, flags & UPL_NOCOMMIT,
+		    tsdrl != NULL,
+		    (tsdrl != NULL) ? tsdrl->r_type : -1,
+		    (tsdrl != NULL) ? tsdrl->r_off : 0,
+		    (tsdrl != NULL) ? tsdrl->r_len : 0,
+		    (tsdrl != NULL && tsdrl->r_caller != NULL) ? tsdrl->r_caller : "(null)",
+		    (tsdrl != NULL) ? tsdrl->r_line : 0);
 		need_z_lock = B_FALSE;
 		goto norwlock;
-	} else if (rw_write_held(&zp->z_map_lock)) {
-		if (!rl) need_rl_unlock = B_FALSE;
+	} else if (rl != NULL && rw_write_held(&zp->z_map_lock)) {
 		need_z_lock = B_FALSE;
-		printf("ZFS: %s:%d: lock held on entry for [%lld..%lld] (size %ld uploff %u) fs %s file %s,"
-		    " avoiding rangelocking (nocommit? %d)\n",
+		printf("ZFS: %s:%d: rwlock held on entry for [%lld..%lld] (size %ld uploff %u)"
+		    " fs %s file %s,"
+		    " but we got a range lock off %lld sz %lld (nocommit? %d) (hold rl? %d)\n",
 		    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size, ap->a_pl_offset,
-		    fsname, fname, flags & UPL_NOCOMMIT);
+		    fsname, fname,
+		    rl->r_off, rl->r_len,
+		    flags & UPL_NOCOMMIT, rl != NULL);
 		goto norwlock;
 	} else {
 		if (!rl && tsd_get(rl_key) != NULL) {
@@ -2343,8 +2359,10 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    fsname, fname,
 				    len, off, off + len, rl != NULL);
 				/* are we a subrange ? */
-				ASSERT3S(trunc_page_64(rl->r_off), <=, off);
-				ASSERT3S(trunc_page_64(rl->r_off)+ round_page_64(rl->r_len), >=, off + len);
+				ASSERT3S(tsdrl->r_type, !=, RL_WRITER); // where did we come from?
+				ASSERT3S(trunc_page_64(tsdrl->r_off), <=, off);
+				ASSERT3S(trunc_page_64(tsdrl->r_off)
+				    + round_page_64(tsdrl->r_len), >=, off + len);
 			} else {
 				printf("ZFS: %s:%d: TSD RL has mismatched zp, waiting for zfs_range_lock"
 				    " off %lld len %ld fs %s fsname %s\n", __func__, __LINE__,
