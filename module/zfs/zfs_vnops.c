@@ -637,7 +637,7 @@ fill_hole(vnode_t *vp, const off_t foffset,
 			ASSERT0(dirty_abortret);
 			return (EAGAIN);
 		}
-		if (upl_page_present(pl, pg)) {
+		if (upl_valid_page(pl, pg)) {
 			// we have lost a race to pagein
 			printf("ZFS: %s:%d warning (who_for %d)"
 			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is"
@@ -891,7 +891,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 					page_index++;
 				}
 				continue;
-			} else if (upl_valid_page(pl, page_index)) {
+			} else if (upl_page_present(pl, page_index)) {
 				page_index++;
 				/* count any present pages during first pass */
 				if (i == 0) present_pages_skipped++;
@@ -902,7 +902,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			for (page_index_hole_end = page_index + 1;
 			     page_index_hole_end < upl_num_pages;
 			     page_index_hole_end++) {
-				if (upl_valid_page(pl, page_index_hole_end) ||
+				if (upl_page_present(pl, page_index_hole_end) ||
 				    upl_dirty_page(pl, page_index_hole_end))
 					break;
 			}
