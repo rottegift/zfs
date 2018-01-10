@@ -123,7 +123,7 @@ typedef struct vnops_stats {
 	kstat_named_t fill_holes_ubc_satisfied_all;
 	kstat_named_t fill_holes_rop_present_total_skip;
 	kstat_named_t fill_holes_rop_present_bytes_skipped;
-	kstat_named_t fill_holes_upl_present_pages_skipped;
+	kstat_named_t fill_holes_upl_valid_pages_skipped;
 	kstat_named_t fill_holes_upl_absent_pages_filled;
 	kstat_named_t zfs_write_calls;
 	kstat_named_t zfs_write_clean_on_write;
@@ -157,7 +157,7 @@ static vnops_stats_t vnops_stats = {
 	{ "fill_holes_ubc_satisfied_all",                KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_total_skip",           KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_bytes_skipped",        KSTAT_DATA_UINT64 },
-	{ "fill_holes_upl_present_pages_skipped",        KSTAT_DATA_UINT64 },
+	{ "fill_holes_upl_valid_pages_skipped",        KSTAT_DATA_UINT64 },
 	{ "fill_holes_upl_absent_pages_filled",          KSTAT_DATA_UINT64 },
 	{ "zfs_write_calls",                             KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write",                    KSTAT_DATA_UINT64 },
@@ -682,12 +682,14 @@ fill_hole(vnode_t *vp, const off_t foffset,
 			ASSERT0(dirty_abortret);
 			return (EAGAIN);
 		}
-		if (upl_page_present(pl, pg)) {
+		if (upl_valid_page(pl, pg)) {
 			// we have lost a race to pagein
 			printf("ZFS: %s:%d warning (who_for %d)"
-			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
+			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is"
+			    " (present? %d) (valid? %d)"
 			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, who_for, pg, upl_size, upl_start, filename,
+			    upl_page_present(pl, pg), upl_valid_page(pl, pg),
 			    upl_flags, spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp));
 			int valid_unmapret = ubc_upl_map(upl, &vaddr);
@@ -792,7 +794,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		    zp->z_size, eof_page);
 	}
 
-	uint64_t present_pages_skipped = 0, absent_pages_filled = 0;
+	uint64_t valid_pages_skipped = 0, absent_pages_filled = 0;
 	off_t cur_upl_file_offset = upl_file_offset;
 	size_t cur_upl_size = upl_size;
 
@@ -905,7 +907,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			VERIFY3P(pl, !=, NULL);
 			if (upl_dirty_page(pl, page_index)) {
 				/* count any dirty pages during first pass */
-				if (i == 0) present_pages_skipped++;
+				if (i == 0) valid_pages_skipped++;
 				if (who_for == FILL_FOR_READ) {
 					/*
 					 * these may trigger a pageout
@@ -934,10 +936,10 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 					page_index++;
 				}
 				continue;
-			} else if (upl_page_present(pl, page_index)) {
+			} else if (upl_valid_page(pl, page_index)) {
 				page_index++;
-				/* count any present pages during first pass */
-				if (i == 0) present_pages_skipped++;
+				/* count any valid pages during first pass */
+				if (i == 0) valid_pages_skipped++;
 				continue;
 			}
 			/* this is a hole.  find its end */
@@ -945,7 +947,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			for (page_index_hole_end = page_index + 1;
 			     page_index_hole_end < upl_num_pages;
 			     page_index_hole_end++) {
-				if (upl_page_present(pl, page_index_hole_end) ||
+				if (upl_valid_page(pl, page_index_hole_end) ||
 				    upl_dirty_page(pl, page_index_hole_end))
 					break;
 			}
@@ -959,7 +961,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 			 * upl_abort(upl, ... | UPL_FREE_ON_EMPTY) does this.
 			 *
 			 * additionally add UPL_ABORT_REFERERNCE, which
-			 * boosts the present pages in the system LRU, so
+			 * boosts the valid pages in the system LRU, so
 			 * that they are less likely to be paged out as we
 			 * bring in the other pages in the range
 			 */
@@ -1085,7 +1087,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 	ASSERT3P(upl, ==, NULL);
 	ASSERT3P(pl, ==, NULL);
 
-	VNOPS_STAT_INCR(fill_holes_upl_present_pages_skipped, present_pages_skipped);
+	VNOPS_STAT_INCR(fill_holes_upl_valid_pages_skipped, valid_pages_skipped);
 	VNOPS_STAT_INCR(fill_holes_upl_absent_pages_filled, absent_pages_filled);
 
 	if (err == 0) {
@@ -1251,16 +1253,6 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			    __func__, __LINE__,
 			    pg_index, upl_num_pgs, resid, uio_resid(uio), *bytes_to_copy,
 			    upl_file_offset, upl_size, fsname, fname);
-#ifdef DO_SHORT_READ
-			if (resid < *bytes_to_copy) {
-				int umapretval = ubc_upl_unmap(upl);
-				ASSERT3S(umapretval, ==, KERN_SUCCESS);
-				int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
-				ASSERT3S(abortall, ==, KERN_SUCCESS);
-				*bytes_to_copy = resid;
-				return (0);
-			}
-#endif
 		}
 		if (upl_dirty_page(pl, pg_index)) {
 			/*

@@ -120,7 +120,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
 	kstat_named_t pageoutv2_invalid_tail_err;
-	kstat_named_t pageoutv2_present_pages_aborted;
+	kstat_named_t pageoutv2_valid_pages_aborted;
 	kstat_named_t pageoutv2_precious_pages_cleaned;
 	kstat_named_t pageoutv2_precious_pages_failed;
 	kstat_named_t pageoutv2_dirty_pages_blustered;
@@ -153,7 +153,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_err",        KSTAT_DATA_UINT64 },
-	{ "pageoutv2_present_pages_aborted",   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_valid_pages_aborted",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_cleaned",  KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_failed",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
@@ -3183,7 +3183,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	for (int64_t i = endpage; i >= stpage; i--) {
 		if (upl_valid_page(pl, i) ||
 		    upl_dirty_page(pl, i)) {
-			ASSERT(upl_page_present(pl, i));
 		} else {
 			printf("ZFS: %s:%d: bad page %lld (pgs %lld-%lld)"
 			    " [file bytes to write %lld-%lld] (size %lld)"
@@ -4304,10 +4303,10 @@ skip_lock_acquisition:
 
 	/*
 	 * The caller may hand us a memory range that results in a run
-	 * of pages at the end of the UPL that aren't present now.
+	 * of pages at the end of the UPL that aren't valid now.
 	 * Under memory pressure, the kernel may reclaim the whole UPL
 	 * from the moment we use a FREE_ON_EMPTY, if the UPL is
-	 * entirely non-present pages.  If this happens while we hold a
+	 * entirely non-valid pages.  If this happens while we hold a
 	 * ubc_upl_map, then we have one of two problems: [a] if we call
 	 * ubc_upl_unmap, we will panic because the UPL is now empty or
 	 * [b] we cannot call ubc_upl_unmap, but the mapping is not
@@ -4324,7 +4323,6 @@ skip_lock_acquisition:
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
 		if (upl_dirty_page(pl, --page_index)) {
-			ASSERT(upl_page_present(pl, page_index));
 			break;
 		} else {
 			if (upl_valid_page(pl, page_index)) {
@@ -4432,8 +4430,8 @@ skip_lock_acquisition:
 	 * If we have an absent page, keep gathering subsequnt absent pages,
 	 * then abort them as a range.
 	 *
-	 * If we have a present-but-not-dirty page, keep gathering subsequent
-	 * present-but-not-dirty pages, then abort them as a range.
+	 * If we have a valid-but-not-dirty page, keep gathering subsequent
+	 * valid-but-not-dirty pages, then abort them as a range.
 	 *
 	 * If in either of the above cases we will deal with the last page in the UPL,
 	 * then unmap before the {commit,abort}_range call.
@@ -4455,7 +4453,7 @@ skip_lock_acquisition:
 			/* gather up a range of absent pages */
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
-				if (upl_page_present(pl, page_past_end_of_range))
+				if (upl_valid_page(pl, page_past_end_of_range))
 					break;
 			}
 			ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
@@ -4485,24 +4483,21 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
 			}
-			VNOPS_OSX_STAT_INCR(pageoutv2_present_pages_aborted, pages_in_range);
+			VNOPS_OSX_STAT_INCR(pageoutv2_valid_pages_aborted, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
 		}
-		/* we found a present but not dirty page */
+		/* we found a valid but not dirty page */
 		else if (upl_valid_page(pl, pg_index) && !upl_dirty_page(pl, pg_index)) {
-			ASSERT(upl_page_present(pl, pg_index));
 			int64_t page_past_end_of_range = pg_index + 1;
-			/* gather up a range of present-but-not-dirty pages */
+			/* gather up a range of valid-but-not-dirty pages */
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
-				if (!upl_page_present(pl, page_past_end_of_range) ||
-				    !upl_valid_page(pl, page_past_end_of_range) ||
+				if (!upl_valid_page(pl, page_past_end_of_range) ||
 				    upl_dirty_page(pl, page_past_end_of_range)) {
 					break;
 				}
 				ASSERT0(upl_dirty_page(pl, page_past_end_of_range));
-				ASSERT(upl_page_present(pl, page_past_end_of_range));
 				ASSERT(upl_valid_page(pl, page_past_end_of_range));
 			}
                         ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
@@ -4511,7 +4506,7 @@ skip_lock_acquisition:
                         const off_t pages_in_range = page_past_end_of_range - pg_index;
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			if (xxxbleat) printf("ZFS: %s:%d committing precious (present-but-not-dirty) upl bytes"
+			if (xxxbleat) printf("ZFS: %s:%d committing precious (valid-but-not-dirty) upl bytes"
 			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
@@ -4538,7 +4533,7 @@ skip_lock_acquisition:
 			    end_of_range, commit_precious_flags);
 			if (commit_precious_ret != KERN_SUCCESS) {
 				/*
-				 * This is an error there is still a present page
+				 * This is an error there is still a valid page
 				 * at a higher page index in this UPL, but is OK
 				 * if the pages are at the end of the UPL and we
 				 * have received KERN_FAILURE (error 5) indicating
@@ -4591,16 +4586,13 @@ skip_lock_acquisition:
 		}
 		/* we have found a dirty page */
 		else if (upl_dirty_page(pl, pg_index)) {
-			ASSERT(upl_page_present(pl, pg_index));
 			ASSERT(upl_valid_page(pl, pg_index));
 			int page_past_end_of_range = pg_index + 1;
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
 				if (!upl_dirty_page(pl, page_past_end_of_range) ||
-				    !upl_valid_page(pl, page_past_end_of_range) ||
-				    !upl_page_present(pl, page_past_end_of_range))
+				    !upl_valid_page(pl, page_past_end_of_range))
 					break;
-				ASSERT(upl_page_present(pl, page_past_end_of_range));
 				ASSERT(upl_valid_page(pl, page_past_end_of_range));
 				ASSERT(upl_dirty_page(pl, page_past_end_of_range));
 			}
@@ -4708,7 +4700,6 @@ skip_lock_acquisition:
 			pg_index = page_past_end_of_range;
 			continue;
 		} else {
-			ASSERT0(upl_page_present(pl, pg_index));
 			ASSERT0(upl_dirty_page(pl, pg_index));
 			ASSERT0(upl_valid_page(pl, pg_index));
 			panic("unknown page type, pg_index %lld of file range [%lld..%lld] fs %s file %s",
@@ -7569,11 +7560,11 @@ zfs_advisory_read_ext(vnode_t *vp, off_t filesize, off_t f_offset, int resid, in
 
                 /*
                  * before we start marching forward, we must make sure we end on
-                 * a present page, otherwise we will be working with a freed
+                 * a valid page, otherwise we will be working with a freed
                  * upl
                  */
                 for (last_pg = pages_in_upl - 1; last_pg >= 0; last_pg--) {
-                        if (upl_page_present(pl, last_pg))
+                        if (upl_valid_page(pl, last_pg))
                                 break;
                 }
                 pages_in_upl = last_pg + 1;
@@ -7581,23 +7572,23 @@ zfs_advisory_read_ext(vnode_t *vp, off_t filesize, off_t f_offset, int resid, in
                 for (last_pg = 0; last_pg < pages_in_upl; ) {
                         /*
                          * scan from the beginning of the upl looking for the first
-                         * page that is present.... this will become the first page in
+                         * page that is valid.... this will become the first page in
                          * the request we're going to make to 'cluster_io'... if all
                          * of the pages are absent, we won't call through to 'cluster_io'
                          */
                         for (start_pg = last_pg; start_pg < pages_in_upl; start_pg++) {
-                                if (upl_page_present(pl, start_pg))
+                                if (upl_valid_page(pl, start_pg))
                                         break;
                         }
 
                         /*
-                         * scan from the starting present page looking for an absent
+                         * scan from the starting valid page looking for an absent
                          * page before the end of the upl is reached, if we
                          * find one, then it will terminate the range of pages being
                          * presented to 'cluster_io'
                          */
                         for (last_pg = start_pg; last_pg < pages_in_upl; last_pg++) {
-                                if (!upl_page_present(pl, last_pg))
+                                if (!upl_valid_page(pl, last_pg))
                                         break;
                         }
 
