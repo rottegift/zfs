@@ -640,9 +640,11 @@ fill_hole(vnode_t *vp, const off_t foffset,
 		if (upl_page_present(pl, pg)) {
 			// we have lost a race to pagein
 			printf("ZFS: %s:%d warning (who_for %d)"
-			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is VALID"
+			    " pg %d of (upl_size = %lld, upl_start = %lld) of file %s is"
+			    " (present? %d) (valid? %d)"
 			    " upl_flags %d, is_mapped %d, is_mapped_writable %d\n",
 			    __func__, __LINE__, who_for, pg, upl_size, upl_start, filename,
+			    upl_page_present(pl, pg), upl_valid_page(pl, pg),
 			    upl_flags, spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp));
 			int valid_unmapret = ubc_upl_map(upl, &vaddr);
@@ -796,7 +798,7 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 		ASSERT3S(err, ==, 0);
 
-		int uplcflags = UPL_RET_ONLY_ABSENT | UPL_FILE_IO;
+		int uplcflags = UPL_RET_ONLY_ABSENT;
 
 		ASSERT3P(zp->z_syncer_active, !=, curthread);
 		mutex_enter(&zp->z_ubc_msync_lock);
