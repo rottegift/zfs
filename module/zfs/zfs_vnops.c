@@ -3764,7 +3764,7 @@ top:
 		if (t_dirty > 0 || t_pageout > 0 || t_precious > 0 || t_busy > 0 || vnode_isinuse(vp, 0)) {
 			may_delete_now = 0;
 			printf("ZFS: %s:%d: may not delete now because of unusual page condition (t_errs %d)"
-			    " dirty %d pageout %d precious %d busy %d totlpgs %lld vnode_inuse %d file %s",
+			    " dirty %d pageout %d precious %d busy %d totlpgs %lld vnode_inuse %d file %s\n",
 			    __func__, __LINE__, t_errs,
 			    t_dirty, t_pageout, t_precious, t_busy,
 			    howmany(ubc_getsize(vp), PAGE_SIZE_64), vnode_isinuse(vp, 0),
