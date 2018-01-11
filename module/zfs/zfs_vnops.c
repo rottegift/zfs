@@ -2278,7 +2278,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		const int dirtypgs = zfs_ubc_range_dirty(zp, vp, rstart, rend);
 		const int busypgs  = zfs_ubc_range_busy (zp, vp, rstart, rend);
 
-		if (dirtypgs > 1 || busypgs > 0) {
+		if (dirtypgs > 0 || busypgs > 0) {
 			printf("ZFS: %s:%d: WARNING busy %d dirty %d of %llu pages in range [%lld..%lld]"
 			    " of fs %s file %s before cluster copy\n",
 			    __func__, __LINE__, busypgs, dirtypgs,
