@@ -3548,7 +3548,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		struct vnode	*a_vp;
 		upl_t		a_pl;
 		vm_offset_t	a_pl_offset;
-		off_t		a_foffset;
+		off_t		a_f_offset;
 		size_t		a_size;
 		int		a_flags;
 		vfs_context_t	a_context;
@@ -3610,9 +3610,20 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			ASSERT0(zp->z_in_pager_op);
 		}
 
-		if (zp && zp->z_sa_hdl && zp->z_syncer_active != curthread)
-			ASSERT3P(zp->z_syncer_active, ==, NULL);
-		else if (zp && zp->z_sa_hdl)
+		if (zp && zp->z_sa_hdl && zp->z_syncer_active != curthread) {
+			if (zp->z_syncer_active != NULL) {
+				rl_t *tsdrl = tsd_get(rl_key);
+				panic("ZFS: %s:%d: [3614 case]: z_syncer_active is not me or NULL! (z_map_lock held? %d z_in_pager_op %d)"
+				    " a_f_offset %llu a_size %lu a_flags %d (tsd_rl? %d r_off %llu r_len %llu) file %s\n",
+				    __func__, __LINE__,
+				    rw_write_held(&zp->z_map_lock), zp->z_in_pager_op,
+				    ap->a_f_offset, ap->a_size, ap->a_flags,
+				    tsdrl != NULL,
+				    (tsdrl != NULL) ? tsdrl->r_off : 0,
+				    (tsdrl != NULL) ? tsdrl->r_len : 0,
+				    zp->z_name_cache);
+			}
+		} else if (zp && zp->z_sa_hdl)
 			printf("ZFS: %s:%d: I am active syncer but zp->z_in_pager_op is %d\n",
 			    __func__, __LINE__, zp->z_in_pager_op);
 		else
