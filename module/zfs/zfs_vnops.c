@@ -522,7 +522,10 @@ zfs_ubc_range_all_flags(znode_t *zp, vnode_t *vp, const off_t off, const off_t e
 	ASSERT3U(off, <=, end);
 
 	off_t f_offset;
-	off_t filesize = ubc_getsize(vp);
+	off_t filesize = MAX(ubc_getsize(vp), zp->z_size);
+
+	if (filesize == 0)
+		return (0);
 
 	ASSERT3U(off, <=, filesize);
 
@@ -531,8 +534,10 @@ zfs_ubc_range_all_flags(znode_t *zp, vnode_t *vp, const off_t off, const off_t e
 	int errs = 0;
 	int flags = 0;
 
+	if (range_start == range_end)
+		range_end += PAGE_SIZE_64;
+
 	ASSERT3U(range_start, <, range_end);
-	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 
 	if (round_page_64(filesize) < round_page_64(end)) {
 		printf("ZFS: %s:%d: (%s) bad range: ubcsize %lld off %lld end %lld"
@@ -569,7 +574,7 @@ int
 zfs_ubc_range_dirty(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
 {
 	int dirty = 0;
-	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
+	(void) zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
 	    &dirty, NULL, NULL, NULL, NULL);
 	//ASSERT0(errs);
 	return (dirty);
@@ -579,7 +584,7 @@ int
 zfs_ubc_range_busy(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
 {
 	int busy = 0;
-	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
+	(void) zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
 	    NULL, NULL, NULL, NULL, &busy);
 	//ASSERT0(errs);
 	return (busy);
@@ -589,7 +594,7 @@ boolean_t
 zfs_is_ubc_range_busy_or_dirty(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
 {
 	int busy = 0, dirty = 0;
-	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
+	(void) zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
 	    &dirty, NULL, NULL, NULL, &busy);
 	//ASSERT0(errs);
 	return(busy == 0 && dirty == 0);
