@@ -527,7 +527,7 @@ zfs_ubc_range_all_flags(znode_t *zp, vnode_t *vp, const off_t off, const off_t e
 	if (filesize == 0)
 		return (0);
 
-	ASSERT3U(off, <=, filesize);
+	ASSERT3U(off, <=, round_page_64(filesize));
 
 	off_t range_end = round_page_64(MIN(filesize, end));
 	off_t range_start = trunc_page_64(off);
