@@ -3766,7 +3766,7 @@ top:
 		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
 		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 		ASSERT0(vnode_isinuse(vp, 0));
-		if (t_dirty > 0 || t_pageout > 0 || t_precious > 0 || t_busy > 0 || vnode_isinuse(vp, 0)) {
+		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0 || vnode_isinuse(vp, 0)) {
 			may_delete_now = 0;
 			printf("ZFS: %s:%d: may not delete now because of unusual page condition (t_errs %d)"
 			    " dirty %d pageout %d precious %d busy %d totlpgs %lld vnode_inuse %d file %s\n",
