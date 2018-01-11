@@ -147,6 +147,7 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
 	kstat_named_t zfs_fsync_zil_commit_reg_vn;
 	kstat_named_t zfs_fsync_ubc_msync;
+	kstat_named_t zfs_fsync_ubc_msync_averted;
 	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t zfs_fsync_disabled;
 	kstat_named_t zfs_fsync_skipped;
@@ -157,7 +158,7 @@ static vnops_stats_t vnops_stats = {
 	{ "fill_holes_ubc_satisfied_all",                KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_total_skip",           KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_bytes_skipped",        KSTAT_DATA_UINT64 },
-	{ "fill_holes_upl_valid_pages_skipped",        KSTAT_DATA_UINT64 },
+	{ "fill_holes_upl_valid_pages_skipped",          KSTAT_DATA_UINT64 },
 	{ "fill_holes_upl_absent_pages_filled",          KSTAT_DATA_UINT64 },
 	{ "zfs_write_calls",                             KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write",                    KSTAT_DATA_UINT64 },
@@ -173,7 +174,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_write_uio_dbufs",                         KSTAT_DATA_UINT64 },
 	{ "zfs_write_uio_dbuf_bytes",                    KSTAT_DATA_UINT64 },
 	{ "zfs_zero_length_write",                       KSTAT_DATA_UINT64 },
-	{ "zfs_write_isreg_want_lock",                      KSTAT_DATA_UINT64 },
+	{ "zfs_write_isreg_want_lock",                   KSTAT_DATA_UINT64 },
 	{ "zfs_read_calls",                              KSTAT_DATA_UINT64 },
 	{ "zfs_read_clean_on_read",                      KSTAT_DATA_UINT64 },
 	{ "mappedread_lock_tries",                       KSTAT_DATA_UINT64 },
@@ -181,6 +182,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit_reg_vn",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
+	{ "zfs_fsync_ubc_msync_averted",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_skipped",                           KSTAT_DATA_UINT64 },
@@ -579,6 +581,16 @@ zfs_ubc_range_busy(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
 	    NULL, NULL, NULL, NULL, &busy);
 	ASSERT0(errs);
 	return (busy);
+}
+
+boolean_t
+zfs_is_ubc_range_busy_or_dirty(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
+{
+	int busy = 0, dirty = 0;
+	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
+	    &dirty, NULL, NULL, NULL, &busy);
+	ASSERT0(errs);
+	return(busy == 0 && dirty == 0);
 }
 
 /*
@@ -4805,6 +4817,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * almost certainly cause pageoutv2 to do a zil_commit.
 	 *
 	 */
+
 	if (ubc_getsize(vp) == 0 || ubc_pages_resident(vp) == 0 ||
 	    is_file_clean(vp, ubc_getsize(vp)) == 0) {
 		// remember the semantics error = is_file_clean()
@@ -4889,10 +4902,13 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	int flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
 
 	// msync conditionally
-	if (zil_commit_only == B_FALSE)
+	if (zil_commit_only == B_FALSE || zfs_ubc_range_busy(zp, vp, 0, ubc_getsize(vp)) > 0) {
 		retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, flags);
-	else
+		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
+	} else {
 		retval = 0;
+		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync_averted);
+	}
 
 	if (retval != 0) {
 		printf("ZFS: %s:%d: error %d from force msync of (size %lld) file %s\n",
@@ -4906,8 +4922,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		tsd_set(rl_key, NULL);
 		zfs_range_unlock(rl);
 	}
-
-	VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 
 	if (do_zil_commit == B_TRUE && have_trl == B_FALSE) {
 		VNOPS_STAT_BUMP(zfs_fsync_zil_commit_reg_vn);
