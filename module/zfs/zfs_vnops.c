@@ -2312,15 +2312,20 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		const off_t rstart = uio_offset(uio);
 		const off_t rend = uio_offset(uio) + xfer_resid;
-		const int dirtypgs = zfs_ubc_range_dirty(zp, vp, rstart, rend);
-		const int busypgs  = zfs_ubc_range_busy (zp, vp, rstart, rend);
 
-		if (dirtypgs > 0 || busypgs > 0) {
-			printf("ZFS: %s:%d: WARNING busy %d dirty %d of %llu pages in range [%lld..%lld]"
+		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
+		int t_errs = zfs_ubc_range_all_flags(zp, vp, rstart, rend,
+		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+
+		if (t_dirty > 0 || t_busy > 0) {
+			// interested most in case where busy > 0 and EOF ~ usize
+			printf("ZFS: %s:%d: WARNING (t_errs %d) busy %d dirty %d precious %d absent %d pageout %d"
+			    " of %llu pages in range [%llu..%llu] (zsize %llu usize %llu)"
 			    " of fs %s file %s before cluster copy\n",
-			    __func__, __LINE__, busypgs, dirtypgs,
+			    __func__, __LINE__, t_errs, t_busy, t_dirty, t_precious, t_absent, t_pageout,
 			    howmany(rend - rstart, PAGE_SIZE_64),
-			    rstart, rend, fsname, fname);
+			    rstart, rend, zp->z_size, ubc_getsize(vp),
+			    fsname, fname);
 		}
 
 		const off_t ubcsize = ubc_getsize(vp);
