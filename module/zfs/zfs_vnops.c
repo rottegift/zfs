@@ -513,20 +513,21 @@ ubc_invalidate_range(znode_t *zp, rl_t *rl, off_t start_byte, off_t end_byte)
 	return(ubc_invalidate_range_impl(zp, rl, start, end));
 }
 
-static int
-zfs_ubc_range_flag(znode_t *zp, vnode_t *vp, const off_t off, const off_t end, int flag, const char *caller)
+int
+zfs_ubc_range_all_flags(znode_t *zp, vnode_t *vp, const off_t off, const off_t end,
+    const char *caller, int *dirty, int *pageout, int *precious, int *absent, int *busy)
 {
 	ASSERT3U(off, <, end);
 
 	off_t f_offset;
-	int total_flagged = 0;
 	off_t filesize = ubc_getsize(vp);
 
 	ASSERT3U(off, <, filesize);
 
 	off_t range_end = round_page_64(MIN(filesize, end));
 	off_t range_start = trunc_page_64(off);
-	int flags;
+	int errs = 0;
+	int flags = 0;
 
 	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 
@@ -543,24 +544,36 @@ zfs_ubc_range_flag(znode_t *zp, vnode_t *vp, const off_t off, const off_t end, i
 			    __func__, __LINE__, caller, pop_retval, f_offset,
 			    filesize, off, end,
 			    zp->z_name_cache);
-		} else if (flags & flag) {
-			total_flagged++;
+			errs++;
+		} else {
+			if (dirty != NULL && (flags & UPL_POP_DIRTY)) *dirty += 1;
+			if (pageout != NULL  && (flags & UPL_POP_PAGEOUT)) *pageout += 1;
+			if (precious != NULL && (flags & UPL_POP_PRECIOUS)) *precious += 1;
+			if (absent != NULL && (flags & UPL_POP_ABSENT)) *absent += 1;
+			if (busy != NULL && (flags & UPL_POP_BUSY)) *busy += 1;
 		}
 	}
-	return (total_flagged);
+	return (errs);
 }
 
 int
 zfs_ubc_range_dirty(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
 {
-	return(zfs_ubc_range_flag(zp, vp, off, end, UPL_POP_DIRTY, __func__));
+	int dirty = 0;
+	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
+	    &dirty, NULL, NULL, NULL, NULL);
+	ASSERT0(errs);
+	return (dirty);
 }
 
-// absent, precious, pageout (paged out)
 int
 zfs_ubc_range_busy(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
 {
-	return(zfs_ubc_range_flag(zp, vp, off, end, UPL_POP_BUSY, __func__));
+	int busy = 0;
+	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
+	    NULL, NULL, NULL, NULL, &busy);
+	ASSERT0(errs);
+	return (busy);
 }
 
 /*

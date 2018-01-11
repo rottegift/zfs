@@ -189,6 +189,11 @@ extern int    zfs_space  ( vnode_t *vp, int cmd, struct flock *bfp, int flag,
 extern int    zfs_setsecattr(vnode_t *vp, vsecattr_t *vsecp, int flag,
                              cred_t *cr, caller_context_t *ct);
 
+extern int zfs_ubc_range_all_flags(znode_t *zp, vnode_t *vp, const off_t off, const off_t end,
+    const char *caller, int *dirty, int *pageout, int *precious, int *absent, int *busy);
+extern int zfs_ubc_range_dirty(znode_t *zp, vnode_t *vp, const off_t off, const off_t end);
+extern int zfs_ubc_range_busy(znode_t *zp, vnode_t *vp, const off_t off, const off_t end);
+
 /* zfs_vnops_osx.c calls */
 typedef struct rl rl_t; // forward
 extern int    zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int flags);
