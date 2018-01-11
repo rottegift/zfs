@@ -2301,11 +2301,15 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			cluster_copy_error = error;
 			if (error == 0 && xfer_resid < this_chunk) {
 				const size_t to_sync = this_chunk - xfer_resid;
+				const off_t sync_to_p = this_off + to_sync;
+				const off_t align_off = trunc_page_64(this_off);
+				const off_t align_end = round_page_64(sync_to_p);
+				const size_t align_to_sync = align_end - align_off;
 				struct vnop_pageout_args ap = {
 					.a_vp = vp,
 					.a_pl = NULL,
-					.a_f_offset = this_off,
-					.a_size = round_page_64(to_sync),
+					.a_f_offset = align_off,
+					.a_size = align_to_sync,
 					.a_flags = UPL_MSYNC,
 					.a_context = NULL,
 				};
