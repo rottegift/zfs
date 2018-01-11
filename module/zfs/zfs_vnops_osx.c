@@ -3541,6 +3541,16 @@ zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int f
  * grab the file locks first, then request the upl to lock down pages.
  */
 
+noinline void
+pageoutv2_exception(const char *caller, const int line)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	printf("ZFS: %s:%d: dtraceme pageoutv2_exception\n", caller, line);
+	return;
+}
+
+
 static int
 pageoutv2_helper(struct vnop_pageout_args *ap)
 #if 0
@@ -3613,7 +3623,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		if (zp && zp->z_sa_hdl && zp->z_syncer_active != curthread) {
 			if (zp->z_syncer_active != NULL) {
 				rl_t *tsdrl = tsd_get(rl_key);
-				panic("ZFS: %s:%d: [3614 case]: z_syncer_active is not me or NULL! (z_map_lock held? %d z_in_pager_op %d)"
+				printf("ZFS: %s:%d: [3614 case]: z_syncer_active is not me or NULL! (z_map_lock held? %d z_in_pager_op %d)"
 				    " a_f_offset %llu a_size %lu a_flags %d (tsd_rl? %d r_off %llu r_len %llu) file %s\n",
 				    __func__, __LINE__,
 				    rw_write_held(&zp->z_map_lock), zp->z_in_pager_op,
@@ -3622,6 +3632,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 				    (tsdrl != NULL) ? tsdrl->r_off : 0,
 				    (tsdrl != NULL) ? tsdrl->r_len : 0,
 				    zp->z_name_cache);
+				pageoutv2_exception(__func__, __LINE__);
+				return (EAGAIN);
 			}
 		} else if (zp && zp->z_sa_hdl)
 			printf("ZFS: %s:%d: I am active syncer but zp->z_in_pager_op is %d\n",
