@@ -2246,7 +2246,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		int t_errs = zfs_ubc_range_all_flags(zp, vp, sync_page_after_new_eof,
 		    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-		if (t_errs > 0 || t_pageout > 0 || t_precious > 0 || t_absent > 0 || t_busy > 0) {
+		if (t_pageout > 0 || t_precious > 0 || t_absent > 0 || t_busy > 0) {
 			printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%lld..%lld]:"
 			    " errs %d dirty %d pageout %d precious %d absent %d busy %d (tot pages %lld)"
 			    " fs %s file %s\n",
@@ -2305,7 +2305,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			t_errs = zfs_ubc_range_all_flags(zp, vp, trunc_page_64(end),
 			    round_page_64(end), __func__,
 			    &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-			if (t_errs > 0 || t_pageout > 0 || t_precious > 0
+			if (t_pageout > 0 || t_precious > 0
 			    || t_absent > 0 || t_busy > 0) {
 				printf("ZFS: %s:%d: for final page of file [%lld..%lld]:"
 				    " errs %d dirty %d pageout %d precious %d absent %d busy %d"

@@ -546,7 +546,9 @@ zfs_ubc_range_all_flags(znode_t *zp, vnode_t *vp, const off_t off, const off_t e
 	for (f_offset = range_start; f_offset < range_end; f_offset += PAGE_SIZE_64) {
 		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &flags);
 		if (pop_retval != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: (%s) error %d from ubc_page_op at offset %lld"
+			// note, err 5 is acceptable because the page may not be looked up
+			// in some circumstances; is_file_clean() ignores this case, for example
+			dprintf("ZFS: %s:%d: (%s) error %d from ubc_page_op at offset %lld"
 			    " (filesize %lld, off %lld end %lld) file %s\n",
 			    __func__, __LINE__, caller, pop_retval, f_offset,
 			    filesize, off, end,
@@ -569,7 +571,7 @@ zfs_ubc_range_dirty(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
 	int dirty = 0;
 	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
 	    &dirty, NULL, NULL, NULL, NULL);
-	ASSERT0(errs);
+	//ASSERT0(errs);
 	return (dirty);
 }
 
@@ -579,7 +581,7 @@ zfs_ubc_range_busy(znode_t *zp, vnode_t *vp, const off_t off, const off_t end)
 	int busy = 0;
 	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
 	    NULL, NULL, NULL, NULL, &busy);
-	ASSERT0(errs);
+	//ASSERT0(errs);
 	return (busy);
 }
 
@@ -589,7 +591,7 @@ zfs_is_ubc_range_busy_or_dirty(znode_t *zp, vnode_t *vp, const off_t off, const 
 	int busy = 0, dirty = 0;
 	int errs = zfs_ubc_range_all_flags(zp, vp, off, end, __func__,
 	    &dirty, NULL, NULL, NULL, &busy);
-	ASSERT0(errs);
+	//ASSERT0(errs);
 	return(busy == 0 && dirty == 0);
 }
 
@@ -3753,7 +3755,6 @@ top:
 		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
 		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
 		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-		ASSERT0(t_errs);
 		ASSERT0(vnode_isinuse(vp, 0));
 		if (t_dirty > 0 || t_pageout > 0 || t_precious > 0 || t_busy > 0 || vnode_isinuse(vp, 0)) {
 			may_delete_now = 0;
@@ -7254,7 +7255,6 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
 		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
 		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-		ASSERT0(t_errs);
 
 		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0 ||
 		    vnode_isinuse(vp, 0) != 0) {
@@ -7273,7 +7273,6 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
 		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
 		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-		ASSERT0(t_errs);
 
 		printf("ZFS: %s:%d: (note) vnode_isinuse(vp, 0) true"
 		    " %d dirty %d pageout %d precious %d absent %d busy %d t_errs %lld totlpgs"
