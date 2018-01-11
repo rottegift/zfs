@@ -517,23 +517,28 @@ int
 zfs_ubc_range_all_flags(znode_t *zp, vnode_t *vp, const off_t off, const off_t end,
     const char *caller, int *dirty, int *pageout, int *precious, int *absent, int *busy)
 {
-	ASSERT3U(off, <, end);
+	ASSERT3U(off, <=, end);
 
 	off_t f_offset;
 	off_t filesize = ubc_getsize(vp);
 
-	ASSERT3U(off, <, filesize);
+	ASSERT3U(off, <=, filesize);
 
 	off_t range_end = round_page_64(MIN(filesize, end));
 	off_t range_start = trunc_page_64(off);
 	int errs = 0;
 	int flags = 0;
 
+	ASSERT3U(range_start, <, range_end);
 	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 
-	if (filesize < end) {
-		printf("ZFS: %s:%d: (%s) bad range: ubcsize %lld off %lld end %lld file %s\n",
-		    __func__, __LINE__, caller, filesize, off, end, zp->z_name_cache);
+	if (round_page_64(filesize) < round_page_64(end)) {
+		printf("ZFS: %s:%d: (%s) bad range: ubcsize %lld off %lld end %lld"
+		    " diff %lld diffpgs %lld file %s\n",
+		    __func__, __LINE__, caller, filesize, off, end,
+		    round_page_64(filesize) - round_page_64(end),
+		    howmany(round_page_64(filesize) - round_page_64(end), PAGE_SIZE_64),
+		    zp->z_name_cache);
 	}
 
 	for (f_offset = range_start; f_offset < range_end; f_offset += PAGE_SIZE_64) {
