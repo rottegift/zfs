@@ -2226,12 +2226,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * about to invalidate.
 	 */
 
-	if (is_file_clean(vp, ubc_getsize(vp))) {
-		// is_file_clean returns nonzero if file is dirty
-		printf("ZFS: %s:%d: unclean fs %s file %s usize %lld zsize %lld\n", __func__, __LINE__,
-		    fsname, fname, ubc_getsize(vp), zp->z_size);
-	}
-
 	/* First hold the vnode */
 
 	ASSERT3U(ubc_getsize(vp), >, end);
