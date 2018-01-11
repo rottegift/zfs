@@ -7225,20 +7225,38 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 		ASSERT3P(zp->z_sa_hdl, !=, NULL);
 		ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 		ASSERT3S(ubc_getsize(ZTOV(zp)), >, 0);
-		if (is_file_clean(ZTOV(zp), ubc_getsize(vp)) != 0 ||
+
+		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
+		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
+		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+		ASSERT0(t_errs);
+
+		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0 ||
 		    vnode_isinuse(vp, 0) != 0) {
-			printf("ZFS: %s:%d: ubc_pages_resident true, is_file_clean %d (0==clean),"
-			    " isinuse %d  mapped? %d write? %d file %s -- RETURNING\n",
-			    __func__, __LINE__, is_file_clean(ZTOV(zp), ubc_getsize(vp)),
+			printf("ZFS: %s:%d: ubc_pages_resident true,"
+			    " %d dirty %d pageout %d precious %d absent %d busy %d t_errs %lld totlpgs"
+			    " inuse? %d mapped? %d write? %d file %s -- RETURNING\n",
+			    __func__, __LINE__,
+			    t_dirty, t_pageout, t_precious, t_absent, t_busy, t_errs,
+			    howmany(ubc_getsize(vp), PAGE_SIZE_64),
 			    vnode_isinuse(vp, 0),
 			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 			    zp->z_name_cache);
 			goto atime_check;
 		}
 	} else if (vnode_isinuse(vp, 0)) {
-		printf("ZFS: %s:%d: (note) vnode_isinuse(vp, 0) true clean? %d (ubcsize %lld)"
+		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
+		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
+		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+		ASSERT0(t_errs);
+
+		printf("ZFS: %s:%d: (note) vnode_isinuse(vp, 0) true"
+		    " %d dirty %d pageout %d precious %d absent %d busy %d t_errs %lld totlpgs"
+		    " (ubcsize %lld)"
 		    " for file %s\n",
-		    __func__, __LINE__, is_file_clean(ZTOV(zp), ubc_getsize(vp)),
+		    __func__, __LINE__,
+		    t_dirty, t_pageout, t_precious, t_absent, t_busy, t_errs,
+		    howmany(ubc_getsize(vp), PAGE_SIZE_64),
 		    ubc_getsize(vp),
 		    zp->z_name_cache);
 	}
