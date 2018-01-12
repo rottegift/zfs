@@ -4933,7 +4933,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			retval = zfs_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHALL);
 		}
 		else {
-			retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHDIRTY | UBC_MSYNC);
+			retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHDIRTY | UBC_SYNC);
 		}
 		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 	} else {
