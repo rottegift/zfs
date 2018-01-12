@@ -1986,7 +1986,12 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 				msync_flags |= UBC_SYNC;
 			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-			int retval = zfs_ubc_msync(zp, rlock, aoff, aend, &resid_off, msync_flags);
+			int retval;
+			if (rlock != NULL && rw_write_held(&zp->z_map_lock)) {
+				retval = zfs_msync(zp, rlock, aoff, aend, &resid_off, UBC_PUSHALL);
+			} else {
+				retval = zfs_ubc_msync(zp, rlock, aoff, aend, &resid_off, msync_flags);
+			}
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			ASSERT3P(tsd_get(rl_key), ==, rlock);
 			tsd_set(rl_key, NULL);
@@ -4921,11 +4926,15 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
 
 	off_t resid_off = 0;
-	int flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
 
 	// msync conditionally
 	if (zil_commit_only == B_FALSE || zfs_ubc_range_busy(zp, vp, 0, ubc_getsize(vp)) > 0) {
-		retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, flags);
+		if (rl && rw_lock_held(&zp->z_map_lock)) {
+			retval = zfs_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHALL);
+		}
+		else {
+			retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHDIRTY | UBC_MSYNC);
+		}
 		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 	} else {
 		retval = 0;

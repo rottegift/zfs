@@ -367,7 +367,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 
 		if (do_not_msync == B_FALSE && zp->z_in_pager_op == 0) {
 			claim = B_FALSE;
-			msync_retval = zfs_ubc_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
+			flags = UBC_PUSHALL;
+			msync_retval = zfs_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
 		} else if (do_not_msync == B_FALSE) {
 			claim = B_TRUE;
 		}
