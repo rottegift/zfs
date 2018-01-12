@@ -99,8 +99,8 @@ typedef struct znode_stats {
 static znode_stats_t znode_stats = {
 	{"trunc_cleaned_new_eof_page",			KSTAT_DATA_UINT64 },
 	{"trunc_cleaned_only_page",			KSTAT_DATA_UINT64 },
-	{"t_setsize_lastbytes_post_pageout",		KSTAT_DATA_UINT64 },
-	{"t_setsize_onlybytes_post_pageout",		KSTAT_DATA_UINT64 },
+	{"t_setsize_lastbytes_pageout",			KSTAT_DATA_UINT64 },
+	{"t_setsize_onlybytes_pageout",			KSTAT_DATA_UINT64 },
 	{"trunc_setsize_lastbytes",			KSTAT_DATA_UINT64 },
 	{"trunc_setsize_lastpage",			KSTAT_DATA_UINT64 },
 	{"trunc_setsize_only_bytes",			KSTAT_DATA_UINT64 },
@@ -109,7 +109,7 @@ static znode_stats_t znode_stats = {
 	{"zfs_trunc_calls",				KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize",				KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize_shrink",			KSTAT_DATA_UINT64 },
-	{"rezget_setsize_shrink_nonaligned",		KSTAT_DATA_UINT64 },
+	{"rezget_shrink_nonaligned",			KSTAT_DATA_UINT64 },
 	{"zfs_extend_setsize",				KSTAT_DATA_UINT64 },
 };
 
