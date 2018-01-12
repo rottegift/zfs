@@ -196,6 +196,7 @@ extern int zfs_ubc_range_busy(znode_t *zp, vnode_t *vp, const off_t off, const o
 
 /* zfs_vnops_osx.c calls */
 typedef struct rl rl_t; // forward
+extern int    zfs_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int flags);
 extern int    zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int flags);
 extern int    zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, vm_offset_t upl_offset,
 				offset_t off, size_t size, int flags, boolean_t take_rlock,

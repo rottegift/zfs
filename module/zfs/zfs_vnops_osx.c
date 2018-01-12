@@ -104,6 +104,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
+	kstat_named_t zfs_msync_pages;
+	kstat_named_t zfs_msync_ranged_pages;
 	kstat_named_t zfs_ubc_msync_calls;
 	kstat_named_t zfs_ubc_msync_cv_waits;
 	kstat_named_t zfs_ubc_msync_sleeps;
@@ -137,6 +139,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
+	{ "zfs_msynced_pages",	               KSTAT_DATA_UINT64 },
+	{ "zfs_msync_ranged_pages",	       KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_calls",               KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_cv_waits",            KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_sleeps",              KSTAT_DATA_UINT64 },
@@ -3363,6 +3367,123 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + write_size);
 
 	return (error);
+}
+
+/*
+ * loop through a range from start to end, and where
+ * we see an "unusual" page, start assembling a range,
+ * and when we have our range, clean it via pageoutv2
+ */
+
+int
+zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resid, const int a_flags)
+{
+	/*
+	 * assume our caller has done ZFS_ENTER/ZFS_VERIFY_ZP, properly
+	 * rangelocked, and z_map_lock held
+	 */
+
+	if (a_flags & UBC_INVALIDATE) {
+		printf("ZFS: %s:%d: improperly called with UBC_INVALIDATE flag set,"
+		    " punting to zfs_ubc_msync\n", __func__, __LINE__);
+		return (zfs_ubc_msync(zp, rl, start, end, resid, a_flags));
+	}
+
+	if (a_flags & UBC_SYNC) {
+		printf("ZFS: %s:%d: improperly called with UBC_SYNC; caller must zil_commit,"
+		    " punting to zfs_ubc_msync\n", __func__, __LINE__);
+		return (zfs_ubc_msync(zp, rl, start, end, resid, a_flags));
+	}
+
+	VERIFY3P(zp, !=, NULL);
+	VERIFY(POINTER_IS_VALID(zp));
+	VERIFY3P(zp->z_zfsvfs, !=, NULL);
+	VERIFY3P(zp->z_sa_hdl, !=, NULL);
+
+	VERIFY(rw_write_held(&zp->z_map_lock));
+	VERIFY3P(rl, !=, NULL);
+
+	vnode_t *vp = ZTOV(zp);
+	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+
+	ASSERT3U(zp->z_size, ==, ubc_getsize(vp));
+
+	if (zp->z_size == 0)
+		return (0);
+
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	const off_t range_start = trunc_page_64(start);
+	const off_t range_end = MIN(round_page_64(end), ubc_getsize(vp));
+
+	ASSERT3U(rl->r_off, <=, range_start);
+	ASSERT3U(rl->r_len + rl->r_off, >=, range_end);
+
+	off_t f_offset;
+
+	// vnop_get ?
+
+	for (f_offset = range_start; f_offset < MIN(range_end, zp->z_size); f_offset += PAGE_SIZE_64) {
+		int flags;
+		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &flags);
+		if (pop_retval == KERN_SUCCESS) {
+			if (((a_flags & UBC_PUSHALL) && (flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
+			    || ((a_flags & UBC_PUSHDIRTY) && (flags & UPL_POP_DIRTY))) {
+				ASSERT0(flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT));
+				off_t subrange_offset = f_offset;
+				off_t subrange_end = f_offset + PAGE_SIZE_64;
+				int s_pages = 1;
+				int s_flags;
+				int s_retval = ubc_page_op(vp, subrange_end, 0, NULL, &flags);
+				for ( ; s_retval == KERN_SUCCESS
+					  && subrange_end < MIN(range_end, zp->z_size)
+					  && s_pages * PAGE_SIZE_64 <= MAX_UPL_TRANSFER_BYTES
+					  && (((a_flags & UBC_PUSHALL) && (s_flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
+					      || ((a_flags & UBC_PUSHDIRTY) && (s_flags & UPL_POP_DIRTY))); ) {
+					ASSERT0(s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT));
+					subrange_end += PAGE_SIZE_64;
+					s_pages += 1;
+					s_retval = ubc_page_op(vp, subrange_end, 0, NULL, &s_flags);
+				}
+				ASSERT3U(subrange_end - subrange_offset, ==, s_pages * PAGE_SIZE_64);
+				ASSERT3U(subrange_end - subrange_offset, <=, MAX_UPL_TRANSFER_BYTES);
+				ASSERT3U(subrange_end - subrange_offset, >, 0);
+
+				if (s_pages > 0)
+					VNOPS_OSX_STAT_INCR(zfs_msync_ranged_pages, s_pages);
+
+				f_offset = subrange_end;
+
+				struct vnop_pageout_args ap = {
+					.a_vp = vp,
+					.a_pl = NULL,
+					.a_f_offset = subrange_offset,
+					.a_size = s_pages * PAGE_SIZE_64,
+					.a_flags = UPL_UBC_MSYNC,
+					.a_context = NULL,
+				};
+
+				zp->z_mr_sync = 0;
+
+				int pout_ret = zfs_vnop_pageoutv2(&ap);
+
+				if (pout_ret) {
+					printf("ZFS: %s:%d: zfs_vnop_pageoutv2 returned %d for (off %llu sz %llu),"
+					    " returning failure,"
+					    " [%lld..%lld] fs %s file %s\n", __func__, __LINE__,
+					    pout_ret, subrange_offset, s_pages * PAGE_SIZE_64,
+					    start, end, fsname, fname);
+					return (0);
+				}
+
+				VNOPS_OSX_STAT_INCR(zfs_msync_pages, s_pages);
+			}
+		}
+		if (resid != NULL)
+			*resid = f_offset - range_start;
+	}
+	return (1);
 }
 
 /*
