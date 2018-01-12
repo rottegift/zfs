@@ -3415,6 +3415,12 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	if (zp->z_size == 0)
 		return (0);
 
+	if (end <= start)
+		return (EINVAL);
+
+	if ((a_flags & (UBC_PUSHDIRTY | UBC_PUSHALL)) == 0)
+		return (EINVAL);
+
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
@@ -3478,7 +3484,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					    " [%lld..%lld] fs %s file %s\n", __func__, __LINE__,
 					    pout_ret, subrange_offset, s_pages * PAGE_SIZE_64,
 					    start, end, fsname, fname);
-					return (0);
+					return (pout_ret);
 				}
 
 				VNOPS_OSX_STAT_INCR(zfs_msync_pages, s_pages);
@@ -3488,7 +3494,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 			*resid = f_offset - range_start;
 	}
 	zp->z_mr_sync = gethrtime();
-	return (1);
+	return (0);
 }
 
 /*
