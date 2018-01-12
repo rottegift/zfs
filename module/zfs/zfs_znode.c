@@ -81,7 +81,9 @@
 
 typedef struct znode_stats {
 	kstat_named_t trunc_cleaned_new_eof_page;
+	kstat_named_t trunc_cleaned_only_page;
 	kstat_named_t trunc_lastbytes_post_pageout;
+	kstat_named_t trunc_onlybytes_post_pageout;
 	kstat_named_t trunc_lastbytes;
 	kstat_named_t trunc_lastpage;
 	kstat_named_t trunc_only_bytes;
@@ -96,7 +98,9 @@ typedef struct znode_stats {
 
 static znode_stats_t znode_stats = {
 	{"trunc_cleaned_new_eof_page",			KSTAT_DATA_UINT64 },
+	{"trunc_cleaned_only_page",			KSTAT_DATA_UINT64 },
 	{"trunc_setsize_lastbytes_post_pageout",	KSTAT_DATA_UINT64 },
+	{"trunc_setsize_onlybytes_post_pageout",	KSTAT_DATA_UINT64 },
 	{"trunc_setsize_lastbytes",			KSTAT_DATA_UINT64 },
 	{"trunc_setsize_lastpage",			KSTAT_DATA_UINT64 },
 	{"trunc_setsize_only_bytes",			KSTAT_DATA_UINT64 },
@@ -2224,6 +2228,14 @@ zfs_trunc_lastbytes_post_pageout(struct vnode *vp, off_t end)
 	return(ubc_setsize(vp, end));
 }
 
+noinline int
+zfs_trunc_onlybytes_post_pageout(struct vnode *vp, off_t end)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	ZNODE_STAT_BUMP(trunc_onlybytes_post_pageout);
+	return(ubc_setsize(vp, end));
+}
 
 noinline int
 zfs_trunc_lastbytes_ubc_setsize(struct vnode *vp, off_t end)
@@ -2396,7 +2408,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 		boolean_t final_page_unusual = B_FALSE;
 
-		if ((eof_pg_delta > 0) && (end & PAGE_MASK_64) != 0) {
+		if ((end & PAGE_MASK_64) != 0) {
 			t_dirty = 0; t_pageout = 0; t_precious = 0; t_absent = 0; t_busy = 0;
 			t_errs = zfs_ubc_range_all_flags(zp, vp, trunc_page_64(end),
 			    round_page_64(end), __func__,
@@ -2434,11 +2446,29 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 				setsize_retval = zfs_trunc_lastbytes_post_pageout(vp, end);
 			}
-		} else if (eof_pg_delta > 0)
-			setsize_retval = zfs_trunc_lastpage_ubc_setsize(vp, end);
-		else if ((end & PAGE_MASK_64) != 0)
+		} else if (eof_pg_delta > 0) {
+			if (final_page_unusual == B_FALSE) {
+				setsize_retval = zfs_trunc_lastpage_ubc_setsize(vp, end);
+			} else {
+				// clean the page within the current locking context
+				struct vnop_pageout_args ap = {
+					.a_vp = vp,
+					.a_pl = NULL,
+					.a_f_offset = trunc_page_64(end),
+					.a_size = PAGE_SIZE,
+					.a_flags = UPL_MSYNC,
+					.a_context = NULL,
+				};
+
+				int pageout_err = zfs_vnop_pageoutv2(&ap);
+				ASSERT0(pageout_err);
+				ZNODE_STAT_BUMP(trunc_cleaned_only_page);
+
+				setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
+			}
+		}  else if ((end & PAGE_MASK_64) != 0) {
 			setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
-		else
+		} else
 			setsize_retval = zfs_trunc_only_page_ubc_setsize(vp, end);
 
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
