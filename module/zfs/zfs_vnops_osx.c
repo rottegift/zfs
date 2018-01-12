@@ -2317,20 +2317,35 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	if (rl == NULL && rw_held_at_entry == B_TRUE && zp->z_in_pager_op > 0) {
 		ASSERT(rw_write_held(&zp->z_map_lock));
 		rl_t *tsdrl = tsd_get(rl_key);
-		printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
-		    " SKIPPING LOCKING for"
-		    " [%lld..%lld] (size %ld uploff %u) fs %s file %s (nocommit? %d)"
-		    " tsd_rl? %d (r_type %d r_off %llu r_len %llu r_caller %s r_line %d\n",
-		    __func__, __LINE__, zp->z_in_pager_op, rw_write_held(&zp->z_map_lock),
-		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
-		    ap->a_size, ap->a_pl_offset,
-		    fsname, fname, flags & UPL_NOCOMMIT,
-		    tsdrl != NULL,
-		    (tsdrl != NULL) ? tsdrl->r_type : -1,
-		    (tsdrl != NULL) ? tsdrl->r_off : 0,
-		    (tsdrl != NULL) ? tsdrl->r_len : 0,
-		    (tsdrl != NULL && tsdrl->r_caller != NULL) ? tsdrl->r_caller : "(null)",
-		    (tsdrl != NULL) ? tsdrl->r_line : 0);
+		if (!tsdrl
+		    || tsdrl->r_off > off
+		    || tsdrl->r_off + tsdrl->r_len > off + len) {
+			printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
+			    " SKIPPING LOCKING (note, range not covered) for"
+			    " [%llu..%llu] (size %lu uploff %u) fs %s file %s (nocommit? %d)"
+			    " tsd_rl? %d (r_type %d r_off %llu r_len %llu r_caller %s r_line %d\n",
+			    __func__, __LINE__, zp->z_in_pager_op, rw_write_held(&zp->z_map_lock),
+			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			    ap->a_size, ap->a_pl_offset,
+			    fsname, fname, flags & UPL_NOCOMMIT,
+			    tsdrl != NULL,
+			    (tsdrl != NULL) ? tsdrl->r_type : -1,
+			    (tsdrl != NULL) ? tsdrl->r_off : 0,
+			    (tsdrl != NULL) ? tsdrl->r_len : 0,
+			    (tsdrl != NULL && tsdrl->r_caller != NULL) ? tsdrl->r_caller : "(null)",
+			    (tsdrl != NULL) ? tsdrl->r_line : 0);
+		} else {
+			printf("ZFS: %s:%d: (covered range) already in pageout (number %d)"
+			    " our pagein [%llu..%llu] (size %lu) TSD rangelock [%llu..%llu] (size %llu)"
+			    " caller %s line %d"
+			    " fs %s file %s\n",
+			    __func__, __LINE__, zp->z_in_pager_op,
+			    ap->a_f_offset, ap->a_f_offset + ap->a_size, ap->a_size,
+			    tsdrl->r_off, tsdrl->r_off + tsdrl->r_len, tsdrl->r_len,
+			    (tsdrl->r_caller != NULL) ? tsdrl->r_caller : "(null)",
+			    tsdrl->r_line,
+			    fsname, fname);
+		}
 		need_z_lock = B_FALSE;
 		goto norwlock;
 	} else if (rl != NULL && rw_write_held(&zp->z_map_lock)) {
