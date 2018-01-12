@@ -5309,11 +5309,26 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		}
 		off_t resid_off = 0;
 		int retval = 0;
+		rl_t *rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+		if (rl == NULL) {
+			printf("ZFS: %s:%d: failed to range lock whole file %s\n",
+			    __func__, __LINE__, zp->z_name_cache);
+		}
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		int msync_flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
-		retval = zfs_ubc_msync(zp, NULL, (off_t)0, ubcsize, &resid_off, msync_flags);
+		if (rl != NULL) {
+			retval = zfs_msync(zp, NULL, 0, ubcsize, &resid_off, UBC_PUSHALL);
+		} else {
+			retval = zfs_ubc_msync(zp, NULL, (off_t)0, ubcsize, &resid_off, msync_flags);
+		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		if (rl != NULL) {
+			zfs_range_unlock(rl);
+			if (zp->z_zfsvfs && zp->z_zfsvfs->z_log) {
+				zil_commit(zp->z_zfsvfs->z_log, zp->z_id);
+			}
+		}
 		ASSERT3S(tries, <=, 2);
 		ASSERT3S(retval, ==, 0);
 		if (retval != 0)
