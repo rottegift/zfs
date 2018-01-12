@@ -2151,7 +2151,7 @@ zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
  */
 
 noinline int
-zfs_trunc_lastpg_ubc_setsize(struct vnode *vp, off_t end)
+zfs_trunc_lastbytes_ubc_setsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
@@ -2159,7 +2159,15 @@ zfs_trunc_lastpg_ubc_setsize(struct vnode *vp, off_t end)
 }
 
 noinline int
-zfs_trunc_tail_ubc_setsize(struct vnode *vp, off_t end)
+zfs_trunc_lastpage_ubc_setsize(struct vnode *vp, off_t end)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	return(ubc_setsize(vp, end));
+}
+
+noinline int
+zfs_trunc_only_bytes_ubc_setsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
@@ -2174,6 +2182,13 @@ zfs_trunc_only_page_ubc_setsize(struct vnode *vp, off_t end)
 	return(ubc_setsize(vp, end));
 }
 
+noinline int
+zfs_trunc_tail_ubc_setsize(struct vnode *vp, off_t end)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	return(ubc_setsize(vp, end));
+}
 
 static int
 zfs_trunc(znode_t *zp, uint64_t end)
@@ -2237,18 +2252,23 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	if (!vnode_get_error) {
 
 		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
-		int t_errs = zfs_ubc_range_all_flags(zp, vp, sync_page_after_new_eof,
-		    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+		int t_errs = 0;
 
-		if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0) {
-			printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%lld..%lld]:"
-			    " errs %d dirty %d pageout %d precious %d absent %d busy %d (tot pages %lld)"
-			    " fs %s file %s\n",
-			    __func__, __LINE__,
-			    sync_page_after_new_eof, sync_eof,
-			    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
-			    eof_pg_delta,
-			    fsname, fname);
+		if ((end & PAGE_MASK_64) != 0) {
+			zfs_ubc_range_all_flags(zp, vp, sync_page_after_new_eof,
+			    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+
+			if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0) {
+				printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
+				    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
+				    " (tot pages %llu)"
+				    " fs %s file %s\n",
+				    __func__, __LINE__,
+				    sync_page_after_new_eof, sync_eof,
+				    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
+				    eof_pg_delta,
+				    fsname, fname);
+			}
 		}
 
 		off_t msync_resid = 0;
@@ -2294,24 +2314,28 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 		// step 3: ubc_setsize to the desired value
 
-		if (eof_pg_delta > 0) {
+		if ((eof_pg_delta > 0) && (end & PAGE_MASK_64) != 0) {
 			t_dirty = 0; t_pageout = 0; t_precious = 0; t_absent = 0; t_busy = 0;
 			t_errs = zfs_ubc_range_all_flags(zp, vp, trunc_page_64(end),
 			    round_page_64(end), __func__,
 			    &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 			if (t_pageout > 0 || t_dirty > 0 || t_absent > 0 || t_busy > 0) {
-				printf("ZFS: %s:%d: for final page of file [%lld..%lld]:"
+				printf("ZFS: %s:%d: for final page of file [%llu..%llu] (new end %llu):"
 				    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
 				    " fs %s file %s\n",
 				    __func__, __LINE__,
-				    trunc_page_64(end), round_page_64(end),
+				    trunc_page_64(end), round_page_64(end), end,
 				    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
 				    fsname, fname);
 			}
 		}
 
-		if (eof_pg_delta > 0)
-			setsize_retval = zfs_trunc_lastpg_ubc_setsize(vp, end);
+		if (eof_pg_delta > 0 && (end & PAGE_MASK_64) !=0)
+			setsize_retval = zfs_trunc_lastbytes_ubc_setsize(vp, end);
+		else if (eof_pg_delta > 0)
+			setsize_retval = zfs_trunc_lastpage_ubc_setsize(vp, end);
+		else if ((end & PAGE_MASK_64) != 0)
+			setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
 		else
 			setsize_retval = zfs_trunc_only_page_ubc_setsize(vp, end);
 
