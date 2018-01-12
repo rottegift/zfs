@@ -3460,7 +3460,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 				ASSERT3U(subrange_end - subrange_offset, <=, MAX_UPL_TRANSFER_BYTES);
 				ASSERT3U(subrange_end - subrange_offset, >, 0);
 
-				if (s_pages > 0)
+				if (s_pages > 1)
 					VNOPS_OSX_STAT_INCR(zfs_msync_ranged_pages, s_pages);
 
 				f_offset = subrange_end;
