@@ -81,10 +81,32 @@
 
 typedef struct znode_stats {
 	kstat_named_t trunc_cleaned_new_eof_page;
+	kstat_named_t trunc_lastbytes_post_pageout;
+	kstat_named_t trunc_lastbytes;
+	kstat_named_t trunc_lastpage;
+	kstat_named_t trunc_only_bytes;
+	kstat_named_t trunc_only_page;
+	kstat_named_t trunc_tail;
+	kstat_named_t zfs_trunc_calls;
+	kstat_named_t rezget_setsize;
+	kstat_named_t rezget_setsize_shrink;
+	kstat_named_t rezget_setsize_shrink_nonaligned;
+	kstat_named_t extend_setsize;
 } znode_stats_t;
 
 static znode_stats_t znode_stats = {
 	{"trunc_cleaned_new_eof_page",			KSTAT_DATA_UINT64 },
+	{"trunc_setsize_lastbytes_post_pageout",	KSTAT_DATA_UINT64 },
+	{"trunc_setsize_lastbytes",			KSTAT_DATA_UINT64 },
+	{"trunc_setsize_lastpage",			KSTAT_DATA_UINT64 },
+	{"trunc_setsize_only_bytes",			KSTAT_DATA_UINT64 },
+	{"trunc_setsize_only_page",			KSTAT_DATA_UINT64 },
+	{"trunc_tail_setsize",				KSTAT_DATA_UINT64 },
+	{"zfs_trunc_calls",				KSTAT_DATA_UINT64 },
+	{"zfs_rezget_setsize",				KSTAT_DATA_UINT64 },
+	{"zfs_rezget_setsize_shrink",			KSTAT_DATA_UINT64 },
+	{"zfs_rezget_setsize_shrink_nonaligned",	KSTAT_DATA_UINT64 },
+	{"zfs_extend_setsize",				KSTAT_DATA_UINT64 },
 };
 
 #define ZNODE_STAT(statname)		(znode_stats.statname.value.ui64)
@@ -113,8 +135,6 @@ znode_stat_fini(void)
                 znode_ksp = NULL;
         }
 }
-
-
 
 /* Used by fstat(1). */
 #ifndef __APPLE__
@@ -1683,6 +1703,12 @@ zfs_rezget(znode_t *zp)
 			int vnode_get_error = vnode_get(vp);
 			ASSERT0(vnode_get_error);
 			if (!vnode_get_error) {
+				ZNODE_STAT_BUMP(rezget_setsize);
+				if (ubc_getsize(vp) < zp->z_size) {
+					ZNODE_STAT_BUMP(rezget_setsize_shrink);
+					if ((zp->z_size & PAGE_MASK_64) != 0)
+						ZNODE_STAT_BUMP(rezget_setsize_shrink_nonaligned);
+				}
 				setsize_retval = ubc_setsize(vp, zp->z_size);
 				vnode_put(vp);
 				did_setsize = B_TRUE;
@@ -2031,6 +2057,7 @@ zfs_extend(znode_t *zp, uint64_t end)
 	int vnode_get_error = vnode_get(vp);
 	ASSERT0(vnode_get_error);
 	if (vnode_get_error == 0) {
+		ZNODE_STAT_BUMP(extend_setsize);
 		const int grow_first_time_retval = ubc_setsize(vp, end);
 		ASSERT3S(grow_first_time_retval, !=, 0); // ubc_setsize returns true on success
 		const int shrink_to_old_retval = ubc_setsize(vp, oldsize);
@@ -2082,6 +2109,7 @@ zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
 #define trunc_page_64(x) ((uint64_t)(x) & ~((uint64_t)PAGE_MASK_64))
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
 	rl = zfs_range_lock(zp, trunc_page_64(off), round_page_64(len), RL_WRITER);
+	ZNODE_STAT_BUMP(zfs_trunc_calls);
 
 	/*
 	 * Nothing to do if file already at desired length.
@@ -2192,6 +2220,7 @@ zfs_trunc_lastbytes_post_pageout(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
+	ZNODE_STAT_BUMP(trunc_lastbytes_post_pageout);
 	return(ubc_setsize(vp, end));
 }
 
@@ -2201,6 +2230,7 @@ zfs_trunc_lastbytes_ubc_setsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
+	ZNODE_STAT_BUMP(trunc_lastbytes);
 	return(ubc_setsize(vp, end));
 }
 
@@ -2209,6 +2239,7 @@ zfs_trunc_lastpage_ubc_setsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
+	ZNODE_STAT_BUMP(trunc_lastpage);
 	return(ubc_setsize(vp, end));
 }
 
@@ -2217,6 +2248,7 @@ zfs_trunc_only_bytes_ubc_setsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
+	ZNODE_STAT_BUMP(trunc_only_bytes);
 	return(ubc_setsize(vp, end));
 }
 
@@ -2225,6 +2257,7 @@ zfs_trunc_only_page_ubc_setsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
+	ZNODE_STAT_BUMP(trunc_only_page);
 	return(ubc_setsize(vp, end));
 }
 
@@ -2233,6 +2266,7 @@ zfs_trunc_tail_ubc_setsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
+	ZNODE_STAT_BUMP(trunc_tail);
 	return(ubc_setsize(vp, end));
 }
 
