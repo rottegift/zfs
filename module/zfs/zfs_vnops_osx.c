@@ -3802,7 +3802,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	if (zp && zp->z_sa_hdl) {
 		if (zp && zp->z_sa_hdl && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted && zp->z_zfsvfs->z_vfs) {
 			inc_z_in_pager_op(zp,
-			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
+			    vfs_statfs(zp->z_zfsvfs->z_vfs)->f_mntfromname,
 			    zp->z_name_cache);
 		} else {
 			inc_z_in_pager_op(zp, "(no filesystem)", "(no name)");
