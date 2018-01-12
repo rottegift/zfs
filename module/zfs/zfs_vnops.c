@@ -147,6 +147,7 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
 	kstat_named_t zfs_fsync_zil_commit_reg_vn;
 	kstat_named_t zfs_fsync_ubc_msync;
+	kstat_named_t zfs_fsync_ubc_msync_new;
 	kstat_named_t zfs_fsync_ubc_msync_averted;
 	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t zfs_fsync_disabled;
@@ -182,6 +183,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit_reg_vn",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
+	{ "zfs_fsync_ubc_msync_new",                     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync_averted",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
@@ -4763,6 +4765,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * syncer active, of if the file is already in pageout/pageoutv2.
 	 */
 
+	boolean_t allow_new_msync = B_FALSE;
 	boolean_t zil_commit_only = B_FALSE;
 
 	if (vnode_isrecycled(vp))
@@ -4788,7 +4791,10 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	if (zp->z_mr_sync < 1024LL) {
 		zp->z_mr_sync = 0; // reset here to keep zfs_vfs_sync out of our hair
 		if (0 == is_file_clean(vp, ubc_getsize(vp))) {
+			// the file is not dirty
 			zil_commit_only = B_TRUE;
+			// but it might have precious pages that we can weed
+			allow_new_msync = B_TRUE;
 		} else {
 			printf("ZFS: %s:%d: z_mr_sync is small @ %lld but file is dirty at this time"
 			    " ubcsz %lld filesz %lld file %s (mapped? %d write? %d)\n",
@@ -4796,6 +4802,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 			    zp->z_size, zp->z_name_cache,
 			    spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp));
+			zil_commit_only = B_TRUE;
+			allow_new_msync = B_TRUE;
 		}
 	}
 
@@ -4828,11 +4836,13 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	if (spl_ubc_is_mapped(vp, NULL) && is_file_clean(vp, ubc_getsize(vp))) {
+		// is_file_clean returns 22 (i.e. true)  when dirty
 		printf("ZFS: %s:%d: skipping msync called on mapped file (writable? %d) (dirty? %d)"
 		    " (size %lld) %s\n",
 		    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
 		    is_file_clean(vp, ubc_getsize(vp)),
 		    zp->z_size, zp->z_name_cache);
+		allow_new_msync = B_TRUE;
 		zil_commit_only = B_TRUE;
 	}
 
@@ -4850,6 +4860,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		// remember the semantics error = is_file_clean()
 		// in particular is_file_clean is EINVAL if the
 		// file has any dirty pages
+		allow_new_msync = B_TRUE;
 		zil_commit_only = B_TRUE;
 		do_zil_commit = B_TRUE;
 	}
@@ -4889,6 +4900,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 				    zp->z_name_cache);
 				tsd_set(rl_key, rl);
 				have_trl = B_FALSE;
+				do_zil_commit = B_TRUE;
 			} else {
 				printf("ZFS: %s:%d: have TSD RL but zp MISMATCHED TSD file %s our file %s,"
 				    " and could not acquire RL, skipping sync\n",
@@ -4899,7 +4911,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 				goto zero;
                        }
 		} else {
-			if (trl->r_off == 0 && trl->r_len >= ubc_getsize(vp)) {
+			if ( ! (trl->r_off == 0 && trl->r_len >= ubc_getsize(vp))) {
 				printf("ZFS: %s:%d: TSD RL off %lld len %lld too small"
 				    " versus our RL off %lld len %lld,"
 				    "file %s, SKIPPING zil_commit\n", __func__, __LINE__,
@@ -4928,14 +4940,16 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	off_t resid_off = 0;
 
 	// msync conditionally
-	if (zil_commit_only == B_FALSE || zfs_ubc_range_busy(zp, vp, 0, ubc_getsize(vp)) > 0) {
+	if (zil_commit_only == B_FALSE || allow_new_msync == B_TRUE) {
 		if (rl && rw_lock_held(&zp->z_map_lock)) {
 			retval = zfs_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHALL);
-		}
-		else {
+			VNOPS_STAT_BUMP(zfs_fsync_ubc_msync_new);
+		} else if (zil_commit_only == B_FALSE) {
 			retval = zfs_ubc_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHDIRTY | UBC_SYNC);
+			VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
+		} else {
+			VNOPS_STAT_BUMP(zfs_fsync_ubc_msync_averted);
 		}
-		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync);
 	} else {
 		retval = 0;
 		VNOPS_STAT_BUMP(zfs_fsync_ubc_msync_averted);
