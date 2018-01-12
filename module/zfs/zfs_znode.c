@@ -2151,6 +2151,15 @@ zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
  */
 
 noinline int
+zfs_trunc_lastbytes_post_pageout(struct vnode *vp, off_t end)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	return(ubc_setsize(vp, end));
+}
+
+
+noinline int
 zfs_trunc_lastbytes_ubc_setsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
@@ -2314,12 +2323,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 		// step 3: ubc_setsize to the desired value
 
+		boolean_t final_page_unusual = B_FALSE;
+
 		if ((eof_pg_delta > 0) && (end & PAGE_MASK_64) != 0) {
 			t_dirty = 0; t_pageout = 0; t_precious = 0; t_absent = 0; t_busy = 0;
 			t_errs = zfs_ubc_range_all_flags(zp, vp, trunc_page_64(end),
 			    round_page_64(end), __func__,
 			    &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-			if (t_pageout > 0 || t_dirty > 0 || t_absent > 0 || t_busy > 0) {
+			if (t_pageout > 0 || t_dirty > 0 || t_absent > 0 || t_busy > 0 || t_precious > 0) {
 				printf("ZFS: %s:%d: for final page of file [%llu..%llu] (new end %llu):"
 				    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
 				    " fs %s file %s\n",
@@ -2328,11 +2339,30 @@ zfs_trunc(znode_t *zp, uint64_t end)
 				    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
 				    fsname, fname);
 			}
+			if (t_pageout > 0 || t_dirty > 0 || t_absent > 0 || t_busy > 0 || t_precious > 0)
+				final_page_unusual = B_TRUE;
 		}
 
-		if (eof_pg_delta > 0 && (end & PAGE_MASK_64) !=0)
-			setsize_retval = zfs_trunc_lastbytes_ubc_setsize(vp, end);
-		else if (eof_pg_delta > 0)
+		if (eof_pg_delta > 0 && (end & PAGE_MASK_64) !=0) {
+			if (final_page_unusual == B_FALSE) {
+				setsize_retval = zfs_trunc_lastbytes_ubc_setsize(vp, end);
+			} else {
+				// clean the page within the current locking context
+				struct vnop_pageout_args ap = {
+					.a_vp = vp,
+					.a_pl = NULL,
+					.a_f_offset = trunc_page_64(end),
+					.a_size = PAGE_SIZE,
+					.a_flags = UPL_MSYNC,
+					.a_context = NULL,
+				};
+
+				int pageout_err = zfs_vnop_pageoutv2(&ap);
+				ASSERT0(pageout_err);
+
+				setsize_retval = zfs_trunc_lastbytes_post_pageout(vp, end);
+			}
+		} else if (eof_pg_delta > 0)
 			setsize_retval = zfs_trunc_lastpage_ubc_setsize(vp, end);
 		else if ((end & PAGE_MASK_64) != 0)
 			setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
