@@ -104,6 +104,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
+	kstat_named_t zfs_msync_calls;
 	kstat_named_t zfs_msync_pages;
 	kstat_named_t zfs_msync_ranged_pages;
 	kstat_named_t zfs_ubc_msync_calls;
@@ -139,6 +140,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
+	{ "zfs_msync_calls",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msynced_pages",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msync_ranged_pages",	       KSTAT_DATA_UINT64 },
 	{ "zfs_ubc_msync_calls",               KSTAT_DATA_UINT64 },
@@ -3382,6 +3384,8 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	 * assume our caller has done ZFS_ENTER/ZFS_VERIFY_ZP, properly
 	 * rangelocked, and z_map_lock held
 	 */
+
+	VNOPS_OSX_STAT_BUMP(zfs_msync_calls);
 
 	if (a_flags & UBC_INVALIDATE) {
 		printf("ZFS: %s:%d: improperly called with UBC_INVALIDATE flag set,"
