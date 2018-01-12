@@ -3487,6 +3487,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 		if (resid != NULL)
 			*resid = f_offset - range_start;
 	}
+	zp->z_mr_sync = gethrtime();
 	return (1);
 }
 

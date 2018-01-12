@@ -280,7 +280,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			ZFS_EXIT(zfsvfs);
 			return (VNODE_RETURNED);
 		}
-		if (zp->z_mr_sync < 10LL) {
+		if (zp->z_mr_sync < 5LL) {
 			if(!(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
 				/*
 				 * this is the only code that, via the ++
