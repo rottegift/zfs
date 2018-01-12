@@ -79,6 +79,43 @@
 #include "zfs_prop.h"
 #include "zfs_comutil.h"
 
+typedef struct znode_stats {
+	kstat_named_t trunc_cleaned_new_eof_page;
+} znode_stats_t;
+
+static znode_stats_t znode_stats = {
+	{"trunc_cleaned_new_eof_page",			KSTAT_DATA_UINT64 },
+};
+
+#define ZNODE_STAT(statname)		(znode_stats.statname.value.ui64)
+#define ZNODE_STAT_INCR(statname, val)	atomic_add_64(&znode_stats.statname.value.ui64, (val))
+#define ZNODE_STAT_BUMP(statname)	ZNODE_STAT_INCR(statname, 1)
+#define ZNODE_STAT_BUMPDOWN(statname)	ZNODE_STAT_INCR(statname, -1)
+
+static kstat_t *znode_ksp;
+
+void
+znode_stat_init(void)
+{
+       znode_ksp = kstat_create("zfs", 0, "znode", "misc", KSTAT_TYPE_NAMED,
+            sizeof (znode_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
+        if (znode_ksp != NULL) {
+                znode_ksp->ks_data = &znode_stats;
+                kstat_install(znode_ksp);
+       }
+}
+
+void
+znode_stat_fini(void)
+{
+        if (znode_ksp != NULL) {
+                kstat_delete(znode_ksp);
+                znode_ksp = NULL;
+        }
+}
+
+
+
 /* Used by fstat(1). */
 #ifndef __APPLE__
 SYSCTL_INT(_debug_sizeof, OID_AUTO, znode, CTLFLAG_RD, 0, sizeof (znode_t),
@@ -2359,6 +2396,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 				int pageout_err = zfs_vnop_pageoutv2(&ap);
 				ASSERT0(pageout_err);
+				ZNODE_STAT_BUMP(trunc_cleaned_new_eof_page);
 
 				setsize_retval = zfs_trunc_lastbytes_post_pageout(vp, end);
 			}

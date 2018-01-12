@@ -2708,6 +2708,7 @@ dmu_init(void)
 #if defined(__APPLE__) && defined(_KERNEL)
 	vnops_osx_stat_init();
 	vnops_stat_init();
+	znode_stat_init();
 #endif
 	zfs_dbgmsg_init();
 	sa_cache_init();
@@ -2737,6 +2738,7 @@ dmu_fini(void)
 #if defined(__APPLE__) && defined(_KERNEL)
 	vnops_osx_stat_fini();
 	vnops_stat_fini();
+	znode_stat_fini();
 #endif
 	abd_fini();
 }

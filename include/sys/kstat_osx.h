@@ -283,4 +283,6 @@ extern void vnops_osx_stat_init(void);
 extern void vnops_osx_stat_fini(void);
 extern void vnops_stat_init(void);
 extern void vnops_stat_fini(void);
+extern void znode_stat_init(void);
+extern void znode_stat_fini(void);
 #endif
