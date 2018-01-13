@@ -2288,6 +2288,15 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		const uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
 
+		/* clean any dirt */
+
+		off_t msync_resid = 0;
+		int msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
+		if (msync_err) {
+			printf("ZFS: %s:%d: error cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
+			    __func__, __LINE__, this_off, this_off + this_chunk, msync_resid, fname, fsname);
+		}
+
 		/* fill any holes */
 		int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, FILL_FOR_WRITE);
 		if (fill_err) {
