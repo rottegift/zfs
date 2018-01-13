@@ -143,6 +143,7 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_read_calls;
 	kstat_named_t zfs_read_clean_on_read;
 	kstat_named_t mappedread_lock_tries;
+	kstat_named_t mappedread_unusual_pages;
 	kstat_named_t zfs_read_mappedread_mapped_file_bytes;
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
 	kstat_named_t zfs_fsync_zil_commit_reg_vn;
@@ -179,6 +180,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_read_calls",                              KSTAT_DATA_UINT64 },
 	{ "zfs_read_clean_on_read",                      KSTAT_DATA_UINT64 },
 	{ "mappedread_lock_tries",                       KSTAT_DATA_UINT64 },
+	{ "mappedread_unusual_pages",  	                 KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_mapped_file_bytes",       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit_reg_vn",                 KSTAT_DATA_UINT64 },
@@ -1452,17 +1454,35 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 	ASSERT3S(upl_size, >=, PAGE_SIZE_64);
 	ASSERT3S(upl_size, >=, inbytes);
 
-	/* clean any unusual pages */
+	/* possibly clean any unusual pages */
 
-	off_t resid_msync = 0;
-	int msync_retval = zfs_msync(zp, rl, upl_file_offset,
-	    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
-	if (msync_retval != 0) {
-		printf("ZFS: %s:%d: zfs_msync error %d (resid %llu)"
-		    " for start %llu end %llu file %s\n",
-		    __func__, __LINE__, msync_retval, resid_msync,
-		    upl_file_offset, upl_file_offset + upl_size,
-		    filename);
+	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
+	int t_errs = zfs_ubc_range_all_flags(zp, vp,
+	    upl_file_offset, upl_file_offset + upl_size,
+	    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+
+	if (t_dirty > 0 || t_precious > 0 || t_busy > 0) {
+		VNOPS_STAT_INCR(mappedread_unusual_pages,
+		    t_dirty + t_precious + t_busy);
+		boolean_t do_lock = !rw_write_held(&zp->z_map_lock);
+		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+		uint64_t tries = 0;
+		if (do_lock)
+			tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+		off_t resid_msync = 0;
+		int msync_retval = zfs_msync(zp, rl, upl_file_offset,
+		    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
+		if (msync_retval != 0) {
+			printf("ZFS: %s:%d: (lock? %d tries %lld) zfs_msync error %d (resid %llu)"
+			    " for start %llu end %llu (unusual pages d %d p %d b %d errs %d file %s\n",
+			    __func__, __LINE__, do_lock, tries,
+			    msync_retval, resid_msync,
+			    upl_file_offset, upl_file_offset + upl_size,
+			    t_dirty, t_precious, t_busy, t_errs,
+			    filename);
+		}
+		if (do_lock)
+			z_map_drop_lock(zp, &need_release, &need_upgrade);
 	}
 
 	/* pull in any absent pages */
