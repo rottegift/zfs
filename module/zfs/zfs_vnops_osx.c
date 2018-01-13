@@ -3761,9 +3761,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		(zp->z_syncer_active == curthread && zp->z_in_pager_op <= 0))) {
 		/* no collision, or we are re-entering, but whine about underflow */
 		if (zp->z_in_pager_op != 0)
-			printf("ZFS: %s:%d expected 0 in_pager_op see %d (me? %d) (lock held? %d)\n",
+			printf("ZFS: %s:%d expected 0 in_pager_op see %d (me? %d) (lock held? %d) file %s\n",
 			    __func__, __LINE__, zp->z_in_pager_op,
-			    (zp->z_syncer_active == curthread), rw_write_held(&zp->z_map_lock));
+			    (zp->z_syncer_active == curthread), rw_write_held(&zp->z_map_lock), zp->z_name_cache);
 	} else {
 		if (zp) {
 			ASSERT3P(zp->z_sa_hdl, !=, NULL);
