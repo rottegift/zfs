@@ -187,8 +187,13 @@ wait:
 		    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu] (append? %d)\n",
 		    __func__, __LINE__,
 		    new->r_caller, new->r_line,
-		    new->r_off, new->r_len,  zp->z_name_cache,
-		    rl->r_caller, rl->r_line, rl->r_len, rl->r_off, new->r_type == RL_APPEND);
+		    new->r_off, new->r_len,
+		    (zp) ? zp->z_name_cache : "(null)",
+		    (rl && rl->r_caller) ? rl->r_caller : "(null)",
+		    (rl) ? rl->r_line : 0,
+		    (rl) ? rl->r_len : 0,
+		    (rl) ? rl->r_off : 0,
+		    new->r_type == RL_APPEND);
 
 		cv_wait(&rl->r_wr_cv, &zp->z_range_lock);
 
@@ -399,8 +404,12 @@ retry:
 			    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu]\n",
 			    __func__, __LINE__,
 			    new->r_caller, new->r_line,
-			    new->r_off, new->r_len, zp->z_name_cache,
-			    prev->r_caller, prev->r_line, prev->r_off, prev->r_len);
+			    new->r_off, new->r_len,
+			    (zp) ? zp->z_name_cache : "(null)",
+			    (prev && prev->r_caller) ? prev->r_caller : "(null)",
+			    (prev) ? prev->r_line : 0,
+			    (prev) ? prev->r_off : 0,
+			    (prev) ? prev->r_len : 0);
 			cv_wait(&prev->r_rd_cv, &zp->z_range_lock);
 			goto retry;
 		}
@@ -430,8 +439,12 @@ retry:
 			    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu]\n",
 			    __func__, __LINE__,
 			    new->r_caller, new->r_line,
-			    new->r_off, new->r_len, zp->z_name_cache,
-			    next->r_caller, next->r_line, next->r_off, next->r_len);
+			    new->r_off, new->r_len,
+			    (zp) ? zp->z_name_cache : "(null)",
+			    (next && next->r_caller) ? next->r_caller : "(null)",
+			    (next) ? next->r_line : 0,
+			    (next) ? next->r_off : 0,
+			    (next) ? next->r_len : 0);
 			cv_wait(&next->r_rd_cv, &zp->z_range_lock);
 			goto retry;
 		}
