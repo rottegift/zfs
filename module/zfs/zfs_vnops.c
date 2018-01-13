@@ -2336,13 +2336,18 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		if (t_dirty > 0 || t_busy > 0) {
 			// interested most in case where busy > 0 and EOF ~ usize
-			printf("ZFS: %s:%d: WARNING (t_errs %d) busy %d dirty %d precious %d absent %d pageout %d"
+			off_t resid_msync = 0;
+			int msync_retval = zfs_msync(zp, rl, rstart, rend, &resid_msync, UBC_PUSHALL);
+			printf("ZFS: %s:%d: WARNING (msync_retval %d, resid %lld)"
+			    " (t_errs %d) busy %d dirty %d precious %d absent %d pageout %d"
 			    " of %llu pages in range [%llu..%llu] (zsize %llu usize %llu)"
 			    " of fs %s file %s before cluster copy\n",
-			    __func__, __LINE__, t_errs, t_busy, t_dirty, t_precious, t_absent, t_pageout,
+			    __func__, __LINE__, msync_retval, resid_msync,
+			    t_errs, t_busy, t_dirty, t_precious, t_absent, t_pageout,
 			    howmany(rend - rstart, PAGE_SIZE_64),
 			    rstart, rend, zp->z_size, ubc_getsize(vp),
 			    fsname, fname);
+
 		}
 
 		const off_t ubcsize = ubc_getsize(vp);
