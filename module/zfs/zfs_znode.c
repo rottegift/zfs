@@ -2365,26 +2365,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	int zfs_msync_drop_ret = 0;
 
-	// step 2: get rid of all the pages after the page containing the new EOF
-
-	if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64)
-		zfs_msync_drop_ret = zfs_ubc_msync(zp, rl,
-		    sync_page_after_new_eof, sync_eof, &msync_resid, UBC_INVALIDATE);
-
-	if (zfs_msync_drop_ret != 0) {
-		printf("ZFS: %s:%d: %s %d (resid %lld) invalidating range"
-		    " [%lld..%lld] (truncing to %lld) (-pages %lld)"
-		    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
-		    __func__, __LINE__,
-		    (msync_resid == 0) ? "ERROR" : "error",
-		    error, msync_resid,
-		    sync_page_after_new_eof, sync_eof, end, eof_pg_delta,
-		    fsname, fname,
-		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-		    is_file_clean(vp, sync_new_eof) != 0);
-	}
-
-	// step 3: ubc_setsize to trim the pages after the end of the new last page
+	// step 2: ubc_setsize to trim the pages after the end of the new last page
 
 	int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
@@ -2402,7 +2383,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    is_file_clean(vp, sync_new_eof) != 0);
 	}
 
-	// step 4: ubc_setsize to the desired value
+	// step 3: ubc_setsize to the desired value
 
 	boolean_t final_page_unusual = B_FALSE;
 
