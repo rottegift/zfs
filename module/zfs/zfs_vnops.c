@@ -2162,15 +2162,9 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	}
 	int ccupl_ioresid = recov_resid_int;
 
-	int vnode_get_error = vnode_get(vp);
-	ASSERT0(vnode_get_error);
-	int ccupl_retval = vnode_get_error;
-	if (!vnode_get_error) {
-		/* do the magic */
-		ccupl_retval = cluster_copy_upl_data(uio, mupl,
+	/* do the magic */
+	int ccupl_retval = cluster_copy_upl_data(uio, mupl,
 		    recov_off_page_offset, &ccupl_ioresid);
-		vnode_put(vp);
-	}
 
 	if (unset_syncer) {
 		ASSERT3S(zp->z_syncer_active, ==, curthread);
