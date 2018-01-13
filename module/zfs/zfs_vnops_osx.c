@@ -3731,6 +3731,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	extern void IOSleep(unsigned milliseconds); // yields thread
 	extern void IODelay(unsigned microseconds); // x86_64 rep nop
 
+	const off_t ubcsize_at_entry = ubc_getsize(vp);
+
 	/* We can still get into this function as non-v2 style, by the default
 	 * pager (ie, swap - when we eventually support it)
 	 */
@@ -3804,14 +3806,29 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    __func__, __LINE__);
 
 		/* spin. */
+
+		boolean_t lock_got = B_FALSE;
 		while (zp && zp->z_sa_hdl
 		    && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted
 		    && zp->z_in_pager_op > 0
+		    && zp->z_syncer_active != NULL
+		    && zp->z_syncer_active != curthread
 		    && !rw_write_held(&zp->z_map_lock)) {
 			extern void IOSleep(unsigned milliseconds);
 			IOSleep(1);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_spin_sleeps);
+			if (zp && (zp->z_size <= ap->a_f_offset)) {
+				/* probably truncated */
+				printf("ZFS: %s:%d: usize %llu; zsize %llu < %llu ap->a_f_offset, file %s\n",
+				    __func__, __LINE__, ubc_getsize(ap->a_vp), zp->z_size, ap->a_f_offset,
+				    zp->z_name_cache);
+				error = EINVAL;
+				goto exit_abort;
+			}
+			lock_got = rw_tryenter(&zp->z_map_lock, RW_WRITER);
 		}
+		if (lock_got)
+			rw_exit(&zp->z_map_lock);
 	}
 
 start_3614_case:
@@ -3838,8 +3855,6 @@ start_3614_case:
 	 * upl_abort. So use the non-error version.
 	 */
 	ZFS_ENTER_NOERROR(zfsvfs);
-
-	const off_t ubcsize_at_entry = ubc_getsize(vp);
 
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
 
