@@ -3724,6 +3724,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	uint64_t filesize;
 	rl_t *rl;
 	boolean_t mapped = B_FALSE;
+	boolean_t must_lock = B_FALSE;
 
 	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
@@ -3770,6 +3771,19 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		if (zp && zp->z_sa_hdl && zp->z_syncer_active != curthread) {
 			if (zp->z_syncer_active != NULL) {
 				rl_t *tsdrl = tsd_get(rl_key);
+				if (tsdrl == NULL && !rw_write_held(&zp->z_map_lock)) {
+					/*
+					 * since 7f288ae22df26 this is a userland msync(2), so
+					 * we can recover if we can get an RL and z_map_lock
+					 */
+					printf("ZFS: %s:%d [3614 case] z_syncer_active is not me or NULL, but"
+					    " tsdrl is NULL and z_map_lock is not held, so proceeding with must_lock"
+					    " a_f_offset %llu a_size %lu a_flags %d file %s\n",
+					    __func__, __LINE__,
+					    ap->a_f_offset, ap->a_size, ap->a_flags, zp->z_name_cache);
+					must_lock = B_TRUE;
+					goto start_3614_case;
+				}
 				printf("ZFS: %s:%d: [3614 case]: z_syncer_active is not me or NULL! (z_map_lock held? %d z_in_pager_op %d)"
 				    " a_f_offset %llu a_size %lu a_flags %d (tsd_rl? %d r_off %llu r_len %llu) file %s\n",
 				    __func__, __LINE__,
@@ -3799,6 +3813,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			VNOPS_OSX_STAT_BUMP(pageoutv2_spin_sleeps);
 		}
 	}
+
+start_3614_case:
 	if (zp && zp->z_sa_hdl) {
 		if (zp && zp->z_sa_hdl && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted && zp->z_zfsvfs->z_vfs) {
 			inc_z_in_pager_op(zp,
@@ -3900,6 +3916,9 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	boolean_t xxxbleat = B_FALSE;
 	const rl_t *tsd_rl_at_entry = tsd_get(rl_key);
 	const uint32_t range_locks_at_entry = zp->z_range_locks;
+
+	if (must_lock)
+		goto acquire_locks;
 
 	if (tsd_get(rl_key) != NULL) {
 		off_t fsize = zp->z_size;
@@ -4106,7 +4125,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		drop_rl = B_FALSE;
 	}
 
-
 acquire_locks:
 
 	EQUIV(had_map_lock_at_entry, rw_write_held(&zp->z_map_lock));
@@ -4120,7 +4138,6 @@ acquire_locks:
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		tsd_set(rl_key, rl);
 	}
-
 
 	if (rl == NULL) {
 		if (had_map_lock_at_entry) {
