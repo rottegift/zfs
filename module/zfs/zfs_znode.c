@@ -1704,19 +1704,15 @@ zfs_rezget(znode_t *zp)
 				    __func__, __LINE__,
 				    zp->z_name_cache, ubc_getsize(vp), zp->z_size);
 			}
-			int vnode_get_error = vnode_get(vp);
-			ASSERT0(vnode_get_error);
-			if (!vnode_get_error) {
-				ZNODE_STAT_BUMP(rezget_setsize);
-				if (ubc_getsize(vp) < zp->z_size) {
-					ZNODE_STAT_BUMP(rezget_setsize_shrink);
-					if ((zp->z_size & PAGE_MASK_64) != 0)
-						ZNODE_STAT_BUMP(rezget_setsize_shrink_nonaligned);
-				}
-				setsize_retval = ubc_setsize(vp, zp->z_size);
-				vnode_put(vp);
-				did_setsize = B_TRUE;
+			ZNODE_STAT_BUMP(rezget_setsize);
+			if (ubc_getsize(vp) < zp->z_size) {
+				ZNODE_STAT_BUMP(rezget_setsize_shrink);
+				if ((zp->z_size & PAGE_MASK_64) != 0)
+					ZNODE_STAT_BUMP(rezget_setsize_shrink_nonaligned);
 			}
+			setsize_retval = ubc_setsize(vp, zp->z_size);
+
+			did_setsize = B_TRUE;
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
