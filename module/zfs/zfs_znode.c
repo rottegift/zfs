@@ -2409,11 +2409,11 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	// step 2: ubc_setsize to trim the pages after the end of the new last page
 
-	if (skip_shrink == B_FALSE) {
+	if (skip_shrink == B_FALSE || spl_ubc_is_mapped(vp, NULL)) {
 
 		int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
-		if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64)
+		if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64 && !spl_ubc_is_mapped(vp, NULL))
 			setsize_trim_pages = zfs_trunc_tail_ubc_setsize(vp, round_page_64(end));
 
 		if (setsize_trim_pages == 0) { // TRUE on success or skip
@@ -2450,7 +2450,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		}
 
 		if (eof_pg_delta > 0 && (end & PAGE_MASK_64) !=0) {
-			if (final_page_unusual == B_FALSE) {
+			if (final_page_unusual == B_FALSE && !spl_ubc_is_mapped(vp, NULL)) {
 				setsize_retval = zfs_trunc_lastbytes_ubc_setsize(vp, end);
 			} else {
 				// clean the page within the current locking context
@@ -2470,7 +2470,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 				setsize_retval = zfs_trunc_lastbytes_post_pageout(vp, end);
 			}
 		} else if (eof_pg_delta > 0) {
-			if (final_page_unusual == B_FALSE) {
+			if (final_page_unusual == B_FALSE && !spl_ubc_is_mapped(vp, NULL)) {
 				setsize_retval = zfs_trunc_lastpage_ubc_setsize(vp, end);
 			} else {
 				// clean the page within the current locking context
@@ -2486,13 +2486,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 				int pageout_err = zfs_vnop_pageoutv2(&ap);
 				ASSERT0(pageout_err);
 				ZNODE_STAT_BUMP(trunc_cleaned_only_page);
-
-				setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
+				if (!spl_ubc_is_mapped(vp, NULL))
+					setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
 			}
-		}  else if ((end & PAGE_MASK_64) != 0) {
+		}  else if ((end & PAGE_MASK_64) != 0 && !spl_ubc_is_mapped(vp, NULL)) {
 			setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
-		} else
+		} else if (!spl_ubc_is_mapped(vp, NULL)) {
 			setsize_retval = zfs_trunc_only_page_ubc_setsize(vp, end);
+		}
 
 		ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
 
