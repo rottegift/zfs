@@ -2347,47 +2347,42 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		const off_t ubcsize = ubc_getsize(vp);
 
-		int cluster_copy_error = 0;
 		int pageoutv2_error = 0;
 
-		int vnode_get_error = vnode_get(vp);
-		ASSERT0(vnode_get_error);
+		/* here we do the magic */
+		int cluster_copy_error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
 
-		if (!vnode_get_error) {
-			/* here we do the magic */
-			error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+		if (!error && cluster_copy_error)
+			error = cluster_copy_error;
 
-			cluster_copy_error = error;
-			if (error == 0 && xfer_resid < this_chunk) {
-				const size_t to_sync = this_chunk - xfer_resid;
-				const off_t sync_to_p = this_off + to_sync;
-				const off_t align_off = trunc_page_64(this_off);
-				const off_t align_end = round_page_64(sync_to_p);
-				const size_t align_to_sync = align_end - align_off;
-				struct vnop_pageout_args ap = {
-					.a_vp = vp,
-					.a_pl = NULL,
-					.a_f_offset = align_off,
-					.a_size = align_to_sync,
-					.a_flags = UPL_MSYNC,
-					.a_context = NULL,
-				};
-				if (do_sync)
-					ap.a_flags |= UPL_IOSYNC;
+		/* clean the data and copy it out to the DMU */
+		if (cluster_copy_error == 0 && xfer_resid < this_chunk) {
+			const size_t to_sync = this_chunk - xfer_resid;
+			const off_t sync_to_p = this_off + to_sync;
+			const off_t align_off = trunc_page_64(this_off);
+			const off_t align_end = round_page_64(sync_to_p);
+			const size_t align_to_sync = align_end - align_off;
+			struct vnop_pageout_args ap = {
+				.a_vp = vp,
+				.a_pl = NULL,
+				.a_f_offset = align_off,
+				.a_size = align_to_sync,
+				.a_flags = UPL_MSYNC,
+				.a_context = NULL,
+			};
+			if (do_sync)
+				ap.a_flags |= UPL_IOSYNC;
 
-				ASSERT3U(ap.a_size, <=, MAX_UPL_TRANSFER_BYTES);
+			ASSERT3U(ap.a_size, <=, MAX_UPL_TRANSFER_BYTES);
 
-				// tell fsync et al. to go away
-				zp->z_mr_sync = 0;
+			// tell fsync et al. to go away
+			zp->z_mr_sync = 0;
 
-				error = zfs_vnop_pageoutv2(&ap);
+			pageoutv2_error = zfs_vnop_pageoutv2(&ap);
 
-				pageoutv2_error = error;
-			}
-			vnode_put(vp);
+			if (!error && pageoutv2_error)
+				error = pageoutv2_error;
 		}
-		if (error == 0 && vnode_get_error != 0)
-			error = vnode_get_error;
 
 		ASSERT3S(ubc_getsize(vp), ==, ubcsize);
 
@@ -2564,10 +2559,10 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			VNOPS_STAT_INCR(zfs_write_cluster_copy_bytes, this_chunk - xfer_resid);
 		} else {
 			printf("ZFS: %s:%d: error %d from operation:"
-			    " vnode_get_error %d cluster_copy_error %d pageoutv2_error %d"
+			    " cluster_copy_error %d pageoutv2_error %d"
 			    " (woff %lld, resid %ld) (now %lld %lld) c %d file %s\n",
 			    __func__, __LINE__, error,
-			    vnode_get_error, cluster_copy_error, pageoutv2_error,
+			    cluster_copy_error, pageoutv2_error,
 			    woff, start_resid,
 			    uio_offset(uio), uio_resid(uio), c,
 			    zp->z_name_cache);
