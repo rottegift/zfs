@@ -2308,9 +2308,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
-	const off_t sync_eof = round_page_64(zp->z_size);
+	const off_t sync_eof = round_page_64(MAX(zp->z_size, ubc_getsize(vp)));
 	const off_t sync_new_eof = trunc_page_64(end);
-	const off_t sync_page_after_new_eof = sync_new_eof + PAGE_SIZE_64;
+	//const off_t sync_page_after_new_eof = sync_new_eof + PAGE_SIZE_64; // for dumping pages
 	const off_t eof_pg_delta = trunc_page_64(zp->z_size) - sync_new_eof;
 
 	IMPLY((end - zp->z_size) < PAGE_SIZE_64, eof_pg_delta == 0);
@@ -2322,31 +2322,11 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * about to invalidate.
 	 */
 
-	/* First hold the vnode */
-
 	ASSERT3U(ubc_getsize(vp), >, end);
 
 	int setsize_retval = 0;
 
 	// step 1 : clean unusual pages from the page containing the EOF onwards
-
-	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
-	int t_errs = 0;
-
-	zfs_ubc_range_all_flags(zp, vp, sync_new_eof,
-	    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-
-	if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0) {
-		printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
-		    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
-		    " (tot pages %llu)"
-		    " fs %s file %s\n",
-		    __func__, __LINE__,
-		    sync_new_eof, sync_eof,
-		    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
-		    eof_pg_delta,
-		    fsname, fname);
-	}
 
 	off_t msync_resid = 0;
 
@@ -2363,7 +2343,23 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    fsname, fname);
 	}
 
-	int zfs_msync_drop_ret = 0;
+	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
+	int t_errs = 0;
+
+	zfs_ubc_range_all_flags(zp, vp, sync_new_eof,
+	    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+
+	if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0 || t_precious > 0) {
+		printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
+		    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
+		    " (tot pages %llu) (msync ret %d resid %llu)"
+		    " fs %s file %s\n",
+		    __func__, __LINE__,
+		    sync_new_eof, sync_eof,
+		    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
+		    eof_pg_delta, zfs_msync_ret, msync_resid,
+		    fsname, fname);
+	}
 
 	// step 2: ubc_setsize to trim the pages after the end of the new last page
 
