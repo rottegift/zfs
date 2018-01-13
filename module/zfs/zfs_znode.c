@@ -2328,31 +2328,44 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	int setsize_retval = 0;
 
+	// step 1 : clean unusual pages from the page containing the EOF onwards
+
 	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
 	int t_errs = 0;
 
-	if ((end & PAGE_MASK_64) != 0) {
-		zfs_ubc_range_all_flags(zp, vp, sync_page_after_new_eof,
-		    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+	zfs_ubc_range_all_flags(zp, vp, sync_new_eof,
+	    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-		if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0) {
-			printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
-			    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
-			    " (tot pages %llu)"
-			    " fs %s file %s\n",
-			    __func__, __LINE__,
-			    sync_page_after_new_eof, sync_eof,
-			    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
-			    eof_pg_delta,
-			    fsname, fname);
-		}
+	if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0) {
+		printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
+		    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
+		    " (tot pages %llu)"
+		    " fs %s file %s\n",
+		    __func__, __LINE__,
+		    sync_new_eof, sync_eof,
+		    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
+		    eof_pg_delta,
+		    fsname, fname);
 	}
 
 	off_t msync_resid = 0;
 
-	// step 1: get rid of all the pages after the page containing the new EOF
+	int zfs_msync_ret = zfs_msync(zp, rl, sync_new_eof, sync_eof, &msync_resid, UBC_PUSHALL);
+
+	if (zfs_msync_ret != 0) {
+		printf("ZFS: %s:%d: %s %d (resid %lld) invalidating range"
+		    " [%lld..%lld] (truncing to %lld) (-pages %lld)"
+		    " fs %s file %s\n",
+		    __func__, __LINE__,
+		    (msync_resid == 0) ? "ERROR" : "error",
+		    error, msync_resid,
+		    sync_new_eof, sync_eof, end, eof_pg_delta,
+		    fsname, fname);
+	}
 
 	int zfs_msync_drop_ret = 0;
+
+	// step 2: get rid of all the pages after the page containing the new EOF
 
 	if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64)
 		zfs_msync_drop_ret = zfs_ubc_msync(zp, rl,
@@ -2371,7 +2384,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    is_file_clean(vp, sync_new_eof) != 0);
 	}
 
-	// step 2: ubc_setsize to trim the pages after the end of the new last page
+	// step 3: ubc_setsize to trim the pages after the end of the new last page
 
 	int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
@@ -2389,7 +2402,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    is_file_clean(vp, sync_new_eof) != 0);
 	}
 
-	// step 3: ubc_setsize to the desired value
+	// step 4: ubc_setsize to the desired value
 
 	boolean_t final_page_unusual = B_FALSE;
 
