@@ -266,10 +266,10 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			const hrtime_t diff = (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1)) - gethrtime();
 			const uint32_t secs = NSEC2SEC(diff);
 			printf("ZFS: %s:%d: zfs_ubc_msync returned for file %s only %u seconds ago,"
-			    " so unwilling to msync right now, wait until next txg or so (waitfor? %d)"
+			    " but willing to msync right now, wait until next txg or so (waitfor? %d)"
 			    " but may zil_commit\n",
 			    __func__, __LINE__, zp->z_name_cache, secs, waitfor);
-			do_not_msync = B_TRUE;
+			//do_not_msync = B_TRUE;
 		}
 		ZFS_ENTER_NOERROR(zfsvfs);
 		const char *fname = zp->z_name_cache;
@@ -286,12 +286,12 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 				 * this is the only code that, via the ++
 				 * below, can generate a small nonzero z_mr_sync
 				 */
-				printf("ZFS: %s:%d: unwilling to be the first ubc_msync on fs %s file %s"
+				printf("ZFS: %s:%d: willing to be the first ubc_msync on fs %s file %s"
 				    " (prev attempts %lld) (waitfor %d, waitfor arg %d) (but may zil_commit)\n",
 				    __func__, __LINE__, fsname, fname, zp->z_mr_sync,
 				    waitfor, *waitfor_arg);
 				zp->z_mr_sync++;
-				do_not_msync = B_TRUE;
+				//do_not_msync = B_TRUE;
 			} else {
 				printf("ZFS: %s:%d unmounting, so in spite of low mr_sync count %lld"
 				    " (waitfor %d, waitfor arg %d), proceeding"
