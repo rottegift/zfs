@@ -3410,9 +3410,9 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	vnode_t *vp = ZTOV(zp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 
-	ASSERT3U(zp->z_size, ==, ubc_getsize(vp));
+	// - will get this from zfs_trunc ASSERT3U(zp->z_size, ==, ubc_getsize(vp));
 
-	if (zp->z_size == 0)
+	if (zp->z_size == 0 && ubc_getsize(vp) == 0)
 		return (0);
 
 	if (end <= start)
@@ -3434,7 +3434,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 
 	// vnop_get ?
 
-	for (f_offset = range_start; f_offset < MIN(range_end, zp->z_size); f_offset += PAGE_SIZE_64) {
+	for (f_offset = range_start; f_offset < MIN(range_end, MAX(zp->z_size, ubc_getsize(vp))); f_offset += PAGE_SIZE_64) {
 		int flags;
 		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &flags);
 		if (pop_retval == KERN_SUCCESS) {
