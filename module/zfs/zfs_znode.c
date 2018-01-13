@@ -2347,9 +2347,10 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const off_t sync_eof = round_page_64(MAX(zp->z_size, ubc_getsize(vp)));
 	const off_t sync_new_eof = trunc_page_64(end);
 	//const off_t sync_page_after_new_eof = sync_new_eof + PAGE_SIZE_64; // for dumping pages
-	const off_t eof_pg_delta = trunc_page_64(zp->z_size) - sync_new_eof;
+	const off_t bytes_after_new_eof =  MAX(zp->z_size, ubc_getsize(vp)) - end;
+	const off_t eof_pg_delta = howmany(bytes_after_new_eof, PAGE_SIZE_64) - 1;
 
-	IMPLY((end - zp->z_size) < PAGE_SIZE_64, eof_pg_delta == 0);
+	IMPLY(bytes_after_new_eof < PAGE_SIZE_64, eof_pg_delta == 0);
 
 	/*
 	 * Clear any mapped pages in the truncated region.  This has to
@@ -2375,7 +2376,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    __func__, __LINE__,
 		    (msync_resid == 0) ? "ERROR" : "error",
 		    error, msync_resid,
-		    sync_new_eof, sync_eof, end, eof_pg_delta,
+		    sync_new_eof, sync_eof, end, eof_pg_delta + 1,
 		    zp->z_size, ubc_getsize(vp),
 		    fsname, fname);
 	}
@@ -2395,7 +2396,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    __func__, __LINE__,
 		    sync_new_eof, sync_eof,
 		    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
-		    eof_pg_delta, zfs_msync_ret, msync_resid,
+		    eof_pg_delta + 1, zfs_msync_ret, msync_resid,
 		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 		    zp->z_size, ubc_getsize(vp),
 		    fsname, fname);
@@ -2413,7 +2414,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    " %lld -> %lld (trunc to %lld) (-pages %lld)"
 		    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
 		    __func__, __LINE__,
-		    sync_eof, sync_new_eof, end, eof_pg_delta,
+		    sync_eof, sync_new_eof, end, eof_pg_delta + 1,
 		    fsname, fname,
 		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 		    is_file_clean(vp, sync_new_eof) != 0);
