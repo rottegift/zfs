@@ -2325,7 +2325,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		rl_t *tsdrl = tsd_get(rl_key);
 		if (!tsdrl
 		    || tsdrl->r_off > off
-		    || tsdrl->r_off + tsdrl->r_len > off + len) {
+		    || tsdrl->r_off + tsdrl->r_len < off + len) {
 			printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
 			    " SKIPPING LOCKING (note, range not covered) for"
 			    " [%llu..%llu] (size %lu uploff %u) fs %s file %s (nocommit? %d)"
