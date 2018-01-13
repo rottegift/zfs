@@ -5205,6 +5205,7 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	dprintf("+vnop_mnomap: %p\n", ap->a_vp);
 
 	ZFS_ENTER(zfsvfs);
+	ZFS_VERIFY_ZP(zp);
 
 	ASSERT(vnode_isreg(vp));
 
@@ -5221,6 +5222,35 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		zp->z_mr_sync = 0;
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
+
+	if (zp->z_size != ubc_getsize(vp)) {
+		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+		printf("ZFS: %s:%d usize %llu <- zsize %llu for file %s\n",
+		    __func__, __LINE__, ubc_getsize(vp), zp->z_size, zp->z_name_cache);
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
+		rl_t *rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+		tsd_set(rl_key, rl);
+		if (spl_ubc_is_mapped(vp, NULL) || zp->z_size == ubc_getsize(vp)) {
+			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rl);
+			rl = NULL;
+		} else {
+			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+			ASSERT3U(tries, <, 10);
+			if (!spl_ubc_is_mapped(vp, NULL) && zp->z_size != ubc_getsize(vp)) {
+				int setsize_retval = ubc_setsize(vp, zp->z_size);
+				ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+			} else {
+				printf("ZFS: %s:%d: (zs %llu us %llu) lost race with mapper %s\n", __func__, __LINE__,
+				    zp->z_size, ubc_getsize(vp), zp->z_name_cache);
+			}
+			z_map_drop_lock(zp, &need_release, &need_upgrade);
+			tsd_set(rl_key, NULL);
+			zfs_range_unlock(rl);
+			rl = NULL;
+		}
+		ASSERT3P(rl, ==, NULL);
+	}
 
 	ZFS_EXIT(zfsvfs);
 
