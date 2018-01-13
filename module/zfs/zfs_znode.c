@@ -2308,6 +2308,42 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
+
+	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
+	if (error) {
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+		return (error);
+	}
+
+	tx = dmu_tx_create(zfsvfs->z_os);
+	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
+	zfs_sa_upgrade_txholds(tx, zp);
+	dmu_tx_mark_netfree(tx);
+	error = dmu_tx_assign(tx, TXG_WAIT);
+	if (error) {
+		dmu_tx_abort(tx);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		return (error);
+	}
+
+	zp->z_size = end;
+	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs),
+	    NULL, &zp->z_size, sizeof (zp->z_size));
+
+	if (end == 0) {
+		zp->z_pflags &= ~ZFS_SPARSE;
+		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_FLAGS(zfsvfs),
+		    NULL, &zp->z_pflags, 8);
+	}
+	VERIFY(sa_bulk_update(zp->z_sa_hdl, bulk, count, tx) == 0);
+
+	dmu_tx_commit(tx);
+
 	const off_t sync_eof = round_page_64(MAX(zp->z_size, ubc_getsize(vp)));
 	const off_t sync_new_eof = trunc_page_64(end);
 	//const off_t sync_page_after_new_eof = sync_new_eof + PAGE_SIZE_64; // for dumping pages
@@ -2333,13 +2369,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	int zfs_msync_ret = zfs_msync(zp, rl, sync_new_eof, sync_eof, &msync_resid, UBC_PUSHALL);
 
 	if (zfs_msync_ret != 0) {
-		printf("ZFS: %s:%d: %s %d (resid %lld) invalidating range"
-		    " [%lld..%lld] (truncing to %lld) (-pages %lld)"
+		printf("ZFS: %s:%d: %s %d (resid %lld) cleaning range"
+		    " [%lld..%lld] (truncing to %lld) (-pages %lld) (zsize %llu usize %llu)"
 		    " fs %s file %s\n",
 		    __func__, __LINE__,
 		    (msync_resid == 0) ? "ERROR" : "error",
 		    error, msync_resid,
 		    sync_new_eof, sync_eof, end, eof_pg_delta,
+		    zp->z_size, ubc_getsize(vp),
 		    fsname, fname);
 	}
 
@@ -2353,12 +2390,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
 		    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
 		    " (tot pages %llu) (msync ret %d resid %llu) (mapped? %d write? %d)"
+		    " (zsize %lld usize %lld)"
 		    " fs %s file %s\n",
 		    __func__, __LINE__,
 		    sync_new_eof, sync_eof,
 		    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
 		    eof_pg_delta, zfs_msync_ret, msync_resid,
 		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
+		    zp->z_size, ubc_getsize(vp),
 		    fsname, fname);
 	}
 
@@ -2459,42 +2498,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 		    is_file_clean(vp, sync_new_eof) != 0);
 	}
-
-	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
-	if (error) {
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		zfs_range_unlock(rl);
-		return (error);
-	}
-
-	tx = dmu_tx_create(zfsvfs->z_os);
-	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-	zfs_sa_upgrade_txholds(tx, zp);
-	dmu_tx_mark_netfree(tx);
-	error = dmu_tx_assign(tx, TXG_WAIT);
-	if (error) {
-		dmu_tx_abort(tx);
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		zfs_range_unlock(rl);
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-		return (error);
-	}
-
-	zp->z_size = end;
-	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs),
-	    NULL, &zp->z_size, sizeof (zp->z_size));
-
-	if (end == 0) {
-		zp->z_pflags &= ~ZFS_SPARSE;
-		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_FLAGS(zfsvfs),
-		    NULL, &zp->z_pflags, 8);
-	}
-	VERIFY(sa_bulk_update(zp->z_sa_hdl, bulk, count, tx) == 0);
-
-	dmu_tx_commit(tx);
-
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
