@@ -2352,12 +2352,13 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0 || t_precious > 0) {
 		printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
 		    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
-		    " (tot pages %llu) (msync ret %d resid %llu)"
+		    " (tot pages %llu) (msync ret %d resid %llu) (mapped? %d write? %d)"
 		    " fs %s file %s\n",
 		    __func__, __LINE__,
 		    sync_new_eof, sync_eof,
 		    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
 		    eof_pg_delta, zfs_msync_ret, msync_resid,
+		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 		    fsname, fname);
 	}
 
