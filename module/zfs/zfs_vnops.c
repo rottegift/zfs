@@ -1372,9 +1372,8 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 }
 
 static int
-mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
+mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *rl)
 {
-	znode_t *zp = VTOZ(vp);
         VERIFY3P(zp, !=, NULL);
         VERIFY3P(zp->z_zfsvfs, !=, NULL);
         VERIFY3P(zp->z_zfsvfs->z_os, !=, NULL);
@@ -1453,6 +1452,21 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 	ASSERT3S(upl_size, >=, PAGE_SIZE_64);
 	ASSERT3S(upl_size, >=, inbytes);
 
+	/* clean any unusual pages */
+
+	off_t resid_msync = 0;
+	int msync_retval = zfs_msync(zp, rl, upl_file_offset,
+	    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
+	if (msync_retval != 0) {
+		printf("ZFS: %s:%d: zfs_msync error %d (resid %llu)"
+		    " for start %llu end %llu file %s\n",
+		    __func__, __LINE__, msync_retval, resid_msync,
+		    upl_file_offset, upl_file_offset + upl_size,
+		    filename);
+	}
+
+	/* pull in any absent pages */
+
 	err = fill_holes_in_range(vp, upl_file_offset, upl_size, FILL_FOR_READ);
 
 	if (err != 0) {
@@ -1478,16 +1492,9 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio)
 		mutex_exit(&zp->z_ubc_msync_lock);
 		unset_syncer = B_TRUE;
 
-		int vnode_get_error = vnode_get(vp);
-		ASSERT0(vnode_get_error);
-		if (vnode_get_error == 0) {
-			/* here we do the magic */
-			//err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
-			err = zfs_ubc_to_uio(zp, vp, uio, &cache_resid, 0, upl_file_offset, upl_size);
-			vnode_put(vp);
-		}
-		if (err == 0 && vnode_get_error != 0)
-			err = vnode_get_error;
+		/* here we do the magic */
+		//err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
+		err = zfs_ubc_to_uio(zp, vp, uio, &cache_resid, 0, upl_file_offset, upl_size);
 
 		if (unset_syncer) {
 			ASSERT3P(zp->z_syncer_active, ==, curthread);
@@ -1699,7 +1706,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 
 		boolean_t was_mapped = spl_ubc_is_mapped(vp, NULL);
 
-		error = mappedread_new(vp, nbytes, uio);
+		error = mappedread_new(vp, nbytes, uio, zp, rl);
 
 		ASSERT3S(error, ==, 0);
 		if (error == 0 && nbytes > 0) {
