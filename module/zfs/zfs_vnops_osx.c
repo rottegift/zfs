@@ -5013,9 +5013,10 @@ pageout_done:
 		rl = NULL;
 	}
 
-	dec_z_in_pager_op(zp, fsname, fname);
 
 exit_abort:
+
+	dec_z_in_pager_op(zp, fsname, fname);
 
 	// rl is uninitialized at this point, confirmed by compiler,
 	// so we can ignore it.
