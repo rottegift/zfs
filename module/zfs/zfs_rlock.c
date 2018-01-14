@@ -182,6 +182,10 @@ wait:
 
 		if (try == B_TRUE)
 			return (B_FALSE);
+		
+		char *rl_caller = NULL;
+
+		if (rl) { rl_caller = rl->r_caller; }
 
 		printf("ZFS: %s:%d: (%s:%d) want lock"
 		    " off %llu len %llu file %s held by (%s:%d) [%llu, %llu] (append? %d)\n",
@@ -189,7 +193,7 @@ wait:
 		    new->r_caller, new->r_line,
 		    new->r_off, new->r_len,
 		    (zp) ? zp->z_name_cache : "(null)",
-		    (rl && rl->r_caller) ? rl->r_caller : "(null)",
+		    (rl_caller != NULL) ? rl_caller : "(null)",
 		    (rl) ? rl->r_line : 0,
 		    (rl) ? rl->r_len : 0,
 		    (rl) ? rl->r_off : 0,
