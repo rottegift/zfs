@@ -3911,6 +3911,15 @@ start_3614_case:
 			error = abortdumpret;
 			goto exit_abort;
 		}
+		if (ap->a_f_offset > zp->z_size && ap->a_f_offset > ubc_getsize(ap->a_vp)) {
+			printf("ZFS: %s:%d: shrinking from usize %lld to a_f_offset %lld (zsize %lld)"
+			    " fs %s file %s\n",
+			    __func__, __LINE__,
+			    ubc_getsize(ap->a_vp), ap->a_f_offset,
+			    zp->z_size, fsname, fname);
+			int setsize_retval = ubc_setsize(ap->a_vp, ap->a_f_offset);
+			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+		}
 		error = 0;
 		goto exit_abort;
 	}
@@ -4633,6 +4642,20 @@ skip_lock_acquisition:
 			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
 		}
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
+	}
+
+	/* maybe try to reduce ubc size */
+	if (upl_pages_after_boundary > 0) {
+		int setsize_retval = ubc_setsize(ap->a_vp,
+		    MAX(dismissal_boundary, round_page_64(zp->z_size)));
+		if (setsize_retval == 0) // returns true on error
+			printf("ZFS: %s:%d: failed to ubc_setsize "
+			    " (tgt: %lld usize: %lld zsize %lld (round %lld) foff %lld"
+			    " fs %s file %s\n",
+			    __func__, __LINE__, dismissal_boundary,
+			    ubc_getsize(ap->a_vp), zp->z_size,
+			    round_page_64(zp->z_size), ap->a_f_offset,
+			    fsname, fname);
 	}
 
 	const off_t trimmed_upl_size = (off_t)ap->a_size - ((off_t)upl_pages_dismissed * PAGE_SIZE_64);
