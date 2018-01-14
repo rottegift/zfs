@@ -4550,11 +4550,25 @@ skip_lock_acquisition:
 	 * that as the practical end of the UPL.
 	 */
 
+
+	// evreything after dismissal boundary must be ditched
+	const off_t dismissal_boundary = round_page_64(zp->z_size);
+	ASSERT3U(dismissal_boundary, >, ap->a_f_offset);
+
 	int upl_pages_dismissed = 0;
+	int upl_pages_after_boundary = 0;
+	int upl_dirty_pages_after_boundary = 0;
 	boolean_t dismissed_valid = B_FALSE;
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
-		if (upl_dirty_page(pl, --page_index)) {
+		if ((ap->a_f_offset + (--page_index * PAGE_SIZE_64)) >= dismissal_boundary) {
+			upl_pages_dismissed++;
+			upl_pages_after_boundary++;
+			if (upl_dirty_page(pl, page_index))
+				upl_dirty_pages_after_boundary++;
+			continue;
+		}
+		if (upl_dirty_page(pl, page_index)) {
 			break;
 		} else {
 			if (upl_valid_page(pl, page_index)) {
@@ -4568,6 +4582,15 @@ skip_lock_acquisition:
 			}
 			upl_pages_dismissed++;
 		}
+	}
+
+	if (upl_pages_after_boundary > 0) {
+		printf("ZFS: %s:%d: %d pages past eof dismissed (total dismissed %d), %d dirty"
+		    " foff %llu sz %lu (pages %d) zsize %llu usize %llu fs %s file %s\n",
+		    __func__, __LINE__, upl_pages_after_boundary,
+		    upl_dirty_pages_after_boundary, upl_pages_dismissed,
+		    ap->a_f_offset, ap->a_size, pages_in_upl,
+		    zp->z_size, ubc_getsize(vp), fsname, fname);
 	}
 
 	if (upl_pages_dismissed == pages_in_upl) {
