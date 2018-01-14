@@ -2409,8 +2409,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	// step 2: ubc_setsize to trim the pages after the end of the new last page
 
-	skip_shrink = B_TRUE;
-
 	if (skip_shrink == B_FALSE || spl_ubc_is_mapped(vp, NULL)) {
 
 		int setsize_trim_pages = B_TRUE; // TRUE on success or skip
