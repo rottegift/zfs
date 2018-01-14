@@ -3879,8 +3879,38 @@ start_3614_case:
 	}
 
 	if (ap->a_f_offset < 0 || ap->a_f_offset >= zp->z_size) {
-		printf("ZFS: %s:%d: invalid offset %lld vs filesize %lld fs %s file %s\n",
-		    __func__, __LINE__, ap->a_f_offset, zp->z_size, fsname, fname);
+		printf("ZFS: %s:%d: invalid offset %lld vs filesize %llu (usize %llu)"
+		    " flags %d fs %s file %s\n",
+		    __func__, __LINE__, ap->a_f_offset, zp->z_size, ubc_getsize(vp),
+		    ap->a_flags, fsname, fname);
+		if (ap->a_f_offset < 0) {
+			error = EINVAL;
+			goto exit_abort;
+		}
+		/* dump these pages */
+		upl_t aupl;
+		upl_page_info_t *apl = NULL;
+		int upldumpret = ubc_create_upl(ap->a_vp,
+		    ap->a_f_offset, ap->a_size, &aupl, &apl,
+		    UPL_WILL_BE_DUMPED | UPL_RET_ONLY_DIRTY | UPL_SET_LITE | UPL_COPYOUT_FROM);
+		if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
+			printf("ZFS: %s:%d: failed to create upl for page dumping: err %d"
+			    " foff %llu sz %lu fs %s fname %s\n",
+			    __func__, __LINE__, upldumpret,
+			    ap->a_f_offset, ap->a_size, fsname, fname);
+			pageoutv2_exception(__func__, __LINE__);
+			error = upldumpret;
+			goto exit_abort;
+		}
+		int abortdumpret = ubc_upl_abort(aupl, UPL_ABORT_DUMP_PAGES);
+		if (abortdumpret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
+			    " foff %llu sz %lu fs %s fname %s\n",
+			    __func__, __LINE__, abortdumpret,
+			    ap->a_f_offset, ap->a_size, fsname, fname);
+			error = abortdumpret;
+			goto exit_abort;
+		}
 		error = EINVAL;
 		goto exit_abort;
 	}
