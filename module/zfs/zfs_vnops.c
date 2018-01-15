@@ -7337,21 +7337,17 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
 		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0 ||
+		    spl_ubc_is_mapped(vp, NULL) ||
 		    vnode_isinuse(vp, 0) != 0) {
 			printf("ZFS: %s:%d: ubc_pages_resident true,"
 			    " %d dirty %d pageout %d precious %d absent %d busy %d t_errs %lld totlpgs"
-			    " inuse? %d mapped? %d write? %d file %s -- %s\n",
+			    " inuse? %d mapped? %d write? %d file %s -- continuing\n",
 			    __func__, __LINE__,
 			    t_dirty, t_pageout, t_precious, t_absent, t_busy, t_errs,
 			    howmany(ubc_getsize(vp), PAGE_SIZE_64),
 			    vnode_isinuse(vp, 0),
 			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-			    zp->z_name_cache,
-			    (vnode_isinuse(vp, 0) != 0 || spl_ubc_is_mapped(vp, NULL))
-			    ? "RETURNING"
-			    : "CONTINUING");
-			if (vnode_isinuse(vp, 0) != 0 || spl_ubc_is_mapped(vp, NULL))
-				goto atime_check;
+			    zp->z_name_cache);
 		}
 	} else if (vnode_isinuse(vp, 0)) {
 		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
@@ -7392,7 +7388,6 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 	}
 	mutex_exit(&zp->z_lock);
 
-atime_check:
 	if (zp->z_atime_dirty && zp->z_unlinked == 0) {
 		dmu_tx_t *tx = dmu_tx_create(zfsvfs->z_os);
 
