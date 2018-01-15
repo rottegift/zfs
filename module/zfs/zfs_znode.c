@@ -89,7 +89,7 @@ typedef struct znode_stats {
 	kstat_named_t trunc_only_bytes;
 	kstat_named_t trunc_only_page;
 	kstat_named_t trunc_tail;
-	kstat_named_t zfs_trunc_calls;
+	kstat_named_t zfs_trunc_skip_shrink;
 	kstat_named_t rezget_setsize;
 	kstat_named_t rezget_setsize_shrink;
 	kstat_named_t rezget_setsize_shrink_nonaligned;
@@ -106,7 +106,7 @@ static znode_stats_t znode_stats = {
 	{"trunc_setsize_only_bytes",			KSTAT_DATA_UINT64 },
 	{"trunc_setsize_only_page",			KSTAT_DATA_UINT64 },
 	{"trunc_tail_setsize",				KSTAT_DATA_UINT64 },
-	{"zfs_trunc_calls",				KSTAT_DATA_UINT64 },
+	{"zfs_trunc_skip_shrink",			KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize",				KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize_shrink",			KSTAT_DATA_UINT64 },
 	{"rezget_shrink_nonaligned",			KSTAT_DATA_UINT64 },
@@ -2102,7 +2102,6 @@ zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
 #define trunc_page_64(x) ((uint64_t)(x) & ~((uint64_t)PAGE_MASK_64))
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
 	rl = zfs_range_lock(zp, trunc_page_64(off), round_page_64(len), RL_WRITER);
-	ZNODE_STAT_BUMP(zfs_trunc_calls);
 
 	/*
 	 * Nothing to do if file already at desired length.
@@ -2281,9 +2280,26 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	int error = 0;
 	sa_bulk_attr_t bulk[2];
 	int count = 0;
+
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	if (vnode_isswap(vp)) {
+		printf("ZFS: %s:%d: attempt to truncate (%llu->%llu) swap file fs %s fn %s\n",
+		    __func__, __LINE__, zp->z_size, end, fsname, fname);
+		return (EPERM);
+	}
+
+	if (vnode_isdir(vp)) {
+		printf("ZFS: %s:%d: attempt to truncate (%llu->%llu) directory fs %s fn %s\n",
+		    __func__, __LINE__, zp->z_size, end, fsname, fname);
+		return (EISDIR);
+	}
+
 	/*
 	 * We will change zp_size, lock the whole file.
 	 */
+
 	ASSERT3P(tsd_get(rl_key), ==, NULL);
 	rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 
@@ -2304,9 +2320,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
 	ASSERT3S(ubcsize_at_entry, ==, zp->z_size);
-
-	const char *fname = zp->z_name_cache;
-	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 
 	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
@@ -2409,8 +2422,20 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	// step 2: ubc_setsize to trim the pages after the end of the new last page
 
-	if (skip_shrink == B_FALSE || spl_ubc_is_mapped(vp, NULL)) {
+	if (vnode_isinuse(vp, 0) != 0 || spl_ubc_is_mapped(vp, NULL)) {
+		printf("ZFS: %s:%d: skipping shrink (inuse? %d mapped? %d mappedwrite? %d"
+		    " new-eof %llu zsize %llu usize %llu (diff %llu)"
+		    " fs %s file %s",
+		    __func__, __LINE__, vnode_isinuse(vp, 0),
+		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
+		    end, zp->z_size, ubc_getsize(vp), ubc_getsize(vp) - end,
+		    fsname, fname);
+		skip_shrink = B_TRUE;
+	}
 
+	if (skip_shrink == B_TRUE) {
+		ZNODE_STAT_BUMP(zfs_trunc_skip_shrink);
+	} else {
 		int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
 		if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64 && !spl_ubc_is_mapped(vp, NULL))
