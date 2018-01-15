@@ -182,7 +182,7 @@ wait:
 
 		if (try == B_TRUE)
 			return (B_FALSE);
-		
+
 		char *rl_caller = NULL;
 
 		if (rl) { rl_caller = rl->r_caller; }
@@ -226,7 +226,7 @@ zfs_range_proxify(avl_tree_t *tree, rl_t *rl)
 	rl->r_cnt = 0;
 
 	/* create a proxy range lock */
-	proxy = kmem_alloc(sizeof (rl_t), KM_SLEEP);
+	proxy = kmem_zalloc(sizeof (rl_t), KM_SLEEP);
 	proxy->r_off = rl->r_off;
 	proxy->r_len = rl->r_len;
 	proxy->r_cnt = 1;
@@ -255,7 +255,7 @@ zfs_range_split(avl_tree_t *tree, rl_t *rl, uint64_t off)
 	ASSERT(rl->r_read_wanted == B_FALSE);
 
 	/* create the rear proxy range lock */
-	rear = kmem_alloc(sizeof (rl_t), KM_SLEEP);
+	rear = kmem_zalloc(sizeof (rl_t), KM_SLEEP);
 	rear->r_off = off;
 	rear->r_len = rl->r_off + rl->r_len - off;
 	rear->r_cnt = rl->r_cnt;
@@ -280,7 +280,7 @@ zfs_range_new_proxy(avl_tree_t *tree, uint64_t off, uint64_t len)
 	rl_t *rl;
 
 	ASSERT(len);
-	rl = kmem_alloc(sizeof (rl_t), KM_SLEEP);
+	rl = kmem_zalloc(sizeof (rl_t), KM_SLEEP);
 	rl->r_off = off;
 	rl->r_len = len;
 	rl->r_cnt = 1;
@@ -480,7 +480,7 @@ zfs_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type, const ch
 
 	ASSERT(type == RL_READER || type == RL_WRITER || type == RL_APPEND);
 
-	new = kmem_alloc(sizeof (rl_t), KM_SLEEP);
+	new = kmem_zalloc(sizeof (rl_t), KM_SLEEP);
 	new->r_zp = zp;
 	new->r_off = off;
 	if (len + off < off)	/* overflow */
@@ -538,7 +538,7 @@ zfs_try_range_lock(znode_t *zp, uint64_t off, uint64_t len, rl_type_t type, cons
 
 	ASSERT(type == RL_READER || type == RL_WRITER || type == RL_APPEND);
 
-	new = kmem_alloc(sizeof (rl_t), KM_SLEEP);
+	new = kmem_zalloc(sizeof (rl_t), KM_SLEEP);
 	new->r_zp = zp;
 	new->r_off = off;
 	if (len + off < off)	/* overflow */
@@ -681,6 +681,7 @@ zfs_range_unlock(rl_t *rl)
 		 */
 		zfs_range_unlock_reader(zp, rl, &free_list);
 	}
+	rl->r_caller = NULL;
 	mutex_exit(&zp->z_range_lock);
 
 	while ((free_rl = list_head(&free_list)) != NULL) {
