@@ -2422,11 +2422,11 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	// step 2: ubc_setsize to trim the pages after the end of the new last page
 
-	if (vnode_isinuse(vp, 0) != 0 || spl_ubc_is_mapped(vp, NULL)) {
+	if (vnode_isinuse(vp, 1) != 0 || spl_ubc_is_mapped(vp, NULL)) {
 		printf("ZFS: %s:%d: skipping shrink (inuse? %d mapped? %d mappedwrite? %d"
 		    " new-eof %llu zsize %llu usize %llu (diff %llu)"
 		    " fs %s file %s",
-		    __func__, __LINE__, vnode_isinuse(vp, 0),
+		    __func__, __LINE__, vnode_isinuse(vp, 1),
 		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 		    end, zp->z_size, ubc_getsize(vp), ubc_getsize(vp) - end,
 		    fsname, fname);
