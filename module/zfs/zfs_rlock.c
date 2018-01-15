@@ -182,7 +182,7 @@ wait:
 
 		if (try == B_TRUE)
 			return (B_FALSE);
-
+		
 		char *rl_caller = NULL;
 
 		if (rl) { rl_caller = rl->r_caller; }
@@ -515,7 +515,6 @@ static void
 zfs_range_free(void *arg)
 {
 	rl_t *rl = arg;
-	znode_t *zp = rl->r_zp;
 
 	if (rl->r_write_wanted)
 		cv_destroy(&rl->r_wr_cv);
@@ -523,9 +522,7 @@ zfs_range_free(void *arg)
 	if (rl->r_read_wanted)
 		cv_destroy(&rl->r_rd_cv);
 
-	mutex_enter(&zp->z_range_lock);
 	kmem_free(rl, sizeof (rl_t));
-	mutex_exit(&zp->z_range_lock);
 }
 
 /*
