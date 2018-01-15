@@ -240,7 +240,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			if (zp->z_mr_sync < 1024LL)
 				zp->z_mr_sync = 0;
 
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		}
 		if (vnode_isinuse(vp, 0)) {
 			if (waitfor)
@@ -248,18 +248,18 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 				    " waitfor_arg %d\n",
 				    __func__, __LINE__, zp->z_name_cache, *waitfor_arg);
 
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		}
 		if (zp->z_in_pager_op > 0) {
 			printf("ZFS: %s:%d: z_in_pager_op %d > 0 for file %s\n", __func__, __LINE__,
 			    zp->z_in_pager_op, zp->z_name_cache);
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		}
 		if (zp->z_syncer_active != NULL) {
 			printf("ZFS: %s:%d: a thread has z_syncer_active for file %s (us? %d)\n",
 			    __func__, __LINE__, zp->z_name_cache, zp->z_syncer_active == curthread);
 			cv_broadcast(&zp->z_ubc_msync_cv);
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		}
 		if (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1) > gethrtime()
 		    && !(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
@@ -344,7 +344,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			printf("ZFS: %s:%d: could not get range lock [0..%lld] for file %s\n",
 			    __func__, __LINE__, round_page_64(ubcsize), zp->z_name_cache);
 			ZFS_EXIT(zfsvfs);
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		}
 		tsd_set(rl_key, rl);
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
@@ -359,7 +359,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			ZFS_EXIT(zfsvfs);
 			tsd_set(rl_key, NULL);
 			zfs_range_unlock(rl);
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		}
 
 		/* do the msync */
@@ -403,13 +403,13 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		} else if (caught_syncer == B_TRUE) {
 			ASSERT3S(waitfor, ==, B_TRUE);
 			printf("ZFS: %s:%d: z_syncer_active isn't NULL (us? %d), watifor is true,"
-			    " returning VNODE_CLAIMED for file %s\n", __func__, __LINE__,
+			    " returning VNODE_RETURNED for file %s\n", __func__, __LINE__,
 			    (zp->z_syncer_active == curthread),
 			    zp->z_name_cache);
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		}
 		if (0 != is_file_clean(vp, ubc_getsize(vp)) && waitfor != B_TRUE)
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		else
 			return (VNODE_RETURNED);
 	} else {
@@ -419,10 +419,10 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		znode_t *zp = VTOZ(vp);
 		ASSERT3P(zp, !=, NULL);
 		if (!zp)
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		ASSERT3P(zp->z_sa_hdl, !=, NULL);
 		if (zp->z_sa_hdl == NULL) {
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		}
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		ASSERT3P(zfsvfs, !=, NULL);
@@ -453,7 +453,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		if (!vnode_isreg(vp) || !ubc_pages_resident(vp)) {
 			return (VNODE_RETURNED);
 		} else if (0 != is_file_clean(vp, ubc_getsize(vp)) && waitfor == B_TRUE) {
-			return (VNODE_CLAIMED);
+			return (VNODE_RETURNED);
 		} else {
 			return (VNODE_RETURNED);
 		}
