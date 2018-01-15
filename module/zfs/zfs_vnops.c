@@ -2664,8 +2664,10 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 					    end_size, zp->z_size);
 				}
 				ASSERT3S(zp->z_size, >=, ubcsize_at_entry);
-				int setsize_retval = ubc_setsize(vp, zp->z_size);
-				ASSERT3S(setsize_retval, !=, 0);
+				if (zp->z_size > ubc_getsize(vp)) {
+					int setsize_retval = ubc_setsize(vp, zp->z_size);
+					ASSERT3S(setsize_retval, !=, 0);
+				}
 			}
 		}
 	} // for

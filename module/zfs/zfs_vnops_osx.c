@@ -5307,19 +5307,31 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		rl_t *rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 		tsd_set(rl_key, rl);
-		if (spl_ubc_is_mapped(vp, NULL) || zp->z_size == ubc_getsize(vp)) {
+		if (spl_ubc_is_mapped(vp, NULL)
+		    || vnode_isinuse(vp, 1)
+		    || zp->z_size == ubc_getsize(vp)) {
 			tsd_set(rl_key, NULL);
 			zfs_range_unlock(rl);
 			rl = NULL;
 		} else {
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 			ASSERT3U(tries, <, 10);
-			if (!spl_ubc_is_mapped(vp, NULL) && zp->z_size != ubc_getsize(vp)) {
+			if (!spl_ubc_is_mapped(vp, NULL)
+			    && vnode_isinuse(vp, 1) == 0
+			    && zp->z_size < ubc_getsize(vp)) {
+				int setsize_retval = ubc_setsize(vp, zp->z_size);
+				ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+			} else if (zp->z_size > ubc_getsize(vp)) {
 				int setsize_retval = ubc_setsize(vp, zp->z_size);
 				ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 			} else {
-				printf("ZFS: %s:%d: (zs %llu us %llu) lost race with mapper %s\n", __func__, __LINE__,
-				    zp->z_size, ubc_getsize(vp), zp->z_name_cache);
+				printf("ZFS: %s:%d: (zs %llu us %llu) lost race with"
+				    " (inuse? %d mapper? %d write? %d)  %s\n", __func__, __LINE__,
+				    zp->z_size, ubc_getsize(vp),
+				    spl_ubc_is_mapped(vp, NULL),
+				    spl_ubc_is_mapped_writable(vp),
+				    vnode_isinuse(vp, 1),
+				    zp->z_name_cache);
 			}
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			tsd_set(rl_key, NULL);
