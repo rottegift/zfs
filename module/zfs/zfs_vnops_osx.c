@@ -3894,7 +3894,7 @@ start_3614_case:
 		    ap->a_f_offset, ap->a_size, &aupl, &apl,
 		    UPL_WILL_BE_DUMPED | UPL_RET_ONLY_DIRTY | UPL_SET_LITE | UPL_COPYOUT_FROM);
 		if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
-			printf("ZFS: %s:%d: failed to create upl for page dumping: err %d"
+			printf("ZFS: %s:%d: failed to create upl to dump pages: err %d"
 			    " foff %llu sz %lu fs %s fname %s\n",
 			    __func__, __LINE__, upldumpret,
 			    ap->a_f_offset, ap->a_size, fsname, fname);
@@ -3911,7 +3911,16 @@ start_3614_case:
 			error = abortdumpret;
 			goto exit_abort;
 		}
-		error = EINVAL;
+		if (ap->a_f_offset > zp->z_size && ap->a_f_offset > ubc_getsize(ap->a_vp)) {
+			printf("ZFS: %s:%d: shrinking from usize %lld to a_f_offset %lld (zsize %lld)"
+			    " fs %s file %s\n",
+			    __func__, __LINE__,
+			    ubc_getsize(ap->a_vp), ap->a_f_offset,
+			    zp->z_size, fsname, fname);
+			int setsize_retval = ubc_setsize(ap->a_vp, ap->a_f_offset);
+			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+		}
+		error = 0;
 		goto exit_abort;
 	}
 
@@ -4550,11 +4559,25 @@ skip_lock_acquisition:
 	 * that as the practical end of the UPL.
 	 */
 
+
+	// evreything after dismissal boundary must be ditched
+	const off_t dismissal_boundary = round_page_64(zp->z_size);
+	ASSERT3U(dismissal_boundary, >, ap->a_f_offset);
+
 	int upl_pages_dismissed = 0;
+	int upl_pages_after_boundary = 0;
+	int upl_dirty_pages_after_boundary = 0;
 	boolean_t dismissed_valid = B_FALSE;
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
-		if (upl_dirty_page(pl, --page_index)) {
+		if ((ap->a_f_offset + (--page_index * PAGE_SIZE_64)) >= dismissal_boundary) {
+			upl_pages_dismissed++;
+			upl_pages_after_boundary++;
+			if (upl_dirty_page(pl, page_index))
+				upl_dirty_pages_after_boundary++;
+			continue;
+		}
+		if (upl_dirty_page(pl, page_index)) {
 			break;
 		} else {
 			if (upl_valid_page(pl, page_index)) {
@@ -4568,6 +4591,15 @@ skip_lock_acquisition:
 			}
 			upl_pages_dismissed++;
 		}
+	}
+
+	if (upl_pages_after_boundary > 0) {
+		printf("ZFS: %s:%d: %d pages past eof dismissed (total dismissed %d), %d dirty"
+		    " foff %llu sz %lu (pages %d) zsize %llu usize %llu fs %s file %s\n",
+		    __func__, __LINE__, upl_pages_after_boundary,
+		    upl_dirty_pages_after_boundary, upl_pages_dismissed,
+		    ap->a_f_offset, ap->a_size, pages_in_upl,
+		    zp->z_size, ubc_getsize(vp), fsname, fname);
 	}
 
 	if (upl_pages_dismissed == pages_in_upl) {
@@ -4610,6 +4642,20 @@ skip_lock_acquisition:
 			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
 		}
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
+	}
+
+	/* maybe try to reduce ubc size */
+	if (upl_pages_after_boundary > 0) {
+		int setsize_retval = ubc_setsize(ap->a_vp,
+		    MAX(dismissal_boundary, round_page_64(zp->z_size)));
+		if (setsize_retval == 0) // returns true on error
+			printf("ZFS: %s:%d: failed to ubc_setsize "
+			    " (tgt: %lld usize: %lld zsize %lld (round %lld) foff %lld"
+			    " fs %s file %s\n",
+			    __func__, __LINE__, dismissal_boundary,
+			    ubc_getsize(ap->a_vp), zp->z_size,
+			    round_page_64(zp->z_size), ap->a_f_offset,
+			    fsname, fname);
 	}
 
 	const off_t trimmed_upl_size = (off_t)ap->a_size - ((off_t)upl_pages_dismissed * PAGE_SIZE_64);

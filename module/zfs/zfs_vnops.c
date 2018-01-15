@@ -1726,6 +1726,23 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 
 		boolean_t was_mapped = spl_ubc_is_mapped(vp, NULL);
 
+		/* don't call mappedread_new if we are reading past EOF */
+		if (uio_offset(uio) >= zp->z_size) {
+			// can we?: think about truncation and pages
+			ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
+			error = 0;
+			goto out;
+		}
+
+		if (uio_offset(uio) + nbytes > zp->z_size) {
+			printf("ZFS: %s:%d: nbytes %lu [%llu..%llu] would read past end of file %lld"
+			    " usize %lld (reducing nbytes to %llu) file %s\n", __func__, __LINE__,
+			    nbytes, uio_offset(uio), uio_offset(uio) + nbytes,
+			    zp->z_size, ubc_getsize(vp),
+			    zp->z_size - uio_offset(uio), zp->z_name_cache);
+			nbytes = zp->z_size - uio_offset(uio);
+		}
+
 		error = mappedread_new(vp, nbytes, uio, zp, rl);
 
 		ASSERT3S(error, ==, 0);
