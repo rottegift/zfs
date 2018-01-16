@@ -3510,7 +3510,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 			*resid = f_offset - range_start;
 	}
 	zp->z_mr_sync = gethrtime();
-	if (kerrs > 0) {
+	if (cleaned > 0) {
 		printf("ZFS: %s:%d: kerrs %llu cleaned %llu processed pages %llu in [%llu-%llu] (%llu pages) fs %s fn %s\n",
 		    __func__, __LINE__, kerrs, cleaned, totproc, start, end, howmany(end - start, PAGE_SIZE_64),
 		    fsname, fname);
