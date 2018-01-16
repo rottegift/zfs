@@ -1496,7 +1496,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		off_t resid_msync = 0;
 		int msync_retval = zfs_msync(zp, rl, upl_file_offset,
-		    upl_file_offset + upl_size, &resid_msync, UBC_PUSHDIRTY);
+		    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
 		if (msync_retval != 0) {
 			printf("ZFS: %s:%d: (lock? %d tries %lld) zfs_msync error %d (resid %llu)"
 			    " for start %llu end %llu (unusual pages d %d p %d b %d errs %d file %s\n",
