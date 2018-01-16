@@ -3431,10 +3431,14 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	ASSERT3U(rl->r_len + rl->r_off, >=, range_end);
 
 	off_t f_offset;
+	off_t kerrs = 0;
+	off_t cleaned = 0;
+	off_t totproc = 0;
 
 	// vnop_get ?
 
 	for (f_offset = range_start; f_offset < MIN(range_end, MAX(zp->z_size, ubc_getsize(vp))); f_offset += PAGE_SIZE_64) {
+		totproc++;
 		int flags;
 		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &flags);
 		if (pop_retval == KERN_SUCCESS) {
@@ -3451,7 +3455,15 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					  && s_pages * PAGE_SIZE_64 <= MAX_UPL_TRANSFER_BYTES
 					  && (((a_flags & UBC_PUSHALL) && (s_flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
 					      || ((a_flags & UBC_PUSHDIRTY) && (s_flags & UPL_POP_DIRTY))); ) {
-					ASSERT0(s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT));
+					if (s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT)) {
+						printf ("ZFS: %s:%d: unexpected POP value busy %d absent %d pageout %d for"
+						    " subrange %llu - %llu (s_pages %d) fsname %s filename %s\n",
+						    __func__, __LINE__,
+						    s_flags & UPL_POP_BUSY, s_flags & UPL_POP_ABSENT,
+						    s_flags & UPL_POP_PAGEOUT,
+						    subrange_offset, subrange_end, s_pages,
+						    fsname, fname);
+					}
 					subrange_end += PAGE_SIZE_64;
 					s_pages += 1;
 					s_retval = ubc_page_op(vp, subrange_end, 0, NULL, &s_flags);
@@ -3486,14 +3498,21 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					    start, end, fsname, fname);
 					return (pout_ret);
 				}
-
+				cleaned++;
 				VNOPS_OSX_STAT_INCR(zfs_msync_pages, s_pages);
 			}
+		} else {
+			kerrs += 1;
 		}
 		if (resid != NULL)
 			*resid = f_offset - range_start;
 	}
 	zp->z_mr_sync = gethrtime();
+	if (kerrs > 0) {
+		printf("ZFS: %s:%d: kerrs %llu cleaned %llu processed pages %llu in [%llu-%llu] (%llu pgaes) fs %s fn %s\n",
+		    __func__, __LINE__, kerrs, cleaned, totproc, start, end, howmany(end - start, PAGE_SIZE_64),
+		    fsname, fname);
+	}
 	return (0);
 }
 
