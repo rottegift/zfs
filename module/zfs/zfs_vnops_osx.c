@@ -5516,7 +5516,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	}
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
 
-	if (vnode_isinuse(vp, 0)) {
+	if (vnode_isreg(vp) && vnode_isinuse(vp, 0)) {
 		printf("ZFS: %s:%d: vnode_isinuse(f, 0) %d vnode_isinuse(f, 1) %d for file %s\n",
 		    __func__, __LINE__, vnode_isinuse(vp, 0), vnode_isinuse(vp, 1), zp->z_name_cache);
 	}
