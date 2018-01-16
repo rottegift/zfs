@@ -3966,7 +3966,8 @@ start_3614_case:
 			error = abortdumpret;
 			goto exit_abort;
 		}
-		if (ap->a_f_offset > zp->z_size && ap->a_f_offset > ubc_getsize(ap->a_vp)) {
+		if (ap->a_f_offset > zp->z_size && ap->a_f_offset > ubc_getsize(ap->a_vp)
+		    && (ap->a_flags & UPL_MSYNC) == 0 && vnode_isinuse(vp, 1) == 0) {
 			printf("ZFS: %s:%d: shrinking from usize %lld to a_f_offset %lld (zsize %lld)"
 			    " fs %s file %s\n",
 			    __func__, __LINE__,
@@ -4521,7 +4522,8 @@ already_acquired_locks:
 		}
 	}
 
-	if (ubc_getsize(vp) < zp->z_size) {
+	if (ubc_getsize(vp) < zp->z_size && (ap->a_flags & UPL_MSYNC) == 0
+	    && vnode_isinuse(vp, 1) == 0) {
 		dprintf("ZFS: %s:%d: increasing ubc size from %lld to z_size %lld for"
 		    " fs %s file %s\n", __func__, __LINE__,
 		    ubc_getsize(vp), zp->z_size, fsname, fname);
@@ -4700,7 +4702,9 @@ skip_lock_acquisition:
 	}
 
 	/* maybe try to reduce ubc size */
-	if (upl_pages_after_boundary > 0) {
+	if (upl_pages_after_boundary > 0
+	    && vnode_isinuse(vp, 1) == 0
+	    && (ap->a_flags & UPL_MSYNC) == 0) {
 		int setsize_retval = ubc_setsize(ap->a_vp,
 		    MAX(dismissal_boundary, round_page_64(zp->z_size)));
 		if (setsize_retval == 0) // returns true on error
