@@ -413,8 +413,9 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 		int close_grow_retval = ubc_setsize(vp, zp->z_size); // True on success
 		ASSERT3S(close_grow_retval, !=, 0);
 	} else {
-		printf("ZFS: %s:%d: (zs %llu us %llu) lost race to setsize %s\n",
-		    __func__, __LINE__, zp->z_size, ubc_getsize(vp), zp->z_name_cache);
+		if (ubc_getsize(vp) != zp->z_size && vnode_isreg(vp))
+			printf("ZFS: %s:%d: (zs %llu us %llu) lost race to setsize %s\n",
+			    __func__, __LINE__, zp->z_size, ubc_getsize(vp), zp->z_name_cache);
 	}
 	mutex_exit(&zp->z_lock);
 

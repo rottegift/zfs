@@ -5386,13 +5386,14 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 				int setsize_grow_retval = ubc_setsize(vp, zp->z_size);
 				ASSERT3S(setsize_grow_retval, !=, 0); // ubc_setsize returns true on success
 			} else {
-				printf("ZFS: %s:%d: (zs %llu us %llu) lost to setsize"
-				    " (inuse? %d mapper? %d write? %d) %s\n", __func__, __LINE__,
-				    zp->z_size, ubc_getsize(vp),
-				    spl_ubc_is_mapped(vp, NULL),
-				    spl_ubc_is_mapped_writable(vp),
-				    vnode_isinuse(vp, 1),
-				    zp->z_name_cache);
+				if (ubc_getsize(vp) != zp->z_size && vnode_isreg(vp))
+					printf("ZFS: %s:%d: (zs %llu us %llu) lost to setsize"
+					    " (inuse? %d mapper? %d write? %d) %s\n", __func__, __LINE__,
+					    zp->z_size, ubc_getsize(vp),
+					    spl_ubc_is_mapped(vp, NULL),
+					    spl_ubc_is_mapped_writable(vp),
+					    vnode_isinuse(vp, 1),
+					    zp->z_name_cache);
 			}
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
 			tsd_set(rl_key, NULL);
