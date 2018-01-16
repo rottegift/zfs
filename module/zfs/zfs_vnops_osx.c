@@ -3457,11 +3457,13 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					      || ((a_flags & UBC_PUSHDIRTY) && (s_flags & UPL_POP_DIRTY))); ) {
 					if (s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT)) {
 						printf ("ZFS: %s:%d: unexpected POP value busy %d absent %d pageout %d for"
-						    " subrange %llu - %llu (s_pages %d) fsname %s filename %s\n",
+						    " subrange %llu - %llu (s_pages %d) of range [%llu - %llu] (pages %lld)"
+						    " fsname %s filename %s\n",
 						    __func__, __LINE__,
 						    s_flags & UPL_POP_BUSY, s_flags & UPL_POP_ABSENT,
 						    s_flags & UPL_POP_PAGEOUT,
 						    subrange_offset, subrange_end, s_pages,
+						    start, end, howmany(end - start, PAGE_SIZE_64),
 						    fsname, fname);
 					}
 					subrange_end += PAGE_SIZE_64;
@@ -3509,7 +3511,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	}
 	zp->z_mr_sync = gethrtime();
 	if (kerrs > 0) {
-		printf("ZFS: %s:%d: kerrs %llu cleaned %llu processed pages %llu in [%llu-%llu] (%llu pgaes) fs %s fn %s\n",
+		printf("ZFS: %s:%d: kerrs %llu cleaned %llu processed pages %llu in [%llu-%llu] (%llu pages) fs %s fn %s\n",
 		    __func__, __LINE__, kerrs, cleaned, totproc, start, end, howmany(end - start, PAGE_SIZE_64),
 		    fsname, fname);
 	}
