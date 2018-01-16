@@ -2368,7 +2368,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	zfs_ubc_range_all_flags(zp, vp, sync_new_eof,
 	    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-	if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0 || t_precious > 0) {
+	if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0) {
+		if (t_busy > 0 || t_pageout > 0)
+			skip_shrink = B_TRUE;
 		printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
 		    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
 		    " (tot pages %llu) (msync ret %d resid %llu) (mapped? %d write? %d)"
@@ -2389,7 +2391,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	if (vnode_isinuse(vp, 1) != 0 || spl_ubc_is_mapped(vp, NULL)) {
 		printf("ZFS: %s:%d: skipping shrink (inuse? %d mapped? %d mappedwrite? %d"
 		    " new-eof %llu zsize %llu usize %llu (diff %llu)"
-		    " fs %s file %s",
+		    " fs %s file %s\n",
 		    __func__, __LINE__, vnode_isinuse(vp, 1),
 		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 		    end, zp->z_size, ubc_getsize(vp), ubc_getsize(vp) - end,
@@ -2402,7 +2404,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	} else {
 		int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
-		if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64 && !spl_ubc_is_mapped(vp, NULL))
+		if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64)
 			setsize_trim_pages = zfs_trunc_tail_ubc_setsize(vp, round_page_64(end));
 
 		if (setsize_trim_pages == 0) { // TRUE on success or skip
