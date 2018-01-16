@@ -3431,9 +3431,17 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	ASSERT3U(rl->r_len + rl->r_off, >=, range_end);
 
 	off_t f_offset;
-	off_t kerrs = 0;
-	off_t cleaned = 0;
-	off_t totproc = 0;
+	uint32_t totproc = 0;
+	uint32_t kerrs = 0;
+	uint32_t outer_noted_busy = 0;
+	uint32_t outer_noted_pageout = 0;
+	uint32_t outer_noted_absent = 0;
+	uint32_t outer_noted_precious = 0;
+	uint32_t cleaned_dirty = 0;
+	uint32_t cleaned_precious = 0;
+	uint32_t inner_noted_busy = 0;
+	uint32_t inner_noted_pageout = 0;
+	uint32_t inner_noted_absent = 0;
 
 	// vnop_get ?
 
@@ -3450,6 +3458,8 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 				int s_pages = 1;
 				int s_flags;
 				int s_retval = ubc_page_op(vp, subrange_end, 0, NULL, &flags);
+				int s_dirty = 0;
+				int s_precious = 0;
 				for ( ; s_retval == KERN_SUCCESS
 					  && subrange_end < MIN(range_end, zp->z_size)
 					  && s_pages * PAGE_SIZE_64 <= MAX_UPL_TRANSFER_BYTES
@@ -3460,11 +3470,17 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 						    " subrange %llu - %llu (s_pages %d) of range [%llu - %llu] (pages %lld)"
 						    " fsname %s filename %s\n",
 						    __func__, __LINE__,
-						    s_flags & UPL_POP_BUSY, s_flags & UPL_POP_ABSENT,
-						    s_flags & UPL_POP_PAGEOUT,
+						    (s_flags & UPL_POP_BUSY) != 0,
+						    (s_flags & UPL_POP_ABSENT) != 0,
+						    (s_flags & UPL_POP_PAGEOUT) != 0,
 						    subrange_offset, subrange_end, s_pages,
 						    start, end, howmany(end - start, PAGE_SIZE_64),
 						    fsname, fname);
+						if (s_flags & UPL_POP_DIRTY) s_dirty++;
+						if (s_flags & UPL_POP_PRECIOUS) s_precious++;
+						if (s_flags & UPL_POP_BUSY) inner_noted_busy++;
+						if (s_flags & UPL_POP_ABSENT) inner_noted_absent++;
+						if (s_flags & UPL_POP_PAGEOUT) inner_noted_pageout++;
 					}
 					subrange_end += PAGE_SIZE_64;
 					s_pages += 1;
@@ -3500,8 +3516,16 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					    start, end, fsname, fname);
 					return (pout_ret);
 				}
-				cleaned++;
+				cleaned_dirty += s_dirty;
+				cleaned_precious += s_precious;
 				VNOPS_OSX_STAT_INCR(zfs_msync_pages, s_pages);
+			} else {
+				ASSERT0(flags & UPL_POP_DIRTY);
+				IMPLY(a_flags & UBC_PUSHALL, (flags & UPL_POP_PRECIOUS) == 0);
+				if (flags & UPL_POP_PRECIOUS) outer_noted_precious++;
+				if (flags & UPL_POP_BUSY) outer_noted_busy++;
+				if (flags & UPL_POP_ABSENT) outer_noted_absent++;
+				if (flags & UPL_POP_PAGEOUT) outer_noted_pageout++;
 			}
 		} else {
 			kerrs += 1;
@@ -3510,9 +3534,16 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 			*resid = f_offset - range_start;
 	}
 	zp->z_mr_sync = gethrtime();
-	if (cleaned > 0) {
-		printf("ZFS: %s:%d: kerrs %llu cleaned %llu processed pages %llu in [%llu-%llu] (%llu pages) fs %s fn %s\n",
-		    __func__, __LINE__, kerrs, cleaned, totproc, start, end, howmany(end - start, PAGE_SIZE_64),
+	if (cleaned_dirty > 0) {
+		printf("ZFS: %s:%d: kerrs %u cleaned (dirty %u precious %u) processed pages %u"
+		    " in [%llu-%llu] (%llu pages)"
+		    " (ibusy %u iabsent %u ipageout %u,"
+		    " obusy %u oabsent %u opageout %u)"
+		    " fs %s fn %s\n",
+		    __func__, __LINE__, kerrs, cleaned_dirty, cleaned_precious, totproc,
+		    start, end, howmany(end - start, PAGE_SIZE_64),
+		    inner_noted_busy, inner_noted_absent, inner_noted_pageout,
+		    outer_noted_busy, outer_noted_absent, outer_noted_pageout,
 		    fsname, fname);
 	}
 	return (0);
