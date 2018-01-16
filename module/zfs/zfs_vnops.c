@@ -357,6 +357,10 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 		atomic_inc_32(&zp->z_sync_cnt);
 	}
 
+	mutex_enter(&zp->z_lock);
+	zp->z_open_cnt++;
+	mutex_exit(&zp->z_lock);
+
 	if (vnode_isreg(*vpp)) { ASSERT3S(zp->z_size, ==, ubc_getsize(*vpp)); }
 
 	if (flag & (FWRITE | FAPPEND))
@@ -392,6 +396,22 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 		ASSERT3S(zp->z_sync_cnt, >, 0);
 		atomic_dec_32(&zp->z_sync_cnt);
 	}
+
+	mutex_enter(&zp->z_lock);
+	ASSERT3S(zp->z_open_cnt, >, 0);
+	zp->z_open_cnt--;
+	if (zp->z_open_cnt == 0
+	    && vnode_isreg(vp)
+	    && !spl_ubc_is_mapped(vp, NULL)
+	    && is_file_clean(vp, ubc_getsize(vp)) == 0
+	    && ubc_getsize(vp) < zp->z_size) {
+		int close_shrink_retval = ubc_setsize(vp, zp->z_size); // True on success
+		ASSERT3S(close_shrink_retval, !=, 0);
+	} else if (ubc_getsize(vp) > zp->z_size) {
+		int close_grow_retval = ubc_setsize(vp, zp->z_size); // True on success
+		ASSERT3S(close_grow_retval, !=, 0);
+	}
+	mutex_exit(&zp->z_lock);
 
 #if 0
 	if (!zfs_has_ctldir(zp) && zp->z_zfsvfs->z_vscan &&
