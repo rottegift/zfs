@@ -2321,42 +2321,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
 	ASSERT3S(ubcsize_at_entry, ==, zp->z_size);
 
-
-	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
-	if (error) {
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		zfs_range_unlock(rl);
-		return (error);
-	}
-
-	tx = dmu_tx_create(zfsvfs->z_os);
-	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-	zfs_sa_upgrade_txholds(tx, zp);
-	dmu_tx_mark_netfree(tx);
-	error = dmu_tx_assign(tx, TXG_WAIT);
-	if (error) {
-		dmu_tx_abort(tx);
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		zfs_range_unlock(rl);
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-		return (error);
-	}
-
-	zp->z_size = end;
-	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs),
-	    NULL, &zp->z_size, sizeof (zp->z_size));
-
-	if (end == 0) {
-		zp->z_pflags &= ~ZFS_SPARSE;
-		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_FLAGS(zfsvfs),
-		    NULL, &zp->z_pflags, 8);
-	}
-	VERIFY(sa_bulk_update(zp->z_sa_hdl, bulk, count, tx) == 0);
-
-	dmu_tx_commit(tx);
-
 	const off_t sync_eof = round_page_64(MAX(zp->z_size, ubc_getsize(vp)));
 	const off_t sync_new_eof = trunc_page_64(end);
 	//const off_t sync_page_after_new_eof = sync_new_eof + PAGE_SIZE_64; // for dumping pages
@@ -2534,6 +2498,42 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		}
 
 	}
+
+	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
+	if (error) {
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+		return (error);
+	}
+
+	tx = dmu_tx_create(zfsvfs->z_os);
+	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
+	zfs_sa_upgrade_txholds(tx, zp);
+	dmu_tx_mark_netfree(tx);
+	error = dmu_tx_assign(tx, TXG_WAIT);
+	if (error) {
+		dmu_tx_abort(tx);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		return (error);
+	}
+
+	zp->z_size = end;
+	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_SIZE(zfsvfs),
+	    NULL, &zp->z_size, sizeof (zp->z_size));
+
+	if (end == 0) {
+		zp->z_pflags &= ~ZFS_SPARSE;
+		SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_FLAGS(zfsvfs),
+		    NULL, &zp->z_pflags, 8);
+	}
+	VERIFY(sa_bulk_update(zp->z_sa_hdl, bulk, count, tx) == 0);
+
+	dmu_tx_commit(tx);
+
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	ASSERT3P(tsd_get(rl_key), ==, rl);
