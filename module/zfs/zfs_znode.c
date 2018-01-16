@@ -2344,46 +2344,54 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	boolean_t skip_shrink = B_FALSE;
 
-	off_t msync_resid = 0;
-
-	int zfs_msync_ret = zfs_msync(zp, rl, sync_new_eof, sync_eof, &msync_resid, UBC_PUSHALL);
-
-	if (zfs_msync_ret != 0) {
-		printf("ZFS: %s:%d: %s %d (resid %lld) cleaning range"
-		    " [%lld..%lld] (truncing to %lld) (-pages %lld) (zsize %llu usize %llu)"
-		    " fs %s file %s\n",
-		    __func__, __LINE__,
-		    (msync_resid == 0) ? "ERROR (skipping shrink)" : "error",
-		    zfs_msync_ret, msync_resid,
-		    sync_new_eof, sync_eof, end, eof_pg_delta + 1,
-		    zp->z_size, ubc_getsize(vp),
-		    fsname, fname);
-		if (msync_resid == 0)
-			skip_shrink = B_TRUE;
-	}
-
 	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
 	int t_errs = 0;
 
-	zfs_ubc_range_all_flags(zp, vp, sync_new_eof,
-	    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+	for (int i = 0; i < 3; i++) {
+		off_t msync_resid = 0;
 
-	if (t_pageout > 0 || t_absent > 0 || t_busy > 0 || t_dirty > 0) {
-		if (t_busy > 0 || t_pageout > 0)
-			skip_shrink = B_TRUE;
-		printf("ZFS: %s:%d: for about-to-be-truncated tail of file [%llu..%llu]:"
-		    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
-		    " (tot pages %llu) (msync ret %d resid %llu) (mapped? %d write? %d)"
-		    " (zsize %lld usize %lld)%s"
-		    " fs %s file %s\n",
-		    __func__, __LINE__,
-		    sync_new_eof, sync_eof,
-		    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
-		    eof_pg_delta + 1, zfs_msync_ret, msync_resid,
-		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-		    zp->z_size, ubc_getsize(vp),
-		    (skip_shrink == B_TRUE) ? "(skipping shrink)" : "",
-		    fsname, fname);
+		int zfs_msync_ret = zfs_msync(zp, rl, sync_new_eof, sync_eof, &msync_resid, UBC_PUSHALL);
+
+		if (zfs_msync_ret != 0) {
+			printf("ZFS: %s:%d: (pass %d) %s %d (resid %lld) cleaning range"
+			    " [%lld..%lld] (truncing to %lld) (-pages %lld) (zsize %llu usize %llu)"
+			    " fs %s file %s\n",
+			    __func__, __LINE__, i,
+			    (msync_resid == 0) ? "ERROR (skipping shrink)" : "error",
+			    zfs_msync_ret, msync_resid,
+			    sync_new_eof, sync_eof, end, eof_pg_delta + 1,
+			    zp->z_size, ubc_getsize(vp),
+			    fsname, fname);
+			if (msync_resid == 0)
+				skip_shrink = B_TRUE;
+		}
+
+		zfs_ubc_range_all_flags(zp, vp, sync_new_eof,
+		    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+
+		if (t_pageout > 0 || t_busy > 0 || t_dirty > 0) {
+			if (t_busy > 0 || t_pageout > 0)
+				skip_shrink = B_TRUE;
+			printf("ZFS: %s:%d: (pass %d) for about-to-be-truncated tail of file [%llu..%llu]:"
+			    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
+			    " (tot pages %llu) (msync ret %d resid %llu) (mapped? %d write? %d)"
+			    " (zsize %lld usize %lld)%s"
+			    " fs %s file %s\n",
+			    __func__, __LINE__, i,
+			    sync_new_eof, sync_eof,
+			    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
+			    eof_pg_delta + 1, zfs_msync_ret, msync_resid,
+			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
+			    zp->z_size, ubc_getsize(vp),
+			    (skip_shrink == B_TRUE) ? "(skipping shrink)" : "",
+			    fsname, fname);
+		} else if (t_pageout == 0 && t_busy == 0 && t_precious == 0) {
+			if (i > 0) {
+				printf("ZFS: %s:%d: cleaned after pass %d fs %s file %s (skip_shrink %d)\n",
+				    __func__, __LINE__, i, fsname, fname, skip_shrink);
+			}
+			break;
+		}
 	}
 
 	// step 2: ubc_setsize to trim the pages after the end of the new last page
