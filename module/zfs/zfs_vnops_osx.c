@@ -5372,16 +5372,22 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 			ASSERT3U(tries, <, 10);
 			if (!spl_ubc_is_mapped(vp, NULL)
+			    && vnode_isreg(vp)
+			    && !vnode_isswap(vp)
 			    && vnode_isinuse(vp, 1) == 0
-			    && zp->z_size < ubc_getsize(vp)) {
-				int setsize_retval = ubc_setsize(vp, zp->z_size);
-				ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+			    && zp->z_open_cnt == 0
+			    && zp->z_syncer_active == NULL
+			    && ubc_getsize(vp) > zp->z_size) {
+				/* we can shrink now */
+				int setsize_shrink_retval = ubc_setsize(vp, zp->z_size);
+				ASSERT3S(setsize_shrink_retval, !=, 0); // ubc_setsize returns true on success
 			} else if (zp->z_size > ubc_getsize(vp)) {
-				int setsize_retval = ubc_setsize(vp, zp->z_size);
-				ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+				/* we can always grow */
+				int setsize_grow_retval = ubc_setsize(vp, zp->z_size);
+				ASSERT3S(setsize_grow_retval, !=, 0); // ubc_setsize returns true on success
 			} else {
-				printf("ZFS: %s:%d: (zs %llu us %llu) lost race with"
-				    " (inuse? %d mapper? %d write? %d)  %s\n", __func__, __LINE__,
+				printf("ZFS: %s:%d: (zs %llu us %llu) lost to setsize"
+				    " (inuse? %d mapper? %d write? %d) %s\n", __func__, __LINE__,
 				    zp->z_size, ubc_getsize(vp),
 				    spl_ubc_is_mapped(vp, NULL),
 				    spl_ubc_is_mapped_writable(vp),
