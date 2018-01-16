@@ -1964,7 +1964,10 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 				uint64_t tries = z_map_rw_lock(zp, &need_release,
 				    &need_upgrade, __func__, __LINE__);
 
-				int setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
+				int setsize_retval = 0;
+
+				if (ubc_getsize(ap->a_vp) > vap->va_size)
+					setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
 
 				z_map_drop_lock(zp, &need_release, &need_upgrade);
 				ASSERT3S(tries, <=, 2);
