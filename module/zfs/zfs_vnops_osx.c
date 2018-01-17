@@ -4691,8 +4691,7 @@ skip_lock_acquisition:
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    f_start_of_upl, f_end_of_upl, fsname, fname);
-		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail,
-		    UPL_COMMIT_FREE_ON_EMPTY);
+		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail, 0);
 		if (commit_tail != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: error %d range committing tail of upl (%d..%d),"
 			    " (%d of %d pages dismissed, lowest page left %d),"
