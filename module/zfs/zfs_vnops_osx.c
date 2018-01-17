@@ -4454,12 +4454,14 @@ already_acquired_locks:
 	if (had_map_lock_at_entry != B_TRUE) {
 		extern int zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl);
 		error = zfs_write_maybe_extend_file(zp, ap->a_f_offset, ap->a_size, rl);
-
 		if (error) {
-		ZFS_EXIT(zfsvfs);
-                printf("ZFS: %s:%d: (extend fail) returning error %d fs %s file %s\n",
-		    __func__, __LINE__, error, fsname, fname);
-		goto pageout_done;
+			ASSERT3S(mapped, ==, B_FALSE);
+			ASSERT3P(upl, ==, NULL);
+			ZFS_EXIT(zfsvfs);
+			printf("ZFS: %s:%d: (extend fail) returning error %d"
+			    " fs %s file %s\n",
+			    __func__, __LINE__, error, fsname, fname);
+			goto pageout_done;
 		}
 	}
 
@@ -4503,6 +4505,8 @@ already_acquired_locks:
 			ASSERT3S(error, ==, 0);
 			if (error != 0) {
 				dmu_tx_abort(tx);
+				ASSERT3S(mapped, ==, B_FALSE);
+				ASSERT3P(upl, ==, NULL);
 				goto pageout_done;
 			}
 			zfs_grow_blocksize(zp, new_blksz, tx);
@@ -4667,9 +4671,15 @@ skip_lock_acquisition:
 		    fsname, fname);
 		if (mapped) {
 			mapped = B_FALSE;
-			int umapret_err = ubc_upl_unmap(upl);
-			ASSERT3S(umapret_err, ==, KERN_SUCCESS);
+			int all_absent_umapret_err = ubc_upl_unmap(upl);
+			ASSERT3S(all_absent_umapret_err, ==, KERN_SUCCESS);
+			if (all_absent_umapret_err == KERN_SUCCESS)
+				mapped = B_FALSE;
 		}
+		int commit_all_unmap_ret = ubc_upl_unmap(upl);
+		ASSERT3S(commit_all_unmap_ret, ==, KERN_SUCCESS);
+		if (commit_all_unmap_ret == KERN_SUCCESS)
+			mapped = B_FALSE;
 		int commit_all = ubc_upl_commit(upl);
 		ASSERT3S(commit_all, ==, KERN_SUCCESS);
 		error = commit_all;
@@ -4697,6 +4707,8 @@ skip_lock_acquisition:
 			    upl_pages_dismissed, pages_in_upl, lowest_page_dismissed,
 			    f_start_of_upl, f_end_of_upl, fsname, fname);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
+			int commit_tail_fail_unmap_ret = ubc_upl_unmap(upl);
+			ASSERT3S(commit_tail_fail_unmap_ret, ==, KERN_SUCCESS);
 			int abort_upl = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
 			if (abort_upl != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: error aborting UPL after failure to commit tail"
@@ -4708,7 +4720,7 @@ skip_lock_acquisition:
 			}
 			if (error == 0)
 				error = commit_tail;
-			goto exit_abort;
+			goto pageout_done;
 		}
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
@@ -5162,6 +5174,8 @@ pageout_done:
 
 
 exit_abort:
+
+	ASSERT3S(mapped, ==, B_FALSE);
 
 	dec_z_in_pager_op(zp, fsname, fname);
 
