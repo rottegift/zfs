@@ -4669,13 +4669,7 @@ skip_lock_acquisition:
 		    __func__, __LINE__, upl_pages_dismissed,
 		    f_start_of_upl, f_end_of_upl, zp->z_size,
 		    fsname, fname);
-		if (mapped) {
-			mapped = B_FALSE;
-			int all_absent_umapret_err = ubc_upl_unmap(upl);
-			ASSERT3S(all_absent_umapret_err, ==, KERN_SUCCESS);
-			if (all_absent_umapret_err == KERN_SUCCESS)
-				mapped = B_FALSE;
-		}
+		ASSERT3S(mapped, ==, B_TRUE);
 		int commit_all_unmap_ret = ubc_upl_unmap(upl);
 		ASSERT3S(commit_all_unmap_ret, ==, KERN_SUCCESS);
 		if (commit_all_unmap_ret == KERN_SUCCESS)
