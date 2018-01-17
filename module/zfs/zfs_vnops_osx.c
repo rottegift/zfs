@@ -3428,6 +3428,9 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	if (zp->z_size == 0 && ubc_getsize(vp) == 0)
 		return (0);
 
+	if (ubc_pages_resident(vp) == 0)
+		return (0);
+
 	if (end <= start)
 		return (EINVAL);
 
@@ -3478,7 +3481,8 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					  && s_pages * PAGE_SIZE_64 <= MAX_UPL_TRANSFER_BYTES
 					  && (((a_flags & UBC_PUSHALL) && (s_flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
 					      || ((a_flags & UBC_PUSHDIRTY) && (s_flags & UPL_POP_DIRTY))); ) {
-					if (s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT)) {
+					if (s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT)
+					    && vnode_isreg(vp)) {
 						printf ("ZFS: %s:%d: unexpected POP value busy %d absent %d pageout %d for"
 						    " subrange %llu - %llu (s_pages %d) of range [%llu - %llu] (pages %lld)"
 						    " fsname %s filename %s\n",
@@ -3547,7 +3551,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 			*resid = f_offset - range_start;
 	}
 	zp->z_mr_sync = gethrtime();
-	if (cleaned_dirty > 0) {
+	if (cleaned_dirty > 0 && vnode_isreg(vp)) {
 		printf("ZFS: %s:%d: kerrs %u cleaned (dirty %u precious %u) processed pages %u"
 		    " in [%llu-%llu] (%llu pages)"
 		    " (ibusy %u iabsent %u ipageout %u,"
