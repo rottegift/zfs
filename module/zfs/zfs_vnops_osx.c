@@ -4697,6 +4697,18 @@ skip_lock_acquisition:
 			    upl_pages_dismissed, pages_in_upl, lowest_page_dismissed,
 			    f_start_of_upl, f_end_of_upl, fsname, fname);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
+			int abort_upl = ubc_upl_abort(upl, UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY);
+			if (abort_upl != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: error aborting UPL after failure to commit tail"
+				    " a_flags 0x%x upl @ [%lld..%lld] (size %lu, fsize %llu, usize %llu) fs %s file %s\n",
+				    __func__, __LINE__, ap->a_flags,
+				    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+				    ap->a_size, zp->z_size, ubc_getsize(vp), fsname, fname);
+				error = abort_upl;
+			}
+			if (error == 0)
+				error = commit_tail;
+			goto exit_abort;
 		}
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
