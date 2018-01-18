@@ -119,6 +119,7 @@ extern int cluster_copy_upl_data(uio_t *, upl_t, int, int *);
 int zfs_vnop_force_formd_normalized_output = 0; /* disabled by default */
 
 typedef struct vnops_stats {
+	kstat_named_t last_close_shrink_ubc;
 	kstat_named_t zfs_vnops_z_syncer_active_wait;
 	kstat_named_t fill_holes_ubc_satisfied_all;
 	kstat_named_t fill_holes_rop_present_total_skip;
@@ -156,6 +157,7 @@ typedef struct vnops_stats {
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
+	{ "last_close_shrink_ubc",                       KSTAT_DATA_UINT64 },
 	{ "zfs_vnops_z_syncer_active_wait",              KSTAT_DATA_UINT64 },
 	{ "fill_holes_ubc_satisfied_all",                KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_total_skip",           KSTAT_DATA_UINT64 },
@@ -406,9 +408,11 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	    && !spl_ubc_is_mapped(vp, NULL)
 	    && zp->z_syncer_active == NULL
 	    && vnode_isinuse(vp, 1) == 0
+	    && zp->z_in_pager_op == 0
 	    && ubc_getsize(vp) > zp->z_size) {
 		int close_shrink_retval = ubc_setsize(vp, zp->z_size); // True on success
 		ASSERT3S(close_shrink_retval, !=, 0);
+		VNOPS_STAT_BUMP(last_close_shrink_ubc);
 	} else if (ubc_getsize(vp) > zp->z_size) {
 		int close_grow_retval = ubc_setsize(vp, zp->z_size); // True on success
 		ASSERT3S(close_grow_retval, !=, 0);

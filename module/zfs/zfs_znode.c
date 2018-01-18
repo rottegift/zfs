@@ -1698,9 +1698,14 @@ zfs_rezget(znode_t *zp)
 		off_t zsize = zp->z_size;
 		vn_pages_remove(vp, 0, 0); // does nothing in O3X
 		if (zp->z_size != size || zp->z_size != ubcsize) {
-			if (zp->z_size < ubc_getsize(vp) && is_file_clean(vp, ubc_getsize(vp))) {
+			if (zp->z_size < ubc_getsize(vp)
+			    && vnode_isreg(vp)
+			    && !spl_ubc_is_mapped(vp, NULL)
+			    && zp->z_in_pager_op == 0
+			    && vnode_isinuse(vp, 1) == 0
+			    && is_file_clean(vp, ubc_getsize(vp))) {
 				// is_file_clean returns nonzero if file is dirty
-				printf("ZFS: %s:%d: unclean file %s usize %lld zsize %lld\n",
+				printf("ZFS: %s:%d: unclean or busy file %s usize %lld zsize %lld\n",
 				    __func__, __LINE__,
 				    zp->z_name_cache, ubc_getsize(vp), zp->z_size);
 			}
@@ -2296,6 +2301,12 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		return (EISDIR);
 	}
 
+	if (!vnode_isreg(vp)) {
+		printf("ZFS: %s:%d: attempt to truncate (%llu->%llu) non-regular fs %s fn %s\n",
+		    __func__, __LINE__, zp->z_size, end, fsname, fname);
+		return (EPERM);
+	}
+
 	/*
 	 * We will change zp_size, lock the whole file.
 	 */
@@ -2346,8 +2357,10 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
 	int t_errs = 0;
+	const int MAXCLEANPASS = 3;
+	int i;
 
-	for (int i = 0; i < 3; i++) {
+	for (i = 0; i < MAXCLEANPASS; i++) {
 		off_t msync_resid = 0;
 
 		int zfs_msync_ret = zfs_msync(zp, rl, sync_new_eof, sync_eof, &msync_resid, UBC_PUSHALL);
@@ -2396,14 +2409,27 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 	// step 2: ubc_setsize to trim the pages after the end of the new last page
 
-	if (vnode_isinuse(vp, 1) != 0 || spl_ubc_is_mapped(vp, NULL)) {
-		printf("ZFS: %s:%d: skipping shrink (inuse? %d mapped? %d mappedwrite? %d"
+	if (vnode_isinuse(vp, 1) != 0
+	    || spl_ubc_is_mapped(vp, NULL)
+	    || zp->z_in_pager_op > 0) {
+		printf("ZFS: %s:%d: skipping shrink (pass %d inuse? %d mapped? %d mappedwrite? %d"
+		    " in pager op? %d)"
 		    " new-eof %llu zsize %llu usize %llu (diff %llu)"
 		    " fs %s file %s\n",
-		    __func__, __LINE__, vnode_isinuse(vp, 1),
+		    __func__, __LINE__, i, vnode_isinuse(vp, 1),
 		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
+		    zp->z_in_pager_op,
 		    end, zp->z_size, ubc_getsize(vp), ubc_getsize(vp) - end,
 		    fsname, fname);
+		skip_shrink = B_TRUE;
+	}
+
+	if (i >= MAXCLEANPASS) {
+		printf("ZFS: %s:%d: could not clean out after %d passes, skipping shrink"
+		    " new-eof %llu zsize %llu usize %llu (diff %llu)"
+		    " fs %s file %s\n",
+		    __func__, __LINE__, i, end, zp->z_size, ubc_getsize(vp),
+		    ubc_getsize(vp) - end, fsname, fname);
 		skip_shrink = B_TRUE;
 	}
 

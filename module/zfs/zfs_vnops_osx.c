@@ -104,6 +104,9 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
+	kstat_named_t mnomap_shrink_ubc;
+	kstat_named_t setattr_shrink_ubc;
+	kstat_named_t pageoutv2_dismiss_shrink_ubc;
 	kstat_named_t zfs_msync_calls;
 	kstat_named_t zfs_msync_pages;
 	kstat_named_t zfs_msync_ranged_pages;
@@ -140,6 +143,9 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
+	{ "mnomap_shrink_ubc",                 KSTAT_DATA_UINT64 },
+	{ "setattr_shrink_ubc",                KSTAT_DATA_UINT64 },
+	{ "pageoutv2_dismiss_shrink_ubc",      KSTAT_DATA_UINT64 },
 	{ "zfs_msync_calls",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msynced_pages",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msync_ranged_pages",	       KSTAT_DATA_UINT64 },
@@ -1970,12 +1976,14 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 				    && vnode_isreg(ap->a_vp)
 				    && vnode_isinuse(ap->a_vp, 1) == 0
 				    && !spl_ubc_is_mapped(ap->a_vp, NULL)
+				    && zp->z_in_pager_op == 0
 				    && zp->z_syncer_active == NULL) {
 					/* be careful about when we shrink */
 					setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
+					VNOPS_OSX_STAT_BUMP(setattr_shrink_ubc);
 				} else if (ubc_getsize(ap->a_vp) < vap->va_size
 				    && vnode_isreg(ap->a_vp)) {
-					/* growing is usually safe */
+					/* growing is safe */
 					setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
 				}
 
@@ -4540,8 +4548,8 @@ already_acquired_locks:
 		}
 	}
 
-	if (ubc_getsize(vp) < zp->z_size && (ap->a_flags & UPL_MSYNC) == 0
-	    && vnode_isinuse(vp, 1) == 0) {
+	if (ubc_getsize(vp) < zp->z_size) {
+		/* increasing ubc size is safe */
 		dprintf("ZFS: %s:%d: increasing ubc size from %lld to z_size %lld for"
 		    " fs %s file %s\n", __func__, __LINE__,
 		    ubc_getsize(vp), zp->z_size, fsname, fname);
@@ -4755,6 +4763,7 @@ skip_lock_acquisition:
 	    && (ap->a_flags & UPL_MSYNC) == 0) {
 		int setsize_retval = ubc_setsize(ap->a_vp,
 		    MAX(dismissal_boundary, round_page_64(zp->z_size)));
+		VNOPS_OSX_STAT_BUMP(pageoutv2_dismiss_shrink_ubc);
 		if (setsize_retval == 0) // returns true on error
 			printf("ZFS: %s:%d: failed to ubc_setsize "
 			    " (tgt: %lld usize: %lld zsize %lld (round %lld) foff %lld"
@@ -5431,10 +5440,12 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 			    && vnode_isinuse(vp, 1) == 0
 			    && zp->z_open_cnt == 0
 			    && zp->z_syncer_active == NULL
+			    && zp->z_in_pager_op == 0
 			    && ubc_getsize(vp) > zp->z_size) {
 				/* we can shrink now */
 				int setsize_shrink_retval = ubc_setsize(vp, zp->z_size);
 				ASSERT3S(setsize_shrink_retval, !=, 0); // ubc_setsize returns true on success
+				VNOPS_OSX_STAT_BUMP(mnomap_shrink_ubc);
 			} else if (zp->z_size > ubc_getsize(vp)) {
 				/* we can always grow */
 				int setsize_grow_retval = ubc_setsize(vp, zp->z_size);
@@ -7818,11 +7829,8 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 			    zp->z_size, zp->z_name_cache);
 		}
 
-		int isclean = (is_file_clean(vp, ubc_getsize(vp)) == 0);
-
-		if (isclean
-		    && ubc_getsize(vp) < zp->z_size
-		    && trunc_page_64(ubc_getsize(vp)) < trunc_page_64(zp->z_size)) {
+		if (ubc_getsize(vp) < zp->z_size) {
+			/* grow ubc to zp->z_size */
 			int set_initial_size_retval = ubc_setsize(vp, zp->z_size);
 			if (set_initial_size_retval == 0) {
 				// ubc_setsize returns TRUE on success, 0 on failure
@@ -7830,9 +7838,9 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 				    " ubc_setsize %lld for file %s\n",
 				    __func__, __LINE__, zp->z_size, zp->z_name_cache);
 			}
-		} else if (ubc_getsize(vp) < zp->z_size) {
-			printf("ZFS: %s:%d: setsize shrink %lld -> %lld skipped because in same page (or dirty? %d), file %s\n",
-			    __func__, __LINE__, ubc_getsize(vp), zp->z_size, !isclean, zp->z_name_cache);
+		} else if (ubc_getsize(vp) > zp->z_size) {
+			printf("ZFS: %s:%d: setsize shrink %lld -> %lld skipped, file %s\n",
+			    __func__, __LINE__, ubc_getsize(vp), zp->z_size, zp->z_name_cache);
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
