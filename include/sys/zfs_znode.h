@@ -232,11 +232,6 @@ typedef struct znode {
 	krwlock_t       z_map_lock;             /* page map lock */
 	const char      *z_map_lock_holder;     /* function that holds the rw_lock */
 
-	kmutex_t        z_ubc_msync_lock;       /* lock out other msyncers */
-	kcondvar_t      z_ubc_msync_cv;         /* a condvar to sleep on */
-	kthread_t       *z_syncer_active;       /* is a thread in ubc_msync now? is *this* thread? */
-
-	_Atomic hrtime_t        z_mr_sync;      /* most recent sync */
 	_Atomic int8_t  z_no_fsync;             /* it is unsafe to fsync when this is true */
 	_Atomic int32_t z_range_locks;          /* how many range locks are on this zp? */
 

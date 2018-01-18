@@ -232,9 +232,6 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	list_link_init(&zp->z_link_node);
 
 	mutex_init(&zp->z_lock, NULL, MUTEX_DEFAULT, NULL);
-	mutex_init(&zp->z_ubc_msync_lock, NULL, MUTEX_DEFAULT, NULL);
-	cv_init(&zp->z_ubc_msync_cv, NULL, CV_DEFAULT, NULL);
-	zp->z_syncer_active = NULL;
 	zp->z_range_locks = 0;
 	zp->z_in_pager_op = 0;
 	rw_init(&zp->z_map_lock, NULL, RW_DEFAULT, NULL);
@@ -254,7 +251,6 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	zp->z_fastpath = B_FALSE;
 
 	zp->z_map_lock_holder = NULL;
-	zp->z_mr_sync = (hrtime_t)0;
 	zp->z_no_fsync = B_FALSE;
 	return (0);
 }
@@ -270,15 +266,6 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 	ASSERT(!list_link_active(&zp->z_link_node));
 	ASSERT(!MUTEX_HELD(&zp->z_lock));
 	mutex_destroy(&zp->z_lock);
-	ASSERT(!MUTEX_HELD(&zp->z_ubc_msync_lock));
-	cv_broadcast(&zp->z_ubc_msync_cv);
-	mutex_enter(&zp->z_ubc_msync_lock);
-	cv_destroy(&zp->z_ubc_msync_cv);
-	ASSERT3S(zp->z_syncer_active, ==, NULL);
-	ASSERT3S(zp->z_syncer_active, !=, curthread);
-	zp->z_syncer_active = NULL;
-	mutex_exit(&zp->z_ubc_msync_lock);
-	mutex_destroy(&zp->z_ubc_msync_lock);
 	ASSERT(!rw_lock_held(&zp->z_map_lock));
 	rw_destroy(&zp->z_map_lock);
 	ASSERT(!rw_lock_held(&zp->z_parent_lock));
@@ -333,14 +320,11 @@ zfs_znode_move_impl(znode_t *ozp, znode_t *nzp)
 
 	/* Apple stuff */
 	nzp->z_sync_cnt = ozp->z_sync_cnt;
-	nzp->z_mr_sync = ozp->z_mr_sync;
 	ASSERT3P(ozp->z_map_lock_holder, ==, NULL);
 	nzp->z_map_lock_holder = ozp->z_map_lock_holder;
 	nzp->z_no_fsync = ozp->z_no_fsync;
 	ASSERT0(ozp->z_in_pager_op);
 	nzp->z_in_pager_op = ozp->z_in_pager_op;
-	ASSERT3P(ozp->z_syncer_active, ==, NULL);
-	nzp->z_syncer_active = ozp->z_syncer_active;
 	nzp->z_range_locks = ozp->z_range_locks;
 
 	nzp->z_is_sa = ozp->z_is_sa;

@@ -206,7 +206,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 	    ubc_pages_resident(vp) &&
 	    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
 		// error = is_file_clean(vp, len) -> 0 if clean, nonzero if dirty
-		boolean_t caught_syncer = B_FALSE;
 		znode_t *zp = VTOZ(vp);
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		if (!zp) {
@@ -228,18 +227,10 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    zp->z_name_cache);
 			return (VNODE_RETURNED);
 		}
-		if (spl_ubc_is_mapped(vp, NULL)) {
+		if (spl_ubc_is_mapped_writable(vp)) {
 			/* this is fairly frequent */
 			dprintf("ZFS: %s:%d: spl_ubc_is_mapped true (writeable? %d) for file %s\n",
 			    __func__, __LINE__, spl_ubc_is_mapped_writable(vp), zp->z_name_cache);
-			/*
-			 * since we've observed this mapped, zero a low z_mr_sync;
-			 * this buys the mapper(s) time to dispose of the dirty pages
-			 * without us trying to do a ubc_msync behind its back
-			 */
-			if (zp->z_mr_sync < 1024LL)
-				zp->z_mr_sync = 0;
-
 			return (VNODE_RETURNED);
 		}
 		if (vnode_isinuse(vp, 0)) {
@@ -255,22 +246,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    zp->z_in_pager_op, zp->z_name_cache);
 			return (VNODE_RETURNED);
 		}
-		if (zp->z_syncer_active != NULL) {
-			printf("ZFS: %s:%d: a thread has z_syncer_active for file %s (us? %d)\n",
-			    __func__, __LINE__, zp->z_name_cache, zp->z_syncer_active == curthread);
-			cv_broadcast(&zp->z_ubc_msync_cv);
-			return (VNODE_RETURNED);
-		}
-		if (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1) > gethrtime()
-		    && !(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
-			const hrtime_t diff = (zp->z_mr_sync + SEC2NSEC(zfs_txg_timeout + 1)) - gethrtime();
-			const uint32_t secs = NSEC2SEC(diff);
-			printf("ZFS: %s:%d: zfs_ubc_msync returned for file %s only %u seconds ago,"
-			    " but willing to msync right now, wait until next txg or so (waitfor? %d)"
-			    " but may zil_commit\n",
-			    __func__, __LINE__, zp->z_name_cache, secs, waitfor);
-			//do_not_msync = B_TRUE;
-		}
 		ZFS_ENTER_NOERROR(zfsvfs);
 		const char *fname = zp->z_name_cache;
 		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
@@ -279,37 +254,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    __func__, __LINE__, fsname, fname, *waitfor_arg);
 			ZFS_EXIT(zfsvfs);
 			return (VNODE_RETURNED);
-		}
-		if (zp->z_mr_sync < 5LL) {
-			if(!(zfsvfs->z_is_unmounting || zfsvfs->z_unmounted)) {
-				/*
-				 * this is the only code that, via the ++
-				 * below, can generate a small nonzero z_mr_sync
-				 */
-				printf("ZFS: %s:%d: willing to be the first ubc_msync on fs %s file %s"
-				    " (prev attempts %lld) (waitfor %d, waitfor arg %d) (but may zil_commit)\n",
-				    __func__, __LINE__, fsname, fname, zp->z_mr_sync,
-				    waitfor, *waitfor_arg);
-				zp->z_mr_sync++;
-				//do_not_msync = B_TRUE;
-			} else {
-				printf("ZFS: %s:%d unmounting, so in spite of low mr_sync count %lld"
-				    " (waitfor %d, waitfor arg %d), proceeding"
-				    " to sync fs %s file %s\n", __func__, __LINE__,
-				    zp->z_mr_sync, waitfor, *waitfor_arg,
-				    fsname, fname);
-			}
-		} else if (zp->z_mr_sync < 8192LL) {
-			/*
-			 * 8192 is just a value bigger than the reset value in the vnops,
-			 * but too small to be a realistic gethrtime() value
-			 */
-			printf("ZFS: %s:%d: attempting to sync probably-orphaned fs %s file %s"
-			    " (%lld prev tries) (waitfor %d, waitfor arg %d) (unmounting? %d -ed? %d)"
-			    " (do_not_msync == %d)\n",
-			    __func__, __LINE__,
-			    fsname, fname, zp->z_mr_sync, waitfor, *waitfor_arg,
-			    zfsvfs->z_is_unmounting, zfsvfs->z_unmounted, do_not_msync);
 		}
 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
 		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
@@ -389,29 +333,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    "resid_off %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
 			    msync_retval, ubcsize, resid_off, flags, zp->z_name_cache);
 		}
-		if (zp->z_syncer_active != NULL) {
-			ASSERT3P(zp->z_syncer_active, !=, curthread);
-			caught_syncer = B_TRUE;
-		}
 		ZFS_EXIT(zfsvfs);
-		if (caught_syncer == B_TRUE && waitfor != B_TRUE) {
-			printf("ZFS: %s:%d: z_syncer_active isn't NULL (us? %d), returning VNODE_RETURNED"
-			    " for file %s\n", __func__, __LINE__,
-			    (zp->z_syncer_active == curthread),
-			    zp->z_name_cache);
-			return (VNODE_RETURNED);
-		} else if (caught_syncer == B_TRUE) {
-			ASSERT3S(waitfor, ==, B_TRUE);
-			printf("ZFS: %s:%d: z_syncer_active isn't NULL (us? %d), watifor is true,"
-			    " returning VNODE_RETURNED for file %s\n", __func__, __LINE__,
-			    (zp->z_syncer_active == curthread),
-			    zp->z_name_cache);
-			return (VNODE_RETURNED);
-		}
-		if (0 != is_file_clean(vp, ubc_getsize(vp)) && waitfor != B_TRUE)
-			return (VNODE_RETURNED);
-		else
-			return (VNODE_RETURNED);
+		return (VNODE_RETURNED);
 	} else {
 		if (!vnode_isreg(vp) || vnode_isrecycled(vp))
 			return (VNODE_RETURNED);
@@ -437,13 +360,13 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		const char *fname = zp->z_name_cache;
 		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
-		if (vfs_isrdonly(zfsvfs->z_vfs) ||
+ 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
 		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
 		    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-			printf("ZFS: %s:%d: attempting to zil_commit probably-orphaned fs %s file %s"
-			    " (%lld prev tries) (waitfor %d, waitfor arg %d) (unmounting? %d -ed? %d)\n",
+			printf("ZFS: %s:%d: WARNING refusing to zil_commit probably-orphaned fs %s file %s"
+			    " (waitfor %d, waitfor arg %d) (unmounting? %d -ed? %d)\n",
 			    __func__, __LINE__,
-			    fsname, fname, zp->z_mr_sync, waitfor, *waitfor_arg,
+			    fsname, fname, waitfor, *waitfor_arg,
 			    zfsvfs->z_is_unmounting, zfsvfs->z_unmounted);
 			ZFS_EXIT(zfsvfs);
 			return (VNODE_RETURNED);

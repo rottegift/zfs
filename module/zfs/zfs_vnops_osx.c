@@ -110,9 +110,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t zfs_msync_calls;
 	kstat_named_t zfs_msync_pages;
 	kstat_named_t zfs_msync_ranged_pages;
-	kstat_named_t zfs_ubc_msync_calls;
-	kstat_named_t zfs_ubc_msync_cv_waits;
-	kstat_named_t zfs_ubc_msync_sleeps;
 	kstat_named_t bluster_pageout_calls;
 	kstat_named_t bluster_pageout_dmu_bytes;
 	kstat_named_t bluster_pageout_pages;
@@ -149,9 +146,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "zfs_msync_calls",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msynced_pages",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msync_ranged_pages",	       KSTAT_DATA_UINT64 },
-	{ "zfs_ubc_msync_calls",               KSTAT_DATA_UINT64 },
-	{ "zfs_ubc_msync_cv_waits",            KSTAT_DATA_UINT64 },
-	{ "zfs_ubc_msync_sleeps",              KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_dmu_bytes",         KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
@@ -1976,8 +1970,7 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 				    && vnode_isreg(ap->a_vp)
 				    && vnode_isinuse(ap->a_vp, 1) == 0
 				    && !spl_ubc_is_mapped(ap->a_vp, NULL)
-				    && zp->z_in_pager_op == 0
-				    && zp->z_syncer_active == NULL) {
+				    && zp->z_in_pager_op == 0) {
 					/* be careful about when we shrink */
 					setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
 					VNOPS_OSX_STAT_BUMP(setattr_shrink_ubc);
@@ -2271,9 +2264,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	}
 
 	ZFS_ENTER(zfsvfs);
-
-	if (zp->z_mr_sync < 1024LL)
-		zp->z_mr_sync = 0;
 
 	file_sz = zp->z_size;
 	ASSERT3S(file_sz, ==, ubc_getsize(vp));
@@ -2669,8 +2659,6 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 
 	if (zp && !rw_write_held(&zp->z_map_lock)) {
 		ASSERT0(zp->z_in_pager_op);
-		ASSERT3P(zp->z_syncer_active, ==, NULL);
-		ASSERT3P(zp->z_syncer_active, !=, curthread);
 	}
 
 	/* take the map */
@@ -2710,9 +2698,6 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 		ZFS_EXIT(zfsvfs);
 		return (EIO);
 	}
-
-	if (zp->z_mr_sync < 1024LL)
-		zp->z_mr_sync = 0;
 
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
@@ -3409,15 +3394,13 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	VNOPS_OSX_STAT_BUMP(zfs_msync_calls);
 
 	if (a_flags & UBC_INVALIDATE) {
-		printf("ZFS: %s:%d: improperly called with UBC_INVALIDATE flag set,"
-		    " punting to zfs_ubc_msync\n", __func__, __LINE__);
-		return (zfs_ubc_msync(zp, rl, start, end, resid, a_flags));
+		panic("ZFS: %s:%d: improperly called with UBC_INVALIDATE flag set,"
+		    " no zfs_ubc_bmsync to punt to file %s\n", __func__, __LINE__, zp->z_name_cache);
 	}
 
 	if (a_flags & UBC_SYNC) {
-		printf("ZFS: %s:%d: improperly called with UBC_SYNC; caller must zil_commit,"
-		    " punting to zfs_ubc_msync\n", __func__, __LINE__);
-		return (zfs_ubc_msync(zp, rl, start, end, resid, a_flags));
+		panic("ZFS: %s:%d: improperly called with UBC_SYNC; caller must zil_commit,"
+		    " no zfs_ubc_msync to punt to file %s\n", __func__, __LINE__, zp->z_name_cache);
 	}
 
 	VERIFY3P(zp, !=, NULL);
@@ -3438,6 +3421,11 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 
 	if (ubc_pages_resident(vp) == 0)
 		return (0);
+
+	if (vnode_isrecycled(vp)) {
+		printf("ZFS: %s:%d: vnode recycled! file %s\n", __func__, __LINE__,
+		    zp->z_name_cache);
+	}
 
 	if (end <= start)
 		return (EINVAL);
@@ -3529,8 +3517,6 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					.a_context = NULL,
 				};
 
-				zp->z_mr_sync = 0;
-
 				int pout_ret = zfs_vnop_pageoutv2(&ap);
 
 				if (pout_ret) {
@@ -3558,7 +3544,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 		if (resid != NULL)
 			*resid = f_offset - range_start;
 	}
-	zp->z_mr_sync = gethrtime();
+
 	if (cleaned_dirty > 0 && vnode_isreg(vp)) {
 		printf("ZFS: %s:%d: kerrs %u cleaned (dirty %u precious %u) processed pages %u"
 		    " in [%llu-%llu] (%llu pages)"
@@ -3572,196 +3558,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 		    fsname, fname);
 	}
 
-	if (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
-		cv_signal(&zp->z_ubc_msync_cv);
-
 	return (0);
-}
-
-/*
- * serialize calls to ubc_msync for a given znode
- * (ultimate goal: total FIFO
- */
-
-int
-zfs_ubc_msync(znode_t *zp, rl_t *rl, off_t start, off_t end, off_t *resid, int flags)
-{
-
-	vnode_t *vp = ZTOV(zp);
-	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
-	boolean_t release_my_rl = B_FALSE;
-
-	VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_calls);
-
-	if (vnode_isrecycled(vp)) {
-		return (0);
-	}
-
-	ZFS_ENTER(zfsvfs);
-	ZFS_VERIFY_ZP(zp);
-
-	ASSERT3P(tsd_get(rl_key), ==, rl);
-	if (tsd_get(rl_key) == NULL)
-		tsd_set(rl_key, rl);
-
-	if (rl) {
-		if (rl->r_zp != zp) {
-			panic("ZFS: %s:%d: rl->r_zp and zp mismatched! fn zp %s fn r_zp %s\n",
-			       __func__, __LINE__, zp->z_name_cache,
-			       (rl != NULL && rl->r_zp != NULL)
-			       ? rl->r_zp->z_name_cache
-			       : "(null rl or r_zp)");
-		}
-		/* rl->r_off can be UINT64_MAX */
-		ASSERT3U(rl->r_off, <=, start);
-		ASSERT3U(rl->r_off + rl->r_len, >=, end);
-	} else if (tsd_get(rl_key) == NULL) {
-		ASSERT3U(start, <, end);
-		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		if ((rl = zfs_try_range_lock(zp, start, end, RL_WRITER)) == NULL) {
-			printf("ZFS: %s:%d: acquiring RL (len %lld) [%lld..%lld] (filesize %lld) file %s\n",
-			    __func__, __LINE__, end - start, start, end, zp->z_size, zp->z_name_cache);
-			rl = zfs_range_lock(zp, start, end, RL_WRITER);
-		}
-		ASSERT3P(rl, !=, NULL);
-		tsd_set(rl_key, rl);
-		release_my_rl = B_TRUE;
-	}
-
-	const hrtime_t entry_time = gethrtime();
-
-	ASSERT(rw_write_held(&zp->z_map_lock));
-	boolean_t rw_lock_held_on_entry = rw_write_held(&zp->z_map_lock);
-	const char me[] = "zfs_ubc_msync called without lock";
-	char const * caller = me;
-	if (rw_lock_held_on_entry) {
-		ASSERT3P(zp->z_map_lock_holder, !=, NULL);
-		caller = zp->z_map_lock_holder;
-		if (caller == NULL)
-			caller = "zfs_ubc_msync called with NULL holder";
-	}
-
-	/*
-	 * watch out for reentrancy!
-	 */
-
-	if (flags & ZFS_UBC_FORCE_MSYNC)
-		flags &= ~(ZFS_UBC_FORCE_MSYNC);
-
-	if (ubc_getsize(vp) == 0 && zp->z_size != 0) {
-		printf("ZFS: %s:%d: called with zero ubcsize; z_size %lld, start %lld, end %lld,"
-		    "flags %d, file %s\n",
-		    __func__, __LINE__, zp->z_size, start, end, flags, zp->z_name_cache);
-	}
-
-	ASSERT3P(zp->z_syncer_active, !=, curthread);
-	ASSERT3P(curthread, !=, NULL);
-
-	mutex_enter(&zp->z_ubc_msync_lock);
-
-	while (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread) {
-		ASSERT3P(zp->z_syncer_active, !=, curthread);
-		VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_cv_waits);
-
-		if (rw_lock_held_on_entry) {
-			rw_exit(&zp->z_map_lock);
-		}
-		ASSERT(!rw_write_held(&zp->z_map_lock));
-
-		cv_signal(&zp->z_ubc_msync_cv); /* wake someone else up */
-		cv_wait(&zp->z_ubc_msync_cv, &zp->z_ubc_msync_lock);
-
-		/* reacquire z_map_lock if necessary */
-		if (rw_lock_held_on_entry) {
-			const hrtime_t start_time = gethrtime();
-			hrtime_t bleat_at = start_time + SEC2NSEC(1);
-			for ( ; ; ) {
-				if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
-					zp->z_map_lock_holder = caller;
-					break;
-				}
-				hrtime_t now = gethrtime();
-				if (now > bleat_at) {
-					bleat_at = now + SEC2NSEC(5);
-					const hrtime_t ns_since = now - start_time;
-					const uint32_t secs = NSEC2SEC(ns_since);
-					printf("ZFS: %s:%d: %d seconds of trying to obtain"
-					    " z_map_lock for file %s (holder %s) (my caller %s)\n",
-					    __func__, __LINE__, secs, zp->z_name_cache,
-					    zp->z_map_lock_holder, caller);
-				}
-				void IOSleep(unsigned milliseconds);
-				IOSleep(1);
-			}
-		}
-	}
-
-	if (rw_lock_held_on_entry) { ASSERT(rw_write_held(&zp->z_map_lock)); }
-	ASSERT3P(zp->z_syncer_active, ==, NULL);
-	zp->z_syncer_active = curthread;
-
-	mutex_exit(&zp->z_ubc_msync_lock);
-
-	/*
-	 * We now have to spin if we have to avoid colliding with
-	 * pageout activity leading to a deadlock in
-	 * memory_object_lock_request for this file. This spin should
-	 * never happen due to z_map_locking, so this is diagnostic.
-	 * Our wait may last milliseconds, for instance if the pageout
-	 * causes a synchronous pagein, and is also a synchronous
-	 * pageout. It may also last a very very long time, like
-	 * spindump analysis lengths, so spin around IOSleep to avoid
-	 * melting the system.
-	 */
-#if 0
-	while (zp->z_in_pager_op > 0 && !rw_write_held(&zp->z_map_lock)) {
-		VNOPS_OSX_STAT_BUMP(zfs_ubc_msync_sleeps);
-		void IOSleep(unsigned milliseconds);
-		IOSleep(1);
-	}
-#endif
-
-	/* we are good to go */
-
-	int retval = 0;
-	if (vnode_isrecycled(vp) == 0) {
-		retval = ubc_msync(vp, start, end, resid, flags);
-	} else {
-		printf("ZFS: %s:%d: ubc_msync skipped because vnode_isrecycled went true file %s\n",
-		       __func__, __LINE__, zp->z_name_cache);
-	}
-	mutex_enter(&zp->z_ubc_msync_lock);
-
-	ASSERT3S(zp->z_syncer_active, ==, curthread);
-	zp->z_syncer_active = NULL;
-
-	cv_signal(&zp->z_ubc_msync_cv);
-
-	mutex_exit(&zp->z_ubc_msync_lock);
-
-	const hrtime_t exit_time = gethrtime();
-	const hrtime_t elapsed_time = exit_time - entry_time;
-	const int elapsed_seconds = NSEC2SEC(elapsed_time);
-	if (elapsed_seconds > 1) {
-		printf("ZFS: %s:%d: long ubc_msync, %d seconds, file %s\n",
-		    __func__, __LINE__, elapsed_seconds, zp->z_name_cache);
-	}
-
-	if (release_my_rl == B_TRUE) {
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		tsd_set(rl_key, NULL);
-		zfs_range_unlock(rl);
-		rl = NULL;
-	}
-
-	if (retval == 0)
-		zp->z_mr_sync = exit_time;
-
-	ASSERT3P(tsd_get(rl_key), ==, rl);
-
-	ZFS_EXIT(zfsvfs);
-
-	return (retval);
 }
 
 /*
@@ -3838,73 +3635,49 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * threads to block on vfs activities.
 	 */
 	if (zp && zp->z_sa_hdl &&
-	    (rw_write_held(&zp->z_map_lock) ||
-		(zp->z_syncer_active == curthread && zp->z_in_pager_op <= 0))) {
+	    (rw_write_held(&zp->z_map_lock) || zp->z_in_pager_op == 0)) {
 		/* no collision, or we are re-entering, but whine about underflow */
 		if (zp->z_in_pager_op != 0)
-			printf("ZFS: %s:%d expected 0 in_pager_op see %d (me? %d) (lock held? %d) file %s\n",
+			printf("ZFS: %s:%d expected 0 in_pager_op see %d (lock held? %d) file %s\n",
 			    __func__, __LINE__, zp->z_in_pager_op,
-			    (zp->z_syncer_active == curthread), rw_write_held(&zp->z_map_lock), zp->z_name_cache);
+			    rw_write_held(&zp->z_map_lock), zp->z_name_cache);
 	} else {
 		if (zp) {
 			ASSERT3P(zp->z_sa_hdl, !=, NULL);
 			ASSERT0(zp->z_in_pager_op);
 		}
+		if (zp && zp->z_sa_hdl && !rw_write_held(&zp->z_map_lock) && tsd_get(rl_key) == NULL) {
+			/*
+			 * since 7f288ae22df26 this is a userland msync(2), so
+			 * we can recover if we can get an RL and z_map_lock
+			 */
+			printf("ZFS: %s:%d [3614 case]"
+			    " tsdrl is NULL and z_map_lock is not held, so proceeding with must_lock"
+			    " a_f_offset %llu a_size %lu a_flags %d file %s\n",
+			    __func__, __LINE__,
+			    ap->a_f_offset, ap->a_size, ap->a_flags, zp->z_name_cache);
+			must_lock = B_TRUE;
+			goto start_3614_case;
+		}
 
-		if (zp && zp->z_sa_hdl && zp->z_syncer_active != curthread) {
-			if (zp->z_syncer_active != NULL) {
-				rl_t *tsdrl = tsd_get(rl_key);
-				if (tsdrl == NULL && !rw_write_held(&zp->z_map_lock)) {
-					/*
-					 * since 7f288ae22df26 this is a userland msync(2), so
-					 * we can recover if we can get an RL and z_map_lock
-					 */
-					printf("ZFS: %s:%d [3614 case] z_syncer_active is not me or NULL, but"
-					    " tsdrl is NULL and z_map_lock is not held, so proceeding with must_lock"
-					    " a_f_offset %llu a_size %lu a_flags %d file %s\n",
-					    __func__, __LINE__,
-					    ap->a_f_offset, ap->a_size, ap->a_flags, zp->z_name_cache);
-					must_lock = B_TRUE;
-					goto start_3614_case;
-				}
-				printf("ZFS: %s:%d: [3614 case]: z_syncer_active is not me or NULL! (z_map_lock held? %d z_in_pager_op %d)"
-				    " a_f_offset %llu a_size %lu a_flags %d (tsd_rl? %d r_off %llu r_len %llu) file %s\n",
-				    __func__, __LINE__,
-				    rw_write_held(&zp->z_map_lock), zp->z_in_pager_op,
-				    ap->a_f_offset, ap->a_size, ap->a_flags,
-				    tsdrl != NULL,
-				    (tsdrl != NULL) ? tsdrl->r_off : 0,
-				    (tsdrl != NULL) ? tsdrl->r_len : 0,
-				    zp->z_name_cache);
-				pageoutv2_exception(__func__, __LINE__);
-				return (EAGAIN);
-			}
-		} else if (zp && zp->z_sa_hdl)
-			printf("ZFS: %s:%d: I am active syncer but zp->z_in_pager_op is %d\n",
-			    __func__, __LINE__, zp->z_in_pager_op);
-		else
-			printf("ZFS: %s:%d: zp or z_sa_hdl is NULL checking for contention\n",
-			    __func__, __LINE__);
-
-		/* spin. */
-
+		/* spin, mainly waiting for z_in_pager_op to drop to 0, or for us to grab the lock
+		 * if we do not already have it.  (is this necessary?  probably not) */
 		boolean_t lock_got = B_FALSE;
 		while (zp && zp->z_sa_hdl
 		    && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted
 		    && zp->z_in_pager_op > 0
-		    && zp->z_syncer_active != NULL
-		    && zp->z_syncer_active != curthread
 		    && !rw_write_held(&zp->z_map_lock)) {
 			extern void IOSleep(unsigned milliseconds);
 			IOSleep(1);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_spin_sleeps);
 			if (zp && (zp->z_size <= ap->a_f_offset)) {
-				/* probably truncated */
-				printf("ZFS: %s:%d: usize %llu; zsize %llu < %llu ap->a_f_offset, file %s\n",
-				    __func__, __LINE__, ubc_getsize(ap->a_vp), zp->z_size, ap->a_f_offset,
+				/* probably truncated, but we can deal with that below */
+				printf("ZFS: %s:%d: BREAK (in_pager_op %d)"
+				    " usize %llu; zsize %llu < %llu ap->a_f_offset, file %s\n",
+				    __func__, __LINE__, zp->z_in_pager_op,
+				    ubc_getsize(ap->a_vp), zp->z_size, ap->a_f_offset,
 				    zp->z_name_cache);
-				error = EINVAL;
-				goto exit_abort;
+				break;
 			}
 			lock_got = rw_tryenter(&zp->z_map_lock, RW_WRITER);
 		}
@@ -3946,9 +3719,6 @@ start_3614_case:
 		printf("ZFS: %s:%d: WARNING! fs %s z_unmounted, file %s (sa_hdl? %d)\n",
 		    __func__, __LINE__, fsname, fname, zp->z_sa_hdl != NULL);
 	}
-
-	if (zp->z_mr_sync < 1024LL)
-		zp->z_mr_sync = 0;
 
 	ASSERT(ubc_pages_resident(vp));
 
@@ -4427,7 +4197,7 @@ acquire_locks:
 			secs++;
 			printf("ZFS: %s:%d: looping for z_map_lock for %d sec"
 			    " (held by %s) [%lld..%lld] (sz %ld) fs %s file %s (z_in_pager_op %d)"
-			    " (syncer active? %d curthread? %d) ctr %d (rl? %d)\n",
+			    "  ctr %d (rl? %d)\n",
 			    __func__, __LINE__, secs,
                             (zp->z_map_lock_holder != NULL)
                             ? zp->z_map_lock_holder
@@ -4435,7 +4205,6 @@ acquire_locks:
 			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			    ap->a_size,
 			    fsname, fname, zp->z_in_pager_op,
-			    zp->z_syncer_active != NULL, zp->z_syncer_active == curthread,
 			    ctr, rl != NULL);
 			print_time = cur_time + SEC2NSEC(1);
 			if (rl) {
@@ -5367,11 +5136,6 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	if (!spl_ubc_is_mapped(vp, NULL))
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
 
-	if (spl_ubc_is_mapped_writable(vp))
-		zp->z_mr_sync = 0;
-	else if (zp->z_mr_sync < 1024LL)
-		zp->z_mr_sync = 0;
-
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	ZFS_EXIT(zfsvfs);
@@ -5418,11 +5182,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 
 	ASSERT(spl_ubc_is_mapped(vp, NULL));
 
-	if (spl_ubc_is_mapped_writable(vp))
-		zp->z_mr_sync = 0;
-	else if (zp->z_mr_sync < 1024LL)
-		zp->z_mr_sync = 0;
-
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
 	if (zp->z_size != ubc_getsize(vp)) {
@@ -5446,7 +5205,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 			    && !vnode_isswap(vp)
 			    && vnode_isinuse(vp, 1) == 0
 			    && zp->z_open_cnt == 0
-			    && zp->z_syncer_active == NULL
 			    && zp->z_in_pager_op == 0
 			    && ubc_getsize(vp) > zp->z_size) {
 				/* we can shrink now */
@@ -5608,11 +5366,12 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		}
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-		int msync_flags = UBC_PUSHDIRTY | UBC_SYNC | ZFS_UBC_FORCE_MSYNC;
 		if (rl != NULL) {
 			retval = zfs_msync(zp, NULL, 0, ubcsize, &resid_off, UBC_PUSHALL);
 		} else {
-			retval = zfs_ubc_msync(zp, NULL, (off_t)0, ubcsize, &resid_off, msync_flags);
+			printf("ZFS: %s:%d: RL NULL! file %s\n", __func__, __LINE__,
+			    zp->z_name_cache);
+			retval = 0;
 		}
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		if (rl != NULL) {
