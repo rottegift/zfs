@@ -4938,13 +4938,16 @@ skip_lock_acquisition:
 				if (mapped || commit_precious_ret != KERN_FAILURE) {
 					printf("ZFS: %s:%d: ERROR %d committing (precious) UPL range"
 					    " [%lld, %lld] of UPL (0..%lld..%ld) at"
-					    " [%lld..%lld] fs %s file %s (mapped %d) exiting\n",
+					    " [%lld..%lld] fs %s file %s (mapped %d) aborting range\n",
 					    __func__, __LINE__,
 					    commit_precious_ret,
 					    start_of_range, end_of_range,
 					    trimmed_upl_size, ap->a_size,
 					    f_start_of_upl, f_end_of_upl,
 					    fsname, fname, mapped);
+					const int abort_failed_precious = ubc_upl_abort_range(upl,
+					    start_of_range, end_of_range, UPL_ABORT_ERROR);
+					ASSERT3S(abort_failed_precious, ==, KERN_SUCCESS);
 					xxxbleat = B_TRUE;
 					pg_index = page_past_end_of_range;
 					continue;
