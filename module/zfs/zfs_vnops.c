@@ -2911,11 +2911,15 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 					const uint32_t secs = NSEC2SEC(now - start_time);
 					rl_t *tsdrl = tsd_get(rl_key);
 					printf("ZFS: %s:%d: waiting %u seconds for APPEND range lock,"
-					    " target len %llu, fs %s file %s (tsdrl? %d tsdzp is us? %d)\n",
+					    " target len %llu, fs %s file %s (tsdrl? %d tsdzp is us? %d)"
+					    " syncer_active? %d me? %d in_pager_op? %d",
 					    __func__, __LINE__, secs, a_target_len, fsname, fname,
 					    tsdrl != NULL,
-					    (tsdrl != NULL) ? tsdrl->r_zp == zp : 0);
+					    (tsdrl != NULL) ? tsdrl->r_zp == zp : 0,
+					    zp->z_syncer_active != NULL,
+					    zp->z_syncer_active == curthread);
 					print_at = now + print_interval;
+					cv_broadcast(&zp->z_ubc_msync_cv);
 				}
 				extern void IOSleep(unsigned milliseconds);
 				IOSleep(1);

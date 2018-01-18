@@ -3571,6 +3571,10 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 		    outer_noted_busy, outer_noted_absent, outer_noted_pageout,
 		    fsname, fname);
 	}
+
+	if (zp->z_syncer_active != NULL && zp->z_syncer_active != curthread)
+		cv_signal(&zp->z_ubc_msync_cv);
+
 	return (0);
 }
 
