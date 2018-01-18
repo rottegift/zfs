@@ -1435,20 +1435,22 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 
 	/* possibly clean any unusual pages */
 
+	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
 	int t_errs = zfs_ubc_range_all_flags(zp, vp,
 	    upl_file_offset, upl_file_offset + upl_size,
 	    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-	if (t_dirty > 0 || t_precious > 0 || t_busy > 0) {
+
+	boolean_t do_lock = !rw_write_held(&zp->z_map_lock);
+	if (t_dirty > 0 || t_precious > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
 		VNOPS_STAT_INCR(mappedread_unusual_pages,
-		    t_dirty + t_precious + t_busy);
-		boolean_t do_lock = !rw_write_held(&zp->z_map_lock);
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+		    t_dirty + t_precious + t_busy + t_pageout);
 		uint64_t tries = 0;
 		if (do_lock)
 			tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		off_t resid_msync = 0;
+		VNOPS_STAT_BUMP(zfs_read_clean_on_read);
 		int msync_retval = zfs_msync(zp, rl, upl_file_offset,
 		    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
 		if (msync_retval != 0) {
@@ -1460,8 +1462,18 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			    t_dirty, t_precious, t_busy, t_errs,
 			    filename);
 		}
-		if (do_lock)
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
+		int t_errs = zfs_ubc_range_all_flags(zp, vp,
+		    upl_file_offset, upl_file_offset + upl_size,
+		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+		if (t_dirty > 0 || t_precious > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
+			printf("ZFS: %s:%d: unusual pages after unusual-page msync:"
+			    " dirty %d pageout %d precious %d absent %d busy %d"
+			    " errs %d range [%llu..%llu] (zsize %lld usize %lld) file %s", __func__, __LINE__,
+			    t_dirty, t_pageout, t_precious, t_absent, t_busy,
+			    t_errs,
+			    upl_file_offset, upl_file_offset + upl_size,
+			    zp->z_size, ubc_getsize(vp), filename);
+		}
 	}
 
 	/* pull in any absent pages */
@@ -1491,6 +1503,9 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			    __func__, __LINE__, arg_bytes, cache_resid, orig_offset, filename);
 		}
 	}
+
+	if (do_lock)
+		z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	dnode_rele(dn, FTAG);
 
