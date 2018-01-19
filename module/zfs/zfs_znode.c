@@ -2416,7 +2416,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    || !vnode_isreg(vp) // excluded at top
 		    || vnode_isswap(vp) // excluded at top
 		    || vnode_isrecycled(vp)
-		    || spl_ubc_is_mapped(vp, NULL)
 		    || zp->z_in_pager_op > 0) {
 			printf("ZFS: %s:%d: (iter %d) skipping shrink (pass %d inuse? %d mapped? %d mappedwrite? %d"
 			    " in pager op? %d)"
@@ -2485,7 +2484,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			}
 
 			if (eof_pg_delta > 0 && (end & PAGE_MASK_64) !=0) {
-				if (final_page_unusual == B_FALSE && !spl_ubc_is_mapped(vp, NULL)) {
+				if (final_page_unusual == B_FALSE && !vnode_isinuse(vp, 1)) {
 					setsize_retval = zfs_trunc_lastbytes_ubc_setsize(vp, end);
 				} else {
 					// clean the page within the current locking context
@@ -2505,7 +2504,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					setsize_retval = zfs_trunc_lastbytes_post_pageout(vp, end);
 				}
 			} else if (eof_pg_delta > 0) {
-				if (final_page_unusual == B_FALSE && !spl_ubc_is_mapped(vp, NULL)) {
+				if (final_page_unusual == B_FALSE && !vnode_isinuse(vp, 1)) {
 					setsize_retval = zfs_trunc_lastpage_ubc_setsize(vp, end);
 				} else {
 					// clean the page within the current locking context
@@ -2521,12 +2520,12 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					int pageout_err = zfs_vnop_pageoutv2(&ap);
 					ASSERT0(pageout_err);
 					ZNODE_STAT_BUMP(trunc_cleaned_only_page);
-					if (!spl_ubc_is_mapped(vp, NULL))
+					if (!vnode_isinuse(vp, 1))
 						setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
 				}
-			}  else if ((end & PAGE_MASK_64) != 0 && !spl_ubc_is_mapped(vp, NULL)) {
+			}  else if ((end & PAGE_MASK_64) != 0 && !vnode_isinuse(vp, 1)) {
 				setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
-			} else if (!spl_ubc_is_mapped(vp, NULL)) {
+			} else if (!vnode_isinuse(vp, 1)) {
 				setsize_retval = zfs_trunc_only_page_ubc_setsize(vp, end);
 			}
 
