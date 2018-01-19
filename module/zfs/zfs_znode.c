@@ -2400,7 +2400,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 				    zp->z_size, ubc_getsize(vp),
 				    (skip_shrink == B_TRUE) ? "(skipping shrink)" : "",
 				    fsname, fname);
-			} else if (t_pageout == 0 && t_busy == 0 && t_precious == 0) {
+			} else if (t_pageout == 0 && t_busy == 0 && t_dirty == 0 && t_precious == 0) {
 				if (i > 0) {
 					printf("ZFS: %s:%d: cleaned after pass %d fs %s file %s (skip_shrink %d)\n",
 					    __func__, __LINE__, i, fsname, fname, skip_shrink);
@@ -2433,12 +2433,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		}
 
 		if (i >= MAXCLEANPASS) {
-			printf("ZFS: %s:%d: (iter %d) could not clean out after %d passes, skipping shrink"
+			printf("ZFS: %s:%d: (iter %d) could not clean out after %d passes, skipping shrink? %d"
 			    " new-eof %llu zsize %llu usize %llu (diff %llu)"
+			    " t_pageout %d t_busy %d t_precious %d t_dirty %d t_absent %d"
 			    " fs %s file %s\n",
-			    __func__, __LINE__, iter, i, end, zp->z_size, ubc_getsize(vp),
-			    ubc_getsize(vp) - end, fsname, fname);
-			skip_shrink = B_TRUE;
+			    __func__, __LINE__, iter, i, skip_shrink,
+			    end, zp->z_size, ubc_getsize(vp), ubc_getsize(vp) - end,
+			    t_pageout, t_busy, t_precious, t_dirty, t_absent,
+			    fsname, fname);
 		}
 
 		if (skip_shrink == B_TRUE) {
