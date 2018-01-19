@@ -2205,22 +2205,13 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		ASSERT3S(this_chunk, >, 0);
 
 		/* increase ubc size if we are growing the file */
-		const off_t cur_maxfs = MAX(zp->z_size, ubc_getsize(vp));
-		end_size = MAX(cur_maxfs, this_off + this_chunk);
+		end_size = this_off + this_chunk;
 
-		if (end_size > ubc_getsize(vp)) {
-			ASSERT3S(end_size, >=, ubcsize_at_entry);
-			int setsize_retval = ubc_setsize(vp, end_size);
-			if (setsize_retval == 0) {
-				// ubc_setsize returns TRUE on success
-				printf("ZFS: %s:%d: ubc_setsize(vp, %lld) failed for file %s\n",
-				    __func__, __LINE__, end_size, zp->z_name_cache);
-			}
-		}
-		if (end_size > zp->z_size || ubc_getsize(vp) > zp->z_size) {
+		if (end_size > zp->z_size || end_size > ubc_getsize(vp)) {
 			uint64_t size_update_ctr = 0;
 			uint64_t prev_size = zp->z_size;
 			uint64_t n_end_size;
+			uint64_t prev_u_size = ubc_getsize(vp);
 			while ((n_end_size = zp->z_size) < end_size) {
 				size_update_ctr++;
 				(void) atomic_cas_64(&zp->z_size, n_end_size,
@@ -2229,10 +2220,25 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			}
 			if (size_update_ctr > 1) {
 				printf("ZFS: %s:%d: %llu tries to increase zp->z_size to end_size"
-				    "  %lld (it is now %lld, and was %lld)\n",
+				    "  %llu (it is now %llu, and was %llu) fs %s file %s\n",
 				    __func__, __LINE__, size_update_ctr,
-				    end_size, zp->z_size, prev_size);
+				    end_size, zp->z_size, prev_size, fname, fsname);
 			}
+			if (ubc_getsize(vp) < zp->z_size) {
+				int setsize_growval = ubc_setsize(vp, zp->z_size);
+				if (setsize_growval == 0) { // true on success
+					printf("ZFS: %s:%d: after %lld steps grew zsize from %llu to %llu"
+					    " (it is now %llu),"
+					    " but error growing usize from %llu to %llu (it is now %llu)"
+					    " fs %s file %s\n",
+					    __func__, __LINE__, size_update_ctr,
+					    prev_size, end_size, zp->z_size,
+					    prev_u_size, zp->z_size, ubc_getsize(vp),
+					    fsname, fname);
+				}
+			}
+			ASSERT3U(zp->z_size, >=, end_size);
+			ASSERT3U(ubc_getsize(vp), >=, end_size);
 		}
 
 		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
@@ -2294,6 +2300,8 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		int pageoutv2_error = 0;
 
 		/* here we do the magic */
+		ASSERT3U(zp->z_size, >=, uio_offset(uio) + xfer_resid);
+		ASSERT3U(ubc_getsize(vp), >=, uio_offset(uio) + xfer_resid);
 		int cluster_copy_error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
 
 		if (!error && cluster_copy_error)
