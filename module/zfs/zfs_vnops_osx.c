@@ -2235,8 +2235,49 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 	VNOPS_OSX_STAT_BUMP(pagein_calls);
 
+	ASSERT0(vnode_isrecycled(vp));
+
 	if (upl == (upl_t)NULL)
 		panic("zfs_vnop_pagein: no upl!");
+
+	if (zp == NULL
+	    || !POINTER_IS_VALID(zp)
+	    || zfsvfs == NULL
+	    || !POINTER_IS_VALID(zfsvfs)) {
+		printf("ZFS: %s:%d: zp == NULL? %d or zfsvfs == NULL? %d, error!\n",
+		    __func__, __LINE__, zp == NULL,
+		    (zp == NULL || zfsvfs == NULL) ? 1 : 0);
+		if (!(flags & UPL_NOCOMMIT)) {
+			int aret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
+				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+			ASSERT3S(aret, ==, KERN_SUCCESS);
+		}
+		return (EIO);
+	}
+
+	ZFS_ENTER_NOERROR(zfsvfs);
+
+	if (zfsvfs->z_unmounted) {
+		printf("ZFS: %s:%d: file system unmounted!\n", __func__, __LINE__);
+		if (!(flags & UPL_NOCOMMIT)) {
+			int aret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
+				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+			ASSERT3S(aret, ==, KERN_SUCCESS);
+		}
+		ZFS_EXIT(zfsvfs);
+		return (EIO);
+	}
+
+	if (!POINTER_IS_VALID(zp) || zp->z_sa_hdl == NULL) {
+		printf("ZFS: %s:%d: invalid z_sa_hdl!\n", __func__, __LINE__);
+		if (!(flags & UPL_NOCOMMIT)) {
+			int aret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
+				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+			ASSERT3S(aret, ==, KERN_SUCCESS);
+		}
+		ZFS_EXIT(zfsvfs);
+		return (EIO);
+	}
 
 	int ubc_map_retval = 0;
 	if ((ubc_map_retval = ubc_upl_map(upl, (vm_offset_t *)&vaddr)) != KERN_SUCCESS) {
@@ -2252,19 +2293,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		return (ENOMEM);
 	}
 
-	if (len <= 0) {
-		printf("ZFS: %s:%d: invalid size %ld upl_off %d\n", __func__, __LINE__, len, upl_offset);
-		(void) ubc_upl_unmap(upl);
-		if (!(flags & UPL_NOCOMMIT)) {
-			int abort_unknown_ret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
-				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
-			ASSERT3S(abort_unknown_ret, ==, KERN_SUCCESS);
-		}
-		return (EINVAL);
-	}
-
-	ZFS_ENTER(zfsvfs);
-
 	file_sz = zp->z_size;
 	ASSERT3S(file_sz, ==, ubc_getsize(vp));
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
@@ -2272,21 +2300,21 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 	/* ASSERT(zp->z_dbuf_held && zp->z_phys); */
-	/* can't fault passed EOF */
-	if ((off < 0) || (off >= file_sz) ||
-		(len & PAGE_MASK) || (upl_offset & PAGE_MASK)) {
-		if (flags & UPL_NOCOMMIT) {
-			printf("ZFS: %s:%d passed EOF or size error"
-			    " (off %lld, fsz %lld) fs %s file %s\n",
-			    __func__, __LINE__, off, file_sz, fsname, fname);
-		}
-		(void) ubc_upl_unmap(upl);
+	/* can't fault past EOF */
+	if ((off >= file_sz)
+	    || (len & PAGE_MASK)
+	    || (upl_offset & PAGE_MASK)) {
+		printf("ZFS: %s:%d offset after EOF or page-alignment error"
+		    " (off %lld, zsize %lld usize %lld) fs %s file %s\n",
+		    __func__, __LINE__, off, file_sz, ubc_getsize(vp), fsname, fname);
+		int unmapret = ubc_upl_unmap(upl);
+		ASSERT3S(unmapret, ==, KERN_SUCCESS);
 		ZFS_EXIT(zfsvfs);
 		if (!(flags & UPL_NOCOMMIT)) {
 			printf("ZFS: %s:%d: aborting out-of-range UPL (off %lld file_sz %lld)"
 			    " fs %s file %s\n",
 			    __func__, __LINE__, off, file_sz, fsname, fname);
-			int aret = ubc_upl_abort_range(upl, upl_offset, len,
+			int aret = ubc_upl_abort_range(upl, upl_offset, ap->a_size,
 			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
 			ASSERT3S(aret, ==, KERN_SUCCESS);
 		}
@@ -2332,13 +2360,17 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 	}
 
 	if (rl == NULL && rw_held_at_entry == B_TRUE && zp->z_in_pager_op > 0) {
+		/*
+		 * rl would be null if someone else has a RL_WRITER lock covering the range;
+		 * we assume it's pageout if z_in_pager_op is nonzero for this file
+		 */
 		ASSERT(rw_write_held(&zp->z_map_lock));
 		rl_t *tsdrl = tsd_get(rl_key);
 		if (!tsdrl
 		    || tsdrl->r_off > off
 		    || tsdrl->r_off + tsdrl->r_len < off + len) {
 			printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
-			    " SKIPPING LOCKING (note, range not covered) for"
+			    " SKIPPING LOCKING (note, range not wholly covered) for"
 			    " [%llu..%llu] (size %lu uploff %u) fs %s file %s (nocommit? %d)"
 			    " tsd_rl? %d (r_type %d r_off %llu r_len %llu r_caller %s r_line %d\n",
 			    __func__, __LINE__, zp->z_in_pager_op, rw_write_held(&zp->z_map_lock),
@@ -2391,7 +2423,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    fsname, fname,
 				    len, off, off + len, rl != NULL);
 				/* are we a subrange ? */
-				ASSERT3S(tsdrl->r_type, !=, RL_WRITER); // where did we come from?
 				ASSERT3S(trunc_page_64(tsdrl->r_off), <=, off);
 				ASSERT3S(trunc_page_64(tsdrl->r_off)
 				    + round_page_64(tsdrl->r_len), >=, off + len);
@@ -2456,11 +2487,19 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 
 norwlock:
 
+	if (vnode_isrecycled(vp) || !vnode_isreg(vp) || vnode_isswap(vp)) {
+		printf("ZFS: %s:%d: unusual vp condition: isrecycled %d"
+		    " isreg %d isswap %d\n",
+		    __func__, __LINE__,
+		    vnode_isrecycled(vp), vnode_isreg(vp), vnode_isswap(vp));
+	}
+
 	dprintf("vaddr %p with upl_off 0x%x\n", vaddr, upl_offset);
 	vaddr += upl_offset;
 
 	/* Can't read beyond EOF - but we need to zero those extra bytes. */
 	if (off + len > file_sz) {
+		ASSERT3U(file_sz, ==, ubc_getsize(vp));
 		uint64_t newend = file_sz - off;
 
 		dprintf("ZFS: pagein zeroing offset 0x%llx for 0x%llx bytes.\n",
@@ -2500,7 +2539,8 @@ norwlock:
 		VNOPS_OSX_STAT_INCR(pagein_pages, pgs);
 	}
 
-	(void) ubc_upl_unmap(upl); // return results aren't interesting
+	int unmapret = ubc_upl_unmap(upl);
+	ASSERT3S(unmapret, ==, KERN_SUCCESS);
 
 	if (!(flags & UPL_NOCOMMIT)) {
 		if (error) {
@@ -2533,25 +2573,28 @@ norwlock:
 			}
 		}
 	}
+
 	ZFS_ACCESSTIME_STAMP(zfsvfs, zp);
 
 	/*
-	 * We can't grab the range lock for the page as reader which would stop
-	 * truncation as this leads to deadlock. So we need to recheck the file
-	 * size.
+	 * Recheck the file  size.
 	 */
-	    ASSERT3S(file_sz, ==, zp->z_size);
-	    ASSERT3S(ap->a_f_offset, <, file_sz);
-	    ASSERT3S(ap->a_f_offset, <, zp->z_size);
-	    ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
+	ASSERT3U(file_sz, ==, zp->z_size);
+	ASSERT3U(ap->a_f_offset, <, file_sz);
+	ASSERT3U(ap->a_f_offset, <, zp->z_size);
+	ASSERT3U(zp->z_size, ==, ubc_getsize(vp));
+	ASSERT3U(ubcsize_at_entry, ==, ubc_getsize(vp));
 
-	    if (ap->a_f_offset >= file_sz || ap->a_f_offset >= zp->z_size) {
-		    printf("ZFS: %s:%d: returning EFAULT because file size changed during pagein"
-			" arg foff %lld beyond filesz %lld z_size %lld fs %s file %s\n",
-			__func__, __LINE__, ap->a_f_offset, file_sz, zp->z_size,
-			fsname, fname);
-		    error = EFAULT;
-	    }
+	if (ap->a_f_offset >= file_sz || ap->a_f_offset >= zp->z_size) {
+		printf("ZFS: %s:%d: returning EFAULT because file size changed during pagein"
+		    " arg foff %lld beyond filesz %lld z_size %lld"
+		    " need_z_lock %d need_rl_unlock %d"
+		    " fs %s file %s\n",
+		    __func__, __LINE__, ap->a_f_offset, file_sz, zp->z_size,
+		    need_z_lock, need_rl_unlock,
+		    fsname, fname);
+		error = EFAULT;
+	}
 
 	if (need_z_lock == B_TRUE) { z_map_drop_lock(zp, &need_release, &need_upgrade); }
 	if (need_rl_unlock == B_TRUE) {
@@ -2561,8 +2604,9 @@ norwlock:
 		if (rl)
 			zfs_range_unlock(rl);
 	}
-	ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
+
 	ZFS_EXIT(zfsvfs);
+
 	if (error) {
 		printf("ZFS: %s:%d returning error %d for (%lld, %ld) in file %s\n", __func__, __LINE__,
 		    error, ap->a_f_offset, ap->a_size, zp->z_name_cache);
