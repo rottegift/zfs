@@ -2242,7 +2242,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		}
 
 		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
-		ASSERT3S(ubc_getsize(vp), ==, end_size);
+		ASSERT3S(ubc_getsize(vp), >=, end_size);
 
 		ASSERT3S(uio_offset(uio), ==, this_off);
 		ASSERT3S(ubc_getsize(vp), >, uio_offset(uio));
