@@ -2395,16 +2395,21 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	// step 2: ubc_setsize to trim the pages after the end of the new last page
 
 	if (vnode_isinuse(vp, 1) != 0
+	    || !vnode_isreg(vp)
+	    || vnode_isswap(vp)
+	    || vnode_isrecycled(vp)
 	    || spl_ubc_is_mapped(vp, NULL)
 	    || zp->z_in_pager_op > 0) {
 		printf("ZFS: %s:%d: skipping shrink (pass %d inuse? %d mapped? %d mappedwrite? %d"
 		    " in pager op? %d)"
 		    " new-eof %llu zsize %llu usize %llu (diff %llu)"
+		    " isreg? %d isswap? %d, isrecycled? %d"
 		    " fs %s file %s\n",
 		    __func__, __LINE__, i, vnode_isinuse(vp, 1),
 		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 		    zp->z_in_pager_op,
 		    end, zp->z_size, ubc_getsize(vp), ubc_getsize(vp) - end,
+		    vnode_isreg(vp), vnode_isswap(vp), vnode_isrecycled(vp),
 		    fsname, fname);
 		skip_shrink = B_TRUE;
 	}

@@ -1936,63 +1936,67 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 					}
 				}
 
-				if (zp && tsdzp != zp) {
-					rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_READER);
+				if (vnode_isreg(ap->a_vp)
+				    && !vnode_isswap(ap->a_vp)
+				    && !vnode_isrecycled(ap->a_vp)
+				    && zp
+				    && POINTER_IS_VALID(zp)
+				    && zp->z_zfsvfs
+				    && POINTER_IS_VALID(zp->z_zfsvfs)
+				    && !zp->z_zfsvfs->z_unmounted
+				    && zp->z_sa_hdl
+				    && rl == NULL
+				    && !(tsdrl != NULL && tsdrl->r_zp != zp)) {
+					rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 					if (rl == NULL) {
 						printf("ZFS: %s:%d: failed to range lock file %s"
 						    " (z_map_lock held? %d) (will wait now? %d)\n",
 						    __func__, __LINE__, zp->z_name_cache,
 						    rw_write_held(&zp->z_map_lock),
 						    vap->va_size < ubc_getsize(ap->a_vp));
-						if (vap->va_size < ubc_getsize(ap->a_vp)) {
-							/*
-							 * we do not want to just chop down a file
-							 * that someone is relying on, or to fall
-							 * into the black hole of a memory_object lock
-							 */
-							rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_READER);
-						}
+						/*
+						 * we do not want to just chop down a file
+						 * that someone is relying on, or to fall
+						 * into the black hole of a memory_object lock
+						 */
+						rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 					}
 					tsd_set(rl_key, rl);
-				}
 
-				if (spl_ubc_is_mapped(ap->a_vp, NULL)) {
-					ASSERT3S(vap->va_size, >=, ubc_getsize(ap->a_vp));
-				}
+					boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+					uint64_t tries = z_map_rw_lock(zp, &need_release,
+					    &need_upgrade, __func__, __LINE__);
 
-				boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-				uint64_t tries = z_map_rw_lock(zp, &need_release,
-				    &need_upgrade, __func__, __LINE__);
+					int setsize_retval = 0;
 
-				int setsize_retval = 0;
+					if (ubc_getsize(ap->a_vp) > vap->va_size
+					    && vnode_isreg(ap->a_vp)
+					    && !vnode_isswap(ap->a_vp)
+					    && !vnode_isrecycled(ap->a_vp)
+					    && vnode_isinuse(ap->a_vp, 1) == 0
+					    && !spl_ubc_is_mapped(ap->a_vp, NULL)
+					    && zp->z_in_pager_op == 0) {
+						/* be careful about when we shrink */
+						setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
+						VNOPS_OSX_STAT_BUMP(setattr_shrink_ubc);
+					} else if (ubc_getsize(ap->a_vp) < vap->va_size
+					    && vnode_isreg(ap->a_vp)) {
+						/* growing is safe */
+						setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
+					}
 
-				if (ubc_getsize(ap->a_vp) > vap->va_size
-				    && vnode_isreg(ap->a_vp)
-				    && vnode_isinuse(ap->a_vp, 1) == 0
-				    && !spl_ubc_is_mapped(ap->a_vp, NULL)
-				    && zp->z_in_pager_op == 0) {
-					/* be careful about when we shrink */
-					setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
-					VNOPS_OSX_STAT_BUMP(setattr_shrink_ubc);
-				} else if (ubc_getsize(ap->a_vp) < vap->va_size
-				    && vnode_isreg(ap->a_vp)) {
-					/* growing is safe */
-					setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
-				}
+					z_map_drop_lock(zp, &need_release, &need_upgrade);
+					ASSERT3S(tries, <=, 2);
+					ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 
-				z_map_drop_lock(zp, &need_release, &need_upgrade);
-				ASSERT3S(tries, <=, 2);
-				ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
+					ASSERT3S(zp->z_size, ==, ubc_getsize(ap->a_vp));
 
-				if (zp) { ASSERT3S(zp->z_size, ==, ubc_getsize(ap->a_vp)); }
-
-				if (rl != NULL) {
 					ASSERT3P(tsd_get(rl_key), ==, rl);
 					tsd_set(rl_key, NULL);
 					zfs_range_unlock(rl);
+					tsd_set(rl_key, tsdrl);
 				}
 
-				tsd_set(rl_key, tsdrl);
 			}
 
 		}
