@@ -3466,7 +3466,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	if (ubc_pages_resident(vp) == 0)
 		return (0);
 
-	if (vnode_isrecycled(vp)) {
+	if (vnode_isrecycled(vp) && (a_flags & ZFS_MSYNC_RECYCLED_OK) == 0) {
 		printf("ZFS: %s:%d: vnode recycled! file %s\n", __func__, __LINE__,
 		    zp->z_name_cache);
 	}

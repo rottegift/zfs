@@ -4697,9 +4697,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	boolean_t allow_new_msync = B_FALSE;
 	boolean_t zil_commit_only = B_FALSE;
 
-	if (vnode_isrecycled(vp))
-		zil_commit_only = B_TRUE;
-
 	if (zp->z_no_fsync != B_FALSE
 	    || zp->z_in_pager_op > 0) {
 		zil_commit_only = B_TRUE;
@@ -4846,8 +4843,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	// msync conditionally
 	if (zil_commit_only == B_FALSE || allow_new_msync == B_TRUE) {
 		if (rl && rw_lock_held(&zp->z_map_lock)) {
-			ASSERT0(vnode_isrecycled(vp));
-			retval = zfs_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHALL);
+			retval = zfs_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHALL | ZFS_MSYNC_RECYCLED_OK);
 			VNOPS_STAT_BUMP(zfs_fsync_ubc_msync_new);
 		} else {
 			retval = 0;

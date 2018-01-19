@@ -274,7 +274,7 @@ extern int ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte);
 extern int dmu_write_wait_safe(znode_t *zp, off_t start_range, off_t end_range);
 extern boolean_t dmu_write_is_safe(znode_t *zp, off_t start_range, off_t end_range);
 
-#define ZFS_UBC_FORCE_MSYNC 0x10000
+#define ZFS_MSYNC_RECYCLED_OK 0x10000
 
 #ifdef	__cplusplus
 }
