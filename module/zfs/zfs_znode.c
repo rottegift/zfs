@@ -2347,6 +2347,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	for (i = 0; i < MAXCLEANPASS; i++) {
 		off_t msync_resid = 0;
 
+		ASSERT0(vnode_isrecycled(vp));
 		int zfs_msync_ret = zfs_msync(zp, rl, sync_new_eof, sync_eof, &msync_resid, UBC_PUSHALL);
 
 		if (zfs_msync_ret != 0) {

@@ -1451,6 +1451,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		off_t resid_msync = 0;
 		VNOPS_STAT_BUMP(zfs_read_clean_on_read);
+		ASSERT0(vnode_isrecycled(vp));
 		int msync_retval = zfs_msync(zp, rl, upl_file_offset,
 		    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
 		if (msync_retval != 0) {
@@ -1973,6 +1974,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 			int retval;
 			if (rlock != NULL && rw_write_held(&zp->z_map_lock)) {
+				ASSERT0(vnode_isrecycled(vp));
 				retval = zfs_msync(zp, rlock, aoff, aend, &resid_off, UBC_PUSHALL);
 			} else {
 				printf("ZFS: %s:%d: locks missing (rlock == NULL? %d rw not held %d),"
@@ -2243,8 +2245,9 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		const uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
 
-		/* clean any dirt */
+		/* clean any dirty pages */
 
+		ASSERT0(vnode_isrecycled(vp));
 		off_t msync_resid = 0;
 		int msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
 		if (msync_err) {
@@ -2271,6 +2274,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		if (t_dirty > 0 || t_busy > 0) {
 			// interested most in case where busy > 0 and EOF ~ usize
+			ASSERT0(vnode_isrecycled(vp));
 			off_t resid_msync = 0;
 			int msync_retval = zfs_msync(zp, rl, rstart, rend, &resid_msync, UBC_PUSHALL);
 			printf("ZFS: %s:%d: WARNING (msync_retval %d, resid %lld)"
@@ -4842,6 +4846,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	// msync conditionally
 	if (zil_commit_only == B_FALSE || allow_new_msync == B_TRUE) {
 		if (rl && rw_lock_held(&zp->z_map_lock)) {
+			ASSERT0(vnode_isrecycled(vp));
 			retval = zfs_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHALL);
 			VNOPS_STAT_BUMP(zfs_fsync_ubc_msync_new);
 		} else {

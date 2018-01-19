@@ -5367,6 +5367,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 		if (rl != NULL) {
+			ASSERT0(vnode_isrecycled(vp));
 			retval = zfs_msync(zp, NULL, 0, ubcsize, &resid_off, UBC_PUSHALL);
 		} else {
 			printf("ZFS: %s:%d: RL NULL! file %s\n", __func__, __LINE__,

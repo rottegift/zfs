@@ -310,6 +310,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		int msync_retval = 0;
 
 		if (do_not_msync == B_FALSE && zp->z_in_pager_op == 0) {
+			ASSERT0(vnode_isrecycled(vp));
 			claim = B_FALSE;
 			flags = UBC_PUSHALL;
 			msync_retval = zfs_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
