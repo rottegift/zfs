@@ -2316,6 +2316,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
 	ASSERT3S(ubcsize_at_entry, ==, zp->z_size);
 
+	if (ubc_getsize(vp) < zp->z_size) {
+		printf("ZFS: %s:%d: bumping ubc size from %llu to z_size %llu (end: %llu) fs %s file %s\n",
+		    __func__, __LINE__, ubc_getsize(vp), zp->z_size, end, fsname, fname);
+		int boost_setsize_retval = ubc_setsize(vp, zp->z_size);
+		ASSERT3S(boost_setsize_retval, !=, 0); // true on success
+	}
+
+
 	const off_t sync_eof = round_page_64(MAX(zp->z_size, ubc_getsize(vp)));
 	const off_t sync_new_eof = trunc_page_64(end);
 	//const off_t sync_page_after_new_eof = sync_new_eof + PAGE_SIZE_64; // for dumping pages
