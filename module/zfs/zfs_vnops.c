@@ -1468,7 +1468,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 		if (t_dirty > 0 || t_precious > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
 			printf("ZFS: %s:%d: unusual pages after unusual-page msync:"
 			    " dirty %d pageout %d precious %d absent %d busy %d"
-			    " errs %d range [%llu..%llu] (zsize %lld usize %lld) file %s", __func__, __LINE__,
+			    " errs %d range [%llu..%llu] (zsize %lld usize %lld) file %s\n", __func__, __LINE__,
 			    t_dirty, t_pageout, t_precious, t_absent, t_busy,
 			    t_errs,
 			    upl_file_offset, upl_file_offset + upl_size,
