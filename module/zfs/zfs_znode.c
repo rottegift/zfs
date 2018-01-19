@@ -2412,8 +2412,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 		// step 2: ubc_setsize to trim the pages after the end of the new last page
 
-		if (vnode_isinuse(vp, 1) != 0
-		    || !vnode_isreg(vp) // excluded at top
+		if (!vnode_isreg(vp) // excluded at top
 		    || vnode_isswap(vp) // excluded at top
 		    || vnode_isrecycled(vp)
 		    || zp->z_in_pager_op > 0) {
@@ -2484,7 +2483,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			}
 
 			if (eof_pg_delta > 0 && (end & PAGE_MASK_64) !=0) {
-				if (final_page_unusual == B_FALSE && !vnode_isinuse(vp, 1)) {
+				if (final_page_unusual == B_FALSE) {
 					setsize_retval = zfs_trunc_lastbytes_ubc_setsize(vp, end);
 				} else {
 					// clean the page within the current locking context
@@ -2504,7 +2503,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					setsize_retval = zfs_trunc_lastbytes_post_pageout(vp, end);
 				}
 			} else if (eof_pg_delta > 0) {
-				if (final_page_unusual == B_FALSE && !vnode_isinuse(vp, 1)) {
+				if (final_page_unusual == B_FALSE) {
 					setsize_retval = zfs_trunc_lastpage_ubc_setsize(vp, end);
 				} else {
 					// clean the page within the current locking context
@@ -2520,12 +2519,11 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					int pageout_err = zfs_vnop_pageoutv2(&ap);
 					ASSERT0(pageout_err);
 					ZNODE_STAT_BUMP(trunc_cleaned_only_page);
-					if (!vnode_isinuse(vp, 1))
-						setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
+					setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
 				}
-			}  else if ((end & PAGE_MASK_64) != 0 && !vnode_isinuse(vp, 1)) {
+			}  else if ((end & PAGE_MASK_64) != 0) {
 				setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
-			} else if (!vnode_isinuse(vp, 1)) {
+			} else {
 				setsize_retval = zfs_trunc_only_page_ubc_setsize(vp, end);
 			}
 
@@ -2534,12 +2532,12 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			if (setsize_retval == 0) {
 				printf("ZFS: %s:%d: (iter %d) (setsize_retval bad? %d)"
 				    " setting size to %lld from %lld (now ubcsize %lld, z_size %lld))"
-				    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
+				    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d) (isinuse? %d)\n",
 				    __func__, __LINE__, iter, setsize_retval,
 				    end, ubcsize_at_entry, ubc_getsize(vp), zp->z_size,
 				    fsname, fname,
 				    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-				    is_file_clean(vp, sync_new_eof) != 0);
+				    is_file_clean(vp, sync_new_eof) != 0, vnode_isinuse(vp, 1));
 			}
 
 		} // skip_shrink
