@@ -4763,11 +4763,11 @@ skip_lock_acquisition:
 				VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_failed, pages_in_range);
 				if (mapped || commit_precious_ret != KERN_FAILURE) {
 					printf("ZFS: %s:%d: ERROR %d committing (precious) UPL range"
-					    " [%lld, %lld] of UPL (0..%lld..%ld) at"
+					    " [%lld, %lld] (%lld pages) of UPL (0..%lld..%ld) at"
 					    " [%lld..%lld] fs %s file %s (mapped %d)\n",
 					    __func__, __LINE__,
 					    commit_precious_ret,
-					    start_of_range, end_of_range,
+					    start_of_range, end_of_range, pages_in_range,
 					    trimmed_upl_size, ap->a_size,
 					    f_start_of_upl, f_end_of_upl,
 					    fsname, fname, mapped);
@@ -4778,10 +4778,10 @@ skip_lock_acquisition:
 					xxxbleat = B_TRUE;
 					printf("ZFS: %s:%d: (precious) range at end of trimmed UPL"
 					    " could not be committed (result %d == 5 is OK,"
-					    " mapped %d == 0 is OK) range [%lld..%lld] of UPL range"
+					    " mapped %d == 0 is OK) range [%lld..%lld] (%lld pages) of UPL range"
 					    " (0..%lld..%ld), at [%lld..%lld] fs %s file %s (done: %d)\n",
 					    __func__, __LINE__, commit_precious_ret,
-					    mapped, start_of_range, end_of_range,
+					    mapped, start_of_range, end_of_range, pages_in_range,
 					    trimmed_upl_size, ap->a_size,
 					    f_start_of_upl, f_end_of_upl,
 					    fsname, fname,
