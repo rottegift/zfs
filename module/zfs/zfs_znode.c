@@ -2360,8 +2360,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	if (z_size_update_ctr > 0) {
 		printf("ZFS: %s:%d: %llu tries to decrease"
 		    " zp->z_size from %lld to end %lld (it is now %lld), fs %s, file %s\n",
-		    __func__, __LINE__, z_prev_size, z_size_update_ctr,
-		    end, zp->z_size, fsname, fname);
+		    __func__, __LINE__, z_size_update_ctr,
+		    z_prev_size, end, zp->z_size, fsname, fname);
 	}
 	ASSERT3U(zp->z_size, ==, end);
 
