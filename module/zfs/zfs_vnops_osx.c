@@ -3562,7 +3562,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					.a_pl = NULL,
 					.a_f_offset = subrange_offset,
 					.a_size = s_pages * PAGE_SIZE_64,
-					.a_flags = UPL_UBC_MSYNC,
+					.a_flags = UPL_MSYNC,
 					.a_context = NULL,
 				};
 
