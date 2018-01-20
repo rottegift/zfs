@@ -3802,14 +3802,24 @@ start_3614_case:
 			error = upldumpret;
 			goto exit_abort;
 		}
-		int commitdumpret = ubc_upl_commit(aupl);
-		if (commitdumpret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: failed to dump pages via upl_commit err %d"
+		int abortdumpret = ubc_upl_abort(aupl, UPL_ABORT_DUMP_PAGES);
+		if (abortdumpret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
 			    " foff %llu sz %lu fs %s fname %s\n",
-			    __func__, __LINE__, commitdumpret,
+			    __func__, __LINE__, abortdumpret,
 			    ap->a_f_offset, ap->a_size, fsname, fname);
-			error = commitdumpret;
+			error = abortdumpret;
 			goto exit_abort;
+		}
+		if (ap->a_f_offset > zp->z_size && ap->a_f_offset > ubc_getsize(ap->a_vp)
+		    && (ap->a_flags & UPL_MSYNC) == 0 && vnode_isinuse(vp, 1) == 0) {
+			printf("ZFS: %s:%d: shrinking from usize %lld to a_f_offset %lld (zsize %lld)"
+			    " fs %s file %s\n",
+			    __func__, __LINE__,
+			    ubc_getsize(ap->a_vp), ap->a_f_offset,
+			    zp->z_size, fsname, fname);
+			int setsize_retval = ubc_setsize(ap->a_vp, ap->a_f_offset);
+			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
 		}
 		error = 0;
 		goto exit_abort;
