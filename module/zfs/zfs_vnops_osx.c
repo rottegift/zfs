@@ -3504,7 +3504,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	uint32_t inner_noted_pageout = 0;
 	uint32_t inner_noted_absent = 0;
 
-	// vnop_get ?
+	ASSERT(vnode_isreg(vp));
 
 	for (f_offset = range_start; f_offset < MIN(range_end, MAX(zp->z_size, ubc_getsize(vp))); f_offset += PAGE_SIZE_64) {
 		totproc++;
@@ -3538,12 +3538,12 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 						    subrange_offset, subrange_end, s_pages,
 						    start, end, howmany(end - start, PAGE_SIZE_64),
 						    fsname, fname);
-						if (s_flags & UPL_POP_DIRTY) s_dirty++;
-						if (s_flags & UPL_POP_PRECIOUS) s_precious++;
-						if (s_flags & UPL_POP_BUSY) inner_noted_busy++;
-						if (s_flags & UPL_POP_ABSENT) inner_noted_absent++;
-						if (s_flags & UPL_POP_PAGEOUT) inner_noted_pageout++;
 					}
+					if (s_flags & UPL_POP_DIRTY) s_dirty++;
+					if (s_flags & UPL_POP_PRECIOUS) s_precious++;
+					if (s_flags & UPL_POP_BUSY) inner_noted_busy++;
+					if (s_flags & UPL_POP_ABSENT) inner_noted_absent++;
+					if (s_flags & UPL_POP_PAGEOUT) inner_noted_pageout++;
 					subrange_end += PAGE_SIZE_64;
 					s_pages += 1;
 					s_retval = ubc_page_op(vp, subrange_end, 0, NULL, &s_flags);
