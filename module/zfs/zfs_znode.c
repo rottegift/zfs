@@ -2456,6 +2456,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 			if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64) {
 				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
+				/* this for loop is the core of a new zfs_ubc_setsize */
 				for (off_t tail =
 					 (ubc_getsize(vp) & PAGE_MASK_64)
 					 ? ubc_getsize(vp)
@@ -2466,8 +2467,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					const int chop_pg_pop_retval = ubc_page_op(vp, chopat,
 					    0, NULL, &chopflags);
 					if (ubc_getsize(vp) > chopat && ubc_getsize(vp) > end) {
-						if (vnode_isinuse(vp, 1)
-						    || (chopflags != 0 && chop_pg_pop_retval == KERN_SUCCESS)) {
+						if (chopflags != 0
+						    && chopflags != UPL_POP_PRECIOUS
+						    && chop_pg_pop_retval == KERN_SUCCESS) {
 							printf("ZFS: %s:%d: (iter %d) POP flags 0x%x (popretval %d)"
 							    " chopat %llu ubcsize %llu end %llu zsize %llu"
 							    " fs %s file %s\n",
@@ -2475,8 +2477,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 							    chop_pg_pop_retval,
 							    chopat, ubc_getsize(vp), end, zp->z_size,
 							    fsname, fname);
-							extern void IODelay(unsigned microseconds);
-							IODelay(100);
+							setsize_trim_pages = B_FALSE;
+							break;
 						}
 						int choptailret = ubc_setsize(vp, chopat);
 						if (choptailret == 0) { // true on success, 0 on failure
