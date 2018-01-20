@@ -2455,7 +2455,11 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
 			if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64) {
-				for (off_t tail = ubc_getsize(vp);
+				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
+				for (off_t tail =
+					 (ubc_getsize(vp) & PAGE_SIZE_64)
+					 ? ubc_getsize(vp)
+					 : MAX(ubc_getsize(vp) - PAGE_SIZE_64, round_page_64(end));
 				     tail > round_page_64(end); ) {
 					off_t chopat = trunc_page_64(tail);
 					int chopflags = 0;
