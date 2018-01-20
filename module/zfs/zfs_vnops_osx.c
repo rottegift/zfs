@@ -3522,7 +3522,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 				int s_precious = 0;
 				for ( ; s_retval == KERN_SUCCESS
 					  && subrange_end < MIN(range_end, zp->z_size)
-					  && s_pages * PAGE_SIZE_64 <= MAX_UPL_TRANSFER_BYTES
+					  && s_pages * PAGE_SIZE_64 < MAX_UPL_TRANSFER_BYTES
 					  && (((a_flags & UBC_PUSHALL) && (s_flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
 					      || ((a_flags & UBC_PUSHDIRTY) && (s_flags & UPL_POP_DIRTY))); ) {
 					if (s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT)

@@ -2480,16 +2480,18 @@ zfs_trunc(znode_t *zp, uint64_t end)
 							setsize_trim_pages = B_FALSE;
 							break;
 						}
-						int choptailret = ubc_setsize(vp, chopat);
+						int choptailret = 0;
+						if (zp->z_in_pager_op == 0)
+						   choptailret = zfs_trunc_tail_ubc_setsize(vp, chopat);
 						if (choptailret == 0) { // true on success, 0 on failure
 							printf("ZFS: %s:%d: (iter %d) ubc_setsize failure"
 							    " chopflags 0x%x (popretval %d)"
 							    " chopat %llu usize %llu end %llu, zsize %llu"
-							    " fs %s fn %s\n",
+							    " fs %s fn %s (z_in_pager_op %d)\n",
 							    __func__, __LINE__, iter, chopflags,
 							    chop_pg_pop_retval,
 							    chopat, ubc_getsize(vp), end, zp->z_size,
-							    fsname, fname);
+							    fsname, fname, zp->z_in_pager_op);
 							setsize_trim_pages = B_FALSE;
 							break;
 						}
