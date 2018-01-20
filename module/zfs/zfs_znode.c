@@ -2392,7 +2392,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			zfs_ubc_range_all_flags(zp, vp, sync_new_eof,
 			    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-			if (t_pageout > 0 || t_busy > 0 || t_dirty > 0) {
+			if (t_pageout > 0 || t_busy > 0 || t_dirty > 0 || t_precious > 0) {
 				if (t_busy > 0 || t_pageout > 0)
 					skip_shrink = B_TRUE;
 				printf("ZFS: %s:%d: (iter %d) (pass %d) for about-to-be-truncated tail of file [%llu..%llu]:"
@@ -2468,7 +2468,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					    0, NULL, &chopflags);
 					if (ubc_getsize(vp) > chopat && ubc_getsize(vp) > end) {
 						if (chopflags != 0
-						    && chopflags != UPL_POP_PRECIOUS
 						    && chop_pg_pop_retval == KERN_SUCCESS) {
 							printf("ZFS: %s:%d: (iter %d) POP flags 0x%x (popretval %d)"
 							    " chopat %llu ubcsize %llu end %llu zsize %llu"
