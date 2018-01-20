@@ -2479,7 +2479,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 							IODelay(100);
 						}
 						int choptailret = ubc_setsize(vp, chopat);
-						if (choptailret != 0) {
+						if (choptailret == 0) { // true on success, 0 on failure
 							printf("ZFS: %s:%d: (iter %d) ubc_setsize failure"
 							    " chopflags 0x%x (popretval %d)"
 							    " chopat %llu usize %llu end %llu, zsize %llu"
