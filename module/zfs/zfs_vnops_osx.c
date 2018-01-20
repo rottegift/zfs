@@ -4534,7 +4534,8 @@ skip_lock_acquisition:
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    f_start_of_upl, f_end_of_upl, fsname, fname);
-		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail, 0);
+		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail,
+			UPL_COMMIT_CLEAR_PRECIOUS);
 		if (commit_tail != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: error %d range committing tail of upl (%d..%d),"
 			    " (%d of %d pages dismissed, lowest page left %d),"
@@ -4548,7 +4549,8 @@ skip_lock_acquisition:
 			for (off_t uoff = start_of_tail;
 			     uoff < end_of_tail;
 			     uoff += PAGE_SIZE_64) {
-				int cpgret = ubc_upl_commit_range(upl, uoff, uoff + PAGE_SIZE_64, 0);
+				int cpgret = ubc_upl_commit_range(upl, uoff, uoff + PAGE_SIZE_64,
+					UPL_COMMIT_CLEAR_PRECIOUS);
 				if (cpgret != KERN_SUCCESS) {
 					pgaborts++;
 					int popflags = 0;
@@ -4766,9 +4768,6 @@ skip_lock_acquisition:
 					    trimmed_upl_size, ap->a_size,
 					    f_start_of_upl, f_end_of_upl,
 					    fsname, fname, mapped);
-					const int abort_failed_precious = ubc_upl_abort_range(upl,
-					    start_of_range, end_of_range, UPL_ABORT_ERROR);
-					ASSERT3S(abort_failed_precious, ==, KERN_SUCCESS);
 					xxxbleat = B_TRUE;
 					pg_index = page_past_end_of_range;
 					continue;
