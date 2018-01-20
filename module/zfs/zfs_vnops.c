@@ -2292,7 +2292,12 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			    howmany(rend - rstart, PAGE_SIZE_64),
 			    rstart, rend, zp->z_size, ubc_getsize(vp),
 			    fsname, fname);
-
+			msync_resid = 0;
+			msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
+			if (msync_err) {
+				printf("ZFS: %s:%d: error post-fill cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
+				    __func__, __LINE__, this_off, this_off + this_chunk, msync_resid, fname, fsname);
+			}
 		}
 
 		const off_t ubcsize = ubc_getsize(vp);
