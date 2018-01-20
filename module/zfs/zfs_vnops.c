@@ -1455,37 +1455,65 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 
 
 	boolean_t do_lock = !rw_write_held(&zp->z_map_lock);
-	if (t_dirty > 0 || t_precious > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
-		VNOPS_STAT_INCR(mappedread_unusual_pages,
-		    t_dirty + t_precious + t_busy + t_pageout);
-		uint64_t tries = 0;
-		if (do_lock)
-			tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-		off_t resid_msync = 0;
-		VNOPS_STAT_BUMP(zfs_read_clean_on_read);
-		ASSERT0(vnode_isrecycled(vp));
-		int msync_retval = zfs_msync(zp, rl, upl_file_offset,
-		    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
-		if (msync_retval != 0) {
-			printf("ZFS: %s:%d: (lock? %d tries %lld) zfs_msync error %d (resid %llu)"
-			    " for start %llu end %llu (unusual pages d %d p %d b %d errs %d file %s\n",
-			    __func__, __LINE__, do_lock, tries,
-			    msync_retval, resid_msync,
+	for (int clean_i = 0, same = 0; clean_i < 10; clean_i++) {
+		if (t_dirty > 0 || t_precious > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
+			int prev_dirty = t_dirty;
+			int prev_pageout = t_pageout;
+			int prev_busy = t_busy;
+			VNOPS_STAT_INCR(mappedread_unusual_pages,
+			    t_dirty + t_precious + t_busy + t_pageout);
+			uint64_t tries = 0;
+			if (do_lock && !rw_write_held(&zp->z_map_lock))
+				tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+			IMPLY(do_lock, rw_write_held(&zp->z_map_lock));
+			off_t resid_msync = 0;
+			VNOPS_STAT_BUMP(zfs_read_clean_on_read);
+			ASSERT0(vnode_isrecycled(vp));
+			int msync_retval = zfs_msync(zp, rl, upl_file_offset,
+			    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
+			if (msync_retval != 0) {
+				printf("ZFS: %s:%d: (iter %d) (lock? %d tries %lld) zfs_msync error %d (resid %llu)"
+				    " for start %llu end %llu (unusual pages d %d p %d b %d errs %d file %s\n",
+				    __func__, __LINE__, clean_i, do_lock, tries,
+				    msync_retval, resid_msync,
+				    upl_file_offset, upl_file_offset + upl_size,
+				    t_dirty, t_precious, t_busy, t_errs,
+				    filename);
+			}
+			int t_errs = zfs_ubc_range_all_flags(zp, vp,
 			    upl_file_offset, upl_file_offset + upl_size,
-			    t_dirty, t_precious, t_busy, t_errs,
-			    filename);
-		}
-		int t_errs = zfs_ubc_range_all_flags(zp, vp,
-		    upl_file_offset, upl_file_offset + upl_size,
-		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-		if (t_dirty > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
-			printf("ZFS: %s:%d: unusual pages after unusual-page msync:"
-			    " dirty %d pageout %d precious %d absent %d busy %d"
-			    " errs %d range [%llu..%llu] (zsize %lld usize %lld) file %s\n", __func__, __LINE__,
-			    t_dirty, t_pageout, t_precious, t_absent, t_busy,
-			    t_errs,
-			    upl_file_offset, upl_file_offset + upl_size,
-			    zp->z_size, ubc_getsize(vp), filename);
+			    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+			if (t_dirty > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
+				printf("ZFS: %s:%d: (iter %d, same %d) (lock? %d) unusual pages after unusual-page msync:"
+				    " dirty %d (prev %d) pageout %d (prev %d) precious %d absent %d busy %d (prev %d)"
+				    " errs %d range [%llu..%llu] (zsize %lld usize %lld) (mapped? %d write? %d) file %s\n",
+				    __func__, __LINE__,
+				    clean_i, same, do_lock,
+				    t_dirty, prev_dirty, t_pageout, prev_pageout,  t_precious, t_absent,
+				    t_busy, prev_busy,
+				    t_errs,
+				    upl_file_offset, upl_file_offset + upl_size,
+				    zp->z_size, ubc_getsize(vp),
+				    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp), filename);
+				if (t_dirty == prev_dirty
+				    && t_busy == prev_busy
+				    && t_pageout == prev_pageout) {
+					if (same > 2) {
+						printf("ZFS: %s:%d no change in unusual pages, breaking,"
+						    " t_busy %d t_pageout %d t_dirty %d, file %s\n", __func__, __LINE__,
+						    t_busy, t_pageout, t_dirty, filename);
+						break;
+					} else {
+						same++;
+					}
+				} else {
+					same = 0;
+				}
+				extern void IOSleep(unsigned milliseconds);
+				IOSleep(1);
+			} else {
+				break;
+			}
 		}
 	}
 
