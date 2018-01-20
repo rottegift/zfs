@@ -3792,7 +3792,7 @@ start_3614_case:
 		upl_page_info_t *apl = NULL;
 		int upldumpret = ubc_create_upl(ap->a_vp,
 		    ap->a_f_offset, ap->a_size, &aupl, &apl,
-		    UPL_WILL_BE_DUMPED | UPL_RET_ONLY_DIRTY | UPL_SET_LITE | UPL_COPYOUT_FROM);
+		    UPL_WILL_BE_DUMPED | UPL_SET_LITE | UPL_COPYOUT_FROM);
 		if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
 			printf("ZFS: %s:%d: failed to create upl to dump pages: err %d"
 			    " foff %llu sz %lu fs %s fname %s\n",
