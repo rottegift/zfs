@@ -2455,6 +2455,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
 			if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64) {
+				const off_t unchopped = ubc_getsize(vp);
 				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
 				/* this for loop is the core of a new zfs_ubc_setsize */
 				for (off_t tail =
@@ -2468,14 +2469,17 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					    0, NULL, &chopflags);
 					if (ubc_getsize(vp) > chopat && ubc_getsize(vp) > end) {
 						if (chopflags != 0
-						    && chopflags != UPL_POP_PRECIOUS
+						    && vnode_isinuse(vp, 1)
 						    && chop_pg_pop_retval == KERN_SUCCESS) {
+							int64_t diff = unchopped - ubc_getsize(vp);
 							printf("ZFS: %s:%d: (iter %d) POP flags 0x%x (popretval %d)"
 							    " chopat %llu ubcsize %llu end %llu zsize %llu"
+							    " unchopped %llu (diff %lld pgs %lld)"
 							    " fs %s file %s\n",
 							    __func__, __LINE__, iter, chopflags,
 							    chop_pg_pop_retval,
 							    chopat, ubc_getsize(vp), end, zp->z_size,
+							    unchopped, diff, howmany(diff, PAGE_SIZE_64),
 							    fsname, fname);
 							setsize_trim_pages = B_FALSE;
 							break;

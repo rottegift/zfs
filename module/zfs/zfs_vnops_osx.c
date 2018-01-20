@@ -3594,7 +3594,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 			*resid = f_offset - range_start;
 	}
 
-	if (cleaned_dirty > 0 && vnode_isreg(vp)) {
+	if ((cleaned_dirty > 0 || cleaned_precious > 0) && vnode_isreg(vp)) {
 		printf("ZFS: %s:%d: kerrs %u cleaned (dirty %u precious %u) processed pages %u"
 		    " in [%llu-%llu] (%llu pages)"
 		    " (ibusy %u iabsent %u ipageout %u,"
