@@ -2465,44 +2465,56 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					int chopflags = 0;
 					int chop_pg_pop_retval = ubc_page_op(vp, chopat,
 					    0, NULL, &chopflags);
-					if (vnode_isinuse(vp, 1)
-					    || (chopflags != 0 && chop_pg_pop_retval == KERN_SUCCESS)) {
-						printf("ZFS: %s:%d: (iter %d) POP flags 0x%x (popretval %d)"
-						    " chopat %llu %llu end %llu zsize %llu"
+					if (ubc_getsize(vp) > chopat && ubc_getsize(vp) > end) {
+						if (vnode_isinuse(vp, 1)
+						    || (chopflags != 0 && chop_pg_pop_retval == KERN_SUCCESS)) {
+							printf("ZFS: %s:%d: (iter %d) POP flags 0x%x (popretval %d)"
+							    " chopat %llu ubcsize %llu end %llu zsize %llu"
+							    " fs %s file %s\n",
+							    __func__, __LINE__, iter, chopflags,
+							    chop_pg_pop_retval,
+							    chopat, ubc_getsize(vp), end, zp->z_size,
+							    fsname, fname);
+							extern void IODelay(unsigned microseconds);
+							IODelay(100);
+						}
+						int choptailret = ubc_setsize(vp, chopat);
+						if (choptailret != 0) {
+							printf("nZFS: %s:%d: (iter %d) ubc_setsize failure"
+							    " chopflags 0x%x (popretval %d)"
+							    " chopat %llu usize %llu end %llu, zsize %llu"
+							    " fs %s fn %s\n",
+							    __func__, __LINE__, iter, chopflags,
+							    chop_pg_pop_retval,
+							    chopat, ubc_getsize(vp), end, zp->z_size,
+							    fsname, fname);
+							setsize_trim_pages = B_FALSE;
+							break;
+						}
+					} else if (ubc_getsize(vp) <= end) {
+						printf("ZFS: %s:%d: (iter %d) surprisingly"
+						    " usize %llu <= end %llu, chopat %llu, zsize %llu,"
 						    " fs %s file %s\n",
-						    __func__, __LINE__, iter, chopflags,
-						    chop_pg_pop_retval,
-						    chopat, ubc_getsize(vp), end, zp->z_size,
+						    __func__, __LINE__, iter,
+						    ubc_getsize(vp), end, chopat, zp->z_size,
 						    fsname, fname);
-						extern void IODelay(unsigned microseconds);
-						IODelay(100);
-					}
-					int choptailret = ubc_setsize(vp, chopat);
-					if (choptailret != 0) {
-						printf("ZFS: %s:%d: (iter %d) ubc_setsize failure"
-						    " chopflags 0x%x (popretval %d)"
-						    " chopat %llu usize %llu end %llu, zsize %llu"
-						    " fs %s fn %s\n",
-						    __func__, __LINE__, iter, chopflags,
-						    chop_pg_pop_retval,
-						    chopat, ubc_getsize(vp), end, zp->z_size,
-						    fsname, fname);
-						setsize_trim_pages = B_FALSE;
 						break;
 					}
-					tail = chopat - PAGE_SIZE_64;
+					tail = MIN(chopat - PAGE_SIZE_64, ubc_getsize(vp));
 				}
 			}
 
 			if (setsize_trim_pages == 0) { // TRUE on success or skip
 				printf("ZFS: %s:%d (iter %d) ubc_setsize error trimming pages"
 				    " %lld -> %lld (trunc to %lld) (-pages %lld)"
-				    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)\n",
+				    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)"
+				    " usize %llu zsize %llu end %llu\n",
 				    __func__, __LINE__, iter,
 				    sync_eof, sync_new_eof, end, eof_pg_delta + 1,
 				    fsname, fname,
 				    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-				    is_file_clean(vp, sync_new_eof) != 0);
+				    is_file_clean(vp, sync_new_eof) != 0,
+				    ubc_getsize(vp), zp->z_size, end);
 				continue;
 			}
 
