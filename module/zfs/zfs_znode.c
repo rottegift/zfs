@@ -2457,13 +2457,13 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64) {
 				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
 				for (off_t tail =
-					 (ubc_getsize(vp) & PAGE_SIZE_64)
+					 (ubc_getsize(vp) & PAGE_MASK_64)
 					 ? ubc_getsize(vp)
 					 : MAX(ubc_getsize(vp) - PAGE_SIZE_64, round_page_64(end));
 				     tail > round_page_64(end); ) {
-					off_t chopat = trunc_page_64(tail);
+					const off_t chopat = trunc_page_64(tail);
 					int chopflags = 0;
-					int chop_pg_pop_retval = ubc_page_op(vp, chopat,
+					const int chop_pg_pop_retval = ubc_page_op(vp, chopat,
 					    0, NULL, &chopflags);
 					if (ubc_getsize(vp) > chopat && ubc_getsize(vp) > end) {
 						if (vnode_isinuse(vp, 1)
@@ -2480,7 +2480,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 						}
 						int choptailret = ubc_setsize(vp, chopat);
 						if (choptailret != 0) {
-							printf("nZFS: %s:%d: (iter %d) ubc_setsize failure"
+							printf("ZFS: %s:%d: (iter %d) ubc_setsize failure"
 							    " chopflags 0x%x (popretval %d)"
 							    " chopat %llu usize %llu end %llu, zsize %llu"
 							    " fs %s fn %s\n",
@@ -2500,8 +2500,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 						    fsname, fname);
 						break;
 					}
-					tail = MIN(chopat - PAGE_SIZE_64, ubc_getsize(vp));
-				}
+					const off_t tusize = trunc_page_64(ubc_getsize(vp));
+					tail = MIN(chopat - PAGE_SIZE_64, tusize);
+				} // for chopat
 			}
 
 			if (setsize_trim_pages == 0) { // TRUE on success or skip
