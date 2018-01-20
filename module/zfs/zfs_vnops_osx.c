@@ -3397,6 +3397,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			}
 		} else {
 			int commitflags = UPL_COMMIT_FREE_ON_EMPTY
+			    | UPL_COMMIT_CLEAR_PRECIOUS
 			    | UPL_COMMIT_CLEAR_DIRTY;
 			kern_return_t commitret = ubc_upl_commit_range(upl, upl_offset, size, commitflags);
 			if (commitret != KERN_SUCCESS) {
