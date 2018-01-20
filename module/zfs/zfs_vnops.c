@@ -1560,10 +1560,6 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
 
-	const size_t initial_z_size = zp->z_size;
-	const size_t initial_u_size = ubc_getsize(vp);
-	ASSERT3U(initial_z_size, ==, initial_u_size);
-
 	os = zfsvfs->z_os;
 
 	if (zp->z_pflags & ZFS_AV_QUARANTINED) {
@@ -1656,6 +1652,11 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	tsd_set(rl_key, rl);
+
+
+	const size_t initial_z_size = zp->z_size;
+	const size_t initial_u_size = ubc_getsize(vp);
+	ASSERT3U(initial_z_size, ==, initial_u_size);
 
 	/*
 	 * If we are reading past end-of-file we can skip
