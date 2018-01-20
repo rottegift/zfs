@@ -4746,7 +4746,9 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
                         }
-			const int commit_precious_flags = UPL_COMMIT_FREE_ON_EMPTY;
+			const int commit_precious_flags =
+			    UPL_COMMIT_CLEAR_PRECIOUS
+			    | UPL_COMMIT_FREE_ON_EMPTY;
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
 			if (commit_precious_ret != KERN_SUCCESS) {
@@ -4762,7 +4764,7 @@ skip_lock_acquisition:
 				if (mapped || commit_precious_ret != KERN_FAILURE) {
 					printf("ZFS: %s:%d: ERROR %d committing (precious) UPL range"
 					    " [%lld, %lld] of UPL (0..%lld..%ld) at"
-					    " [%lld..%lld] fs %s file %s (mapped %d) aborting range\n",
+					    " [%lld..%lld] fs %s file %s (mapped %d)\n",
 					    __func__, __LINE__,
 					    commit_precious_ret,
 					    start_of_range, end_of_range,
