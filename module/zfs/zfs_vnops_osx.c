@@ -4548,14 +4548,12 @@ skip_lock_acquisition:
 					int popflags = 0;
 					int poperr = ubc_page_op(vp, uoff + ap->a_f_offset,
 					    0, NULL, &popflags);
-					int apgret = ubc_upl_abort_range(upl, uoff, uoff + PAGE_SIZE_64,
-					    UPL_ABORT_ERROR);
 					printf("ZFS: %s:%d: (recovering from range committing tail fail)"
-					    " page commit error %d (abort error %d) for upl page %lld @"
+					    " page commit error %d for upl page %lld @"
 					    " %lld in fs %s file %s"
 					    " (zsize %lld usize %lld poperr %d popflags 0x%x)\n",
 					    __func__, __LINE__,
-					    cpgret, apgret, uoff / PAGE_SIZE_64,
+					    cpgret, uoff / PAGE_SIZE_64,
 					    uoff + ap->a_f_offset, fsname, fname,
 					    zp->z_size, ubc_getsize(vp), poperr, popflags);
 				} else {
