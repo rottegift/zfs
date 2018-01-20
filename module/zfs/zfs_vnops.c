@@ -2768,15 +2768,19 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			rl = zfs_try_range_lock(zp, trunc_page_64(zp->z_size),
 			    UINT64_MAX, RL_WRITER);
 			if (rl != NULL) {
-				if (trunc_page_64(zp->z_size) != rl->r_off) {
+				if (trunc_page_64(zp->z_size) != rl->r_off
+					&& rl->r_off != 0
+					&& rl->r_len != UINT64_MAX) {
 					printf("ZFS: %s:%d: range lock anomaly"
 					    " trunc_page_64(zp->z_size) == %llu"
 					    " rl->r_off == %llu, diff %lld,"
+					    " rl->r_len == %llu"
 					    " fs %s file %s (retrying)\n",
 					    __func__, __LINE__,
 					    trunc_page_64(zp->z_size),
 					    rl->r_off,
 					    rl->r_off - trunc_page_64(zp->z_size),
+					    rl->r_len,
 					    fsname, fname);
 					zfs_range_unlock(rl);
 					IOSleep(1);

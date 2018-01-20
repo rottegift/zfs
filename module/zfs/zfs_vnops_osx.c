@@ -3562,7 +3562,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					.a_pl = NULL,
 					.a_f_offset = subrange_offset,
 					.a_size = s_pages * PAGE_SIZE_64,
-					.a_flags = UPL_UBC_MSYNC,
+					.a_flags = UPL_MSYNC,
 					.a_context = NULL,
 				};
 
@@ -3802,13 +3802,14 @@ start_3614_case:
 			error = upldumpret;
 			goto exit_abort;
 		}
-		int commitdumpret = ubc_upl_commit(aupl);
-		if (commitdumpret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: failed to dump pages via upl_commit err %d"
+		int abortdumpret = ubc_upl_abort(aupl,
+		    UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
+		if (abortdumpret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
 			    " foff %llu sz %lu fs %s fname %s\n",
-			    __func__, __LINE__, commitdumpret,
+			    __func__, __LINE__, abortdumpret,
 			    ap->a_f_offset, ap->a_size, fsname, fname);
-			error = commitdumpret;
+			error = abortdumpret;
 			goto exit_abort;
 		}
 		error = 0;
