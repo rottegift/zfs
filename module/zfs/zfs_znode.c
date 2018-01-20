@@ -2482,8 +2482,12 @@ zfs_trunc(znode_t *zp, uint64_t end)
 								    unchopped, diff, howmany(diff, PAGE_SIZE_64),
 								    fsname, fname);
 							}
-							setsize_trim_pages = B_FALSE;
-							break;
+							if (chopflags != 0
+							    && chopflags != 0x4
+							    && chop_pg_pop_retval == KERN_SUCCESS) {
+								setsize_trim_pages = B_FALSE;
+								break;
+							}
 						}
 						int choptailret = 0;
 						if (zp->z_in_pager_op == 0)
