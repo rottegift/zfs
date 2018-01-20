@@ -2357,7 +2357,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		z_size_update_ctr++;
 		(void) atomic_cas_64(&zp->z_size, z_n_end, end);
 	}
-	if (z_size_update_ctr > 0) {
+	if (z_size_update_ctr > 1) {
 		printf("ZFS: %s:%d: %llu tries to decrease"
 		    " zp->z_size from %lld to end %lld (it is now %lld), fs %s, file %s\n",
 		    __func__, __LINE__, z_size_update_ctr,
