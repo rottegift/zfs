@@ -1664,7 +1664,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 * in pageoutv2
 	 */
 	rl = zfs_try_range_lock(zp, trunc_page_64(uio_offset(uio)),
-			    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_READER);
+			    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_WRITER);
 
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
@@ -1676,7 +1676,7 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), fsname, fname, zp->z_range_locks);
 
 		rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)),
-		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_READER);
+		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_WRITER);
 	}
 
 	tsd_set(rl_key, rl);
