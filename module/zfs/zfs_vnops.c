@@ -2742,7 +2742,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			if (rl != NULL) {
 				if (trunc_page_64(zp->z_size) != rl->r_off
 					&& rl->r_off != 0
-					&& rl->r_len != UINTMAX_64) {
+					&& rl->r_len != UINT64_MAX) {
 					printf("ZFS: %s:%d: range lock anomaly"
 					    " trunc_page_64(zp->z_size) == %llu"
 					    " rl->r_off == %llu, diff %lld,"
