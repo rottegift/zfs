@@ -1892,29 +1892,25 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			dprintf("ZFS: setattr new size %llx %llx\n", vap->va_size,
 					ubc_getsize(ap->a_vp));
 
-			ASSERT3S(vap->va_size, ==, ubc_getsize(ap->a_vp));
+			ASSERT3U(vap->va_size, ==, ubc_getsize(ap->a_vp));
 
 			VATTR_SET_SUPPORTED(vap, va_data_size);
 
 			if (vap->va_size != ubc_getsize(ap->a_vp)) {
 
-				/*
-				 * do we have a lock when changing ubcsize here?
-				 *
-				 * we should not deadlock by insisting on one if we
-				 * already inherit one in our thread, but it is worth
-				 * doing a speculative RL if we can
-				 */
-
-
 				znode_t *zp = VTOZ(ap->a_vp);
-				ASSERT3P(zp, !=, NULL);
+				zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+
+				ZFS_ENTER(zfsvfs);
+				ZFS_VERIFY_ZP(zp);
+
+				ASSERT3U(vap->va_size, ==, zp->z_size);
 
 				rl_t *tsdrl = tsd_get(rl_key);
 				rl_t *rl = NULL;
 				znode_t *tsdzp = NULL;
 
-				if (zp && tsdrl != NULL) {
+				if (tsdrl != NULL) {
 					tsdzp = tsdrl->r_zp;
 					if (tsdzp != zp) {
 						printf("ZFS: %s:%d bogus tsd rl type %d off %lld len %lld"
@@ -1939,14 +1935,8 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 				if (vnode_isreg(ap->a_vp)
 				    && !vnode_isswap(ap->a_vp)
 				    && !vnode_isrecycled(ap->a_vp)
-				    && zp
-				    && POINTER_IS_VALID(zp)
-				    && zp->z_zfsvfs
-				    && POINTER_IS_VALID(zp->z_zfsvfs)
-				    && !zp->z_zfsvfs->z_unmounted
-				    && zp->z_sa_hdl
 				    && rl == NULL
-				    && !(tsdrl != NULL && tsdrl->r_zp != zp)) {
+				    && (tsdrl == NULL || tsdrl->r_zp != zp)) {
 					rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 					if (rl == NULL) {
 						printf("ZFS: %s:%d: failed to range lock file %s"
@@ -1961,6 +1951,7 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 						 */
 						rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 					}
+					ASSERT3P(tsd_get(rl_key), ==, NULL);
 					tsd_set(rl_key, rl);
 
 					boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
@@ -1996,9 +1987,7 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 					zfs_range_unlock(rl);
 					tsd_set(rl_key, tsdrl);
 				}
-
 			}
-
 		}
 		if (VATTR_IS_ACTIVE(vap, va_mode))
 			VATTR_SET_SUPPORTED(vap, va_mode);
@@ -4572,8 +4561,11 @@ skip_lock_acquisition:
 
 	/* maybe try to reduce ubc size */
 	if (upl_pages_after_boundary > 0
+	    && !vnode_isswap(vp)
+	    && rw_write_held(&zp->z_map_lock)
 	    && vnode_isinuse(vp, 1) == 0
 	    && (ap->a_flags & UPL_MSYNC) == 0) {
+		ASSERT3P(rl, !=, NULL);
 		int setsize_retval = ubc_setsize(ap->a_vp,
 		    MAX(dismissal_boundary, round_page_64(zp->z_size)));
 		VNOPS_OSX_STAT_BUMP(pageoutv2_dismiss_shrink_ubc);

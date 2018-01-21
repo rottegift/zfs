@@ -1223,7 +1223,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	upl_page_info_t *pl = NULL;
 
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
-	if (trunc_page_64(zp->z_size) > trunc_page_64(ubc_getsize(vp))) {
+	if (zp->z_size > ubc_getsize(vp)) {
 		printf("ZFS: %s:%d: boosting ubc size %lld to znode size %lld fs %s file %s\n",
 		    __func__, __LINE__, ubc_getsize(vp), zp->z_size, fsname, fname);
 		int setsize_retval = ubc_setsize(vp, zp->z_size);
@@ -2541,7 +2541,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		    : 0;
 
 		if (zp->z_size < def_woff_plus_resid_dispatched) {
-			printf("ZFS: %s:%d: z_size %lld should be at least"
+			printf("ZFS: %s:%d: WEIRD z_size %lld should be at least"
 			    " woff+resid_dispatched %lld, resid_dispatched %lld,"
 			    " size deficit %lld"
 			    " uio_off %lld uio_resid %lld file %s\n",

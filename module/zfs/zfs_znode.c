@@ -1682,27 +1682,30 @@ zfs_rezget(znode_t *zp)
 		off_t zsize = zp->z_size;
 		vn_pages_remove(vp, 0, 0); // does nothing in O3X
 		if (zp->z_size != size || zp->z_size != ubcsize) {
-			if (zp->z_size < ubc_getsize(vp)
-			    && vnode_isreg(vp)
+			if (ubc_getsize(vp) > zp->z_size
 			    && !spl_ubc_is_mapped(vp, NULL)
-			    && zp->z_in_pager_op == 0
+			    && !vnode_isswap(vp)
 			    && vnode_isinuse(vp, 1) == 0
-			    && is_file_clean(vp, ubc_getsize(vp))) {
-				// is_file_clean returns nonzero if file is dirty
+			    && 0 == is_file_clean(vp, ubc_getsize(vp)) // is_file_clean returns nonzero if file is dirty
+			    && zp->z_in_pager_op == 0) {
+				ZNODE_STAT_BUMP(rezget_setsize);
+				if (ubc_getsize(vp) > zp->z_size) {
+					ZNODE_STAT_BUMP(rezget_setsize_shrink);
+					if ((zp->z_size & PAGE_MASK_64) != 0)
+						ZNODE_STAT_BUMP(rezget_setsize_shrink_nonaligned);
+				}
+				setsize_retval = ubc_setsize(vp, zp->z_size);
+				did_setsize = B_TRUE;
+			} else if (ubc_getsize(vp) < zp->z_size) {
+				setsize_retval = ubc_setsize(vp, zp->z_size);
+				ZNODE_STAT_BUMP(rezget_setsize);
+			} else {
 				printf("ZFS: %s:%d: unclean or busy file %s usize %lld zsize %lld\n",
 				    __func__, __LINE__,
 				    zp->z_name_cache, ubc_getsize(vp), zp->z_size);
 			}
-			ZNODE_STAT_BUMP(rezget_setsize);
-			if (ubc_getsize(vp) < zp->z_size) {
-				ZNODE_STAT_BUMP(rezget_setsize_shrink);
-				if ((zp->z_size & PAGE_MASK_64) != 0)
-					ZNODE_STAT_BUMP(rezget_setsize_shrink_nonaligned);
-			}
-			setsize_retval = ubc_setsize(vp, zp->z_size);
-
-			did_setsize = B_TRUE;
 		}
+
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 		ASSERT3S(tries, <=, 2);
 
@@ -1953,7 +1956,7 @@ zfs_no_putpage(struct vnode *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
  *
  *	RETURN:	0 on success, error code on failure
  */
-static int
+int
 zfs_extend(znode_t *zp, uint64_t end)
 {
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
@@ -2038,22 +2041,27 @@ zfs_extend(znode_t *zp, uint64_t end)
 	 * the oldsize, then setting to the new size.
 	 */
 	vnode_t *vp = ZTOV(zp);
-	if (spl_ubc_is_mapped(vp, NULL)) {
-		dprintf("ZFS: %s:%d: mapped file (writable? %d), bouncing end %lld -> now %lld ->"
-		    " end %lld file %s\n", __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
-		    end, ubc_getsize(vp), end, zp->z_name_cache);
+	if (!vnode_isswap(vp)) {
+		/* don't ever shrink an isswap file */
+		if (spl_ubc_is_mapped_writable(vp) || vnode_isinuse(vp, 1)) {
+			printf("ZFS: %s:%d: NOTE: file mapped writable %d or inuse %d"
+			    " usize %llu end %lld file %s\n",
+			    __func__, __LINE__,
+			    spl_ubc_is_mapped_writable(vp), vnode_isinuse(vp, 1),
+			    ubc_getsize(vp), end, zp->z_name_cache);
+		}
+		const int grow_first_time_retval = ubc_setsize(vp, end);
+		ASSERT3S(grow_first_time_retval, !=, 0); // ubc_setsize returns true on success
+		const int shrink_to_old_retval = ubc_setsize(vp, oldsize);
+		ASSERT3S(shrink_to_old_retval, !=, 0);
 	}
-	ZNODE_STAT_BUMP(extend_setsize);
-	const int grow_first_time_retval = ubc_setsize(vp, end);
-	ASSERT3S(grow_first_time_retval, !=, 0); // ubc_setsize returns true on success
-	const int shrink_to_old_retval = ubc_setsize(vp, oldsize);
-	ASSERT3S(shrink_to_old_retval, !=, 0);
 	const int grow_to_new_retval = ubc_setsize(vp, end);
 	if (grow_to_new_retval == 0) {
 		printf("ZFS: %s:%d: error setting ubc size to %lld from %lld (delta %lld)"
 		    "for file %s\n",
 		    __func__, __LINE__, end, oldsize, end - oldsize, zp->z_name_cache);
 	}
+	ZNODE_STAT_BUMP(extend_setsize);
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3S(tries, <=, 2);
@@ -2076,6 +2084,10 @@ zfs_extend(znode_t *zp, uint64_t end)
 static int
 zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
 {
+
+	panic("zfs_free_range called off %llu len %llu filesize %llu file %s",
+	    off, len, zp->z_size, zp->z_name_cache);
+
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 	rl_t *rl;
 	int error;
@@ -2316,10 +2328,17 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
 	ASSERT3S(ubcsize_at_entry, ==, zp->z_size);
 
-	if (ubc_getsize(vp) < zp->z_size) {
-		printf("ZFS: %s:%d: bumping ubc size from %llu to z_size %llu (end: %llu) fs %s file %s\n",
-		    __func__, __LINE__, ubc_getsize(vp), zp->z_size, end, fsname, fname);
-		int boost_setsize_retval = ubc_setsize(vp, zp->z_size);
+	/*
+	 * we want ubc_getsize to point to the end of the page containing the EOF
+	 * so as to save some work under memory_object_lock_request, and below as well
+	 */
+	if (ubc_getsize(vp) < round_page_64(zp->z_size)) {
+		printf("ZFS: %s:%d: bumping ubc size from %llu to rounded-up z_size (%llu->%llu)"
+		    " (trunc end: %llu) fs %s file %s\n",
+		    __func__, __LINE__, ubc_getsize(vp),
+		    zp->z_size, round_page_64(zp->z_size),
+		    end, fsname, fname);
+		int boost_setsize_retval = ubc_setsize(vp, round_page_64(zp->z_size));
 		ASSERT3S(boost_setsize_retval, !=, 0); // true on success
 	}
 
@@ -2670,6 +2689,12 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	VERIFY(sa_bulk_update(zp->z_sa_hdl, bulk, count, tx) == 0);
 
 	dmu_tx_commit(tx);
+
+	if (zp->z_size != ubc_getsize(vp)) {
+		printf("ZFS: %s:%d: after dmu_tx_commit, zsize %llu usize %llu not equal (trunc end: %llu),"
+		    " fs %s file %s\n", __func__, __LINE__,
+		    zp->z_size, ubc_getsize(vp), end, fsname, fname);
+	}
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
