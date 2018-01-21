@@ -1734,13 +1734,15 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 */
 
 	if (uio_offset(uio) >= zp->z_size) {
-		printf("ZFS: %s:%d: uio_offset %llu past end of file"
-		    " zsize %llu usize %llu fs %s file %s locktype %s rangelocks %d\n",
-		    __func__, __LINE__, uio_offset(uio),
-		    zp->z_size, ubc_getsize(vp),
-		    fsname, fname,
-		    (rlocktype == RL_WRITER) ? "RL_WRITER" : "RL_READER",
-		    zp->z_range_locks);
+		if (uio_offset(uio) > zp->z_size) {
+			printf("ZFS: %s:%d: uio_offset %llu past end of file"
+			    " zsize %llu usize %llu fs %s file %s locktype %s rangelocks %d\n",
+			    __func__, __LINE__, uio_offset(uio),
+			    zp->z_size, ubc_getsize(vp),
+			    fsname, fname,
+			    (rlocktype == RL_WRITER) ? "RL_WRITER" : "RL_READER",
+			    zp->z_range_locks);
+		}
 		// can we?: think about truncation and pages
 		ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 		error = 0;
