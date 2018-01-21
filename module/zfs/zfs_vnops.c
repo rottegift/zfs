@@ -1461,8 +1461,12 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 	    upl_file_offset, upl_file_offset + upl_size,
 	    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-	boolean_t do_lock = !rw_write_held(&zp->z_map_lock);
 	uint64_t tries = 0;
+	boolean_t did_lock = B_FALSE;
+	if (!rw_write_held(&zp->z_map_lock)) {
+		tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+		did_lock = B_TRUE;
+	}
 
 	for (int clean_i = 0, same = 0; clean_i < 10; clean_i++) {
 		if (t_dirty > 0 || t_precious > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
@@ -1471,9 +1475,6 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			int prev_busy = t_busy;
 			VNOPS_STAT_INCR(mappedread_unusual_pages,
 			    t_dirty + t_precious + t_busy + t_pageout);
-			if (do_lock && !rw_write_held(&zp->z_map_lock))
-				tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-			IMPLY(do_lock, rw_write_held(&zp->z_map_lock));
 			off_t resid_msync = 0;
 			VNOPS_STAT_BUMP(zfs_read_clean_on_read);
 			ASSERT0(vnode_isrecycled(vp));
@@ -1482,7 +1483,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			if (msync_retval != 0) {
 				printf("ZFS: %s:%d: (iter %d) (lock? %d tries %lld) zfs_msync error %d (resid %llu)"
 				    " for start %llu end %llu (unusual pages d %d p %d b %d errs %d file %s\n",
-				    __func__, __LINE__, clean_i, do_lock, tries,
+				    __func__, __LINE__, clean_i, did_lock, tries,
 				    msync_retval, resid_msync,
 				    upl_file_offset, upl_file_offset + upl_size,
 				    t_dirty, t_precious, t_busy, t_errs,
@@ -1496,7 +1497,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 				    " dirty %d (prev %d) pageout %d (prev %d) precious %d absent %d busy %d (prev %d)"
 				    " errs %d range [%llu..%llu] (zsize %lld usize %lld) (mapped? %d write? %d) file %s\n",
 				    __func__, __LINE__,
-				    clean_i, same, do_lock,
+				    clean_i, same, did_lock,
 				    t_dirty, prev_dirty, t_pageout, prev_pageout,  t_precious, t_absent,
 				    t_busy, prev_busy,
 				    t_errs,
@@ -1524,10 +1525,6 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			}
 		}
 	}
-	do_lock = !rw_write_held(&zp->z_map_lock);
-	if (do_lock && !rw_write_held(&zp->z_map_lock))
-		tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-	IMPLY(do_lock, rw_write_held(&zp->z_map_lock));
 
 	/* pull in any absent pages */
 
@@ -1559,7 +1556,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 		}
 	}
 
-	if (do_lock)
+	if (did_lock)
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
 
 	dnode_rele(dn, FTAG);
