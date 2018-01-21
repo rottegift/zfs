@@ -2365,7 +2365,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		    __func__, __LINE__, z_size_update_ctr,
 		    z_prev_size, r_end, zp->z_size, fsname, fname);
 	}
-	ASSERT3U(zp->z_size, ==, end);
+	ASSERT3U(zp->z_size, ==, round_page_64(end));
 
 	const off_t ubc_at_start_of_loop = ubc_getsize(vp);
 	const hrtime_t loop_start = gethrtime();
