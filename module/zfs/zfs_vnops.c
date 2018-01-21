@@ -1192,7 +1192,8 @@ ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte)
 
 static int
 zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
-    __unused const int mark_dirty, const off_t upl_file_offset, const size_t upl_size)
+    __unused const int mark_dirty, const off_t upl_file_offset, const size_t upl_size,
+    rl_t *rl)
 {
 	if (bytes_to_copy == NULL)
 		return (EINVAL);
@@ -1223,13 +1224,22 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	upl_page_info_t *pl = NULL;
 
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
-	if (zp->z_size > ubc_getsize(vp)) {
-		printf("ZFS: %s:%d: boosting ubc size %lld to znode size %lld fs %s file %s\n",
-		    __func__, __LINE__, ubc_getsize(vp), zp->z_size, fsname, fname);
-		int setsize_retval = ubc_setsize(vp, zp->z_size);
-		if (setsize_retval == 0) { // ubc_setsize returns TRUE on success
-			printf("ZFS: %s:%d: ubc_setsize(vp, %lld) failed for fs %s file %s\n",
-			    __func__, __LINE__, zp->z_size, fsname, fname);
+	if (upl_file_offset + upl_size > ubc_getsize(vp)) {
+		ASSERT(rw_write_held(&zp->z_map_lock));
+		if (rl->r_type == RL_WRITER) {
+			printf("ZFS: %s:%d: boosting ubc size %llu to UPL end %llu (zsize %llu) fs %s file %s\n",
+			    __func__, __LINE__, ubc_getsize(vp), upl_file_offset + upl_size,
+			    zp->z_size, fsname, fname);
+			int setsize_retval = ubc_setsize(vp, upl_file_offset + upl_size);
+			if (setsize_retval == 0) { // ubc_setsize returns TRUE on success
+				printf("ZFS: %s:%d: ubc_setsize(vp, %lld) failed for fs %s file %s\n",
+				    __func__, __LINE__, zp->z_size, fsname, fname);
+			}
+		} else {
+			printf("ZFS: %s:%d: WARNING ubc size %llu is less than upl end %llu"
+			    " zsise %llu and we do not have RL_WRITER exclusivity fs %s file %s\n",
+			    __func__, __LINE__, ubc_getsize(vp),
+			    upl_file_offset + upl_size, zp->z_size, fsname, fname);
 		}
 	}
 
@@ -1389,13 +1399,11 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 	/* useful variables and sanity checking */
         const uint64_t inbytes = arg_bytes;
         int64_t inbytes_remaining = inbytes;
-        const size_t filesize = zp->z_size;
-        const size_t usize = ubc_getsize(vp);
 
-	ASSERT3U(filesize, ==, usize);
+	ASSERT3U(zp->z_size, ==, ubc_getsize(vp));
         ASSERT3S(inbytes_remaining, >, 0);
-        ASSERT3S(uio_offset(uio), <=, filesize);
-        ASSERT3S(ubc_getsize(vp), ==, filesize);
+        ASSERT3S(uio_offset(uio), <=, zp->z_size);
+        ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 
         const user_ssize_t orig_resid = uio_resid(uio);
         const off_t orig_offset = uio_offset(uio);
@@ -1405,17 +1413,17 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
         ASSERT3S(inbytes_remaining, <=, MAX_UPL_TRANSFER_BYTES);
 
         /* check against file size */
-        if (orig_resid + orig_offset > filesize &&
-            inbytes_remaining > filesize) {
+        if (orig_resid + orig_offset > zp->z_size &&
+            inbytes_remaining > zp->z_size) {
                 const char *fn = vnode_getname(vp);
                 const char *pn = (fn == NULL) ? "<NULL>" : fn;
                 printf("ZFS: %s either orig_nbytes(%lld) or"
                     " [orig_resid(%lld)+orig_offset(%lld)](%lld) >"
-                    " filesize(%lu)"
+                    " filesize(%llu)"
                     " [vnode name: %s cache name: %s]\n",
                     __func__, inbytes_remaining,
                     orig_resid, orig_offset, orig_resid + orig_offset,
-                    filesize, pn, filename);
+                    zp->z_size, pn, filename);
         }
 
         ASSERT3S(orig_resid + orig_offset, >=, inbytes_remaining);
@@ -1453,8 +1461,9 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 	    upl_file_offset, upl_file_offset + upl_size,
 	    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-
 	boolean_t do_lock = !rw_write_held(&zp->z_map_lock);
+	uint64_t tries = 0;
+
 	for (int clean_i = 0, same = 0; clean_i < 10; clean_i++) {
 		if (t_dirty > 0 || t_precious > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
 			int prev_dirty = t_dirty;
@@ -1462,7 +1471,6 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			int prev_busy = t_busy;
 			VNOPS_STAT_INCR(mappedread_unusual_pages,
 			    t_dirty + t_precious + t_busy + t_pageout);
-			uint64_t tries = 0;
 			if (do_lock && !rw_write_held(&zp->z_map_lock))
 				tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 			IMPLY(do_lock, rw_write_held(&zp->z_map_lock));
@@ -1516,9 +1524,15 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			}
 		}
 	}
+	do_lock = !rw_write_held(&zp->z_map_lock);
+	if (do_lock && !rw_write_held(&zp->z_map_lock))
+		tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+	IMPLY(do_lock, rw_write_held(&zp->z_map_lock));
 
 	/* pull in any absent pages */
 
+	ASSERT3U(zp->z_size, >=, upl_file_offset + upl_size);
+	ASSERT3U(ubc_getsize(vp), >=, upl_file_offset + upl_size);
 	err = fill_holes_in_range(vp, upl_file_offset, upl_size, FILL_FOR_READ);
 
 	if (err != 0) {
@@ -1532,7 +1546,7 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 	if (err == 0) {
 		/* here we do the magic */
 		//err = cluster_copy_ubc_data(vp, uio, &cache_resid, 0);
-		err = zfs_ubc_to_uio(zp, vp, uio, &cache_resid, 0, upl_file_offset, upl_size);
+		err = zfs_ubc_to_uio(zp, vp, uio, &cache_resid, 0, upl_file_offset, upl_size, rl);
 
 		if (err != 0) {
 			printf("ZFS: %s:%d zfs_ubc_to_uio returned error %d,"
@@ -1638,6 +1652,9 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	//      in the case where sync=always is set on the dataset (does FRSYNC ever happen?)
 #endif
 
+	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
 	/*
 	 * Lock the range against changes.
 	 */
@@ -1663,24 +1680,45 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 * we have to overlock here to make sure that we aren't underlocked
 	 * in pageoutv2
 	 */
-	rl = zfs_try_range_lock(zp, trunc_page_64(uio_offset(uio)),
-			    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_WRITER);
+	const off_t aligned_lock_end = round_page_64(uio_resid(uio) + uio_offset(uio));
+	const off_t aligned_lock_len = aligned_lock_end - trunc_page_64(uio_offset(uio));
+	ASSERT0(aligned_lock_len & PAGE_MASK_64);
+	ASSERT3U(aligned_lock_len, >=, uio_resid(uio));
 
-	const char *fname = zp->z_name_cache;
-	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+	rl_type_t rlocktype = (zp->z_size == ubc_getsize(vp)
+	    && ubc_getsize(vp) > aligned_lock_end)
+	    ? RL_READER
+	    : RL_WRITER;
+
+	rl = zfs_try_range_lock(zp, trunc_page_64(uio_offset(uio)), aligned_lock_len, rlocktype);
 
 	if (rl == NULL) {
-		printf("ZFS: %s:%d: waiting to read lock (aligned) off %lld, len %lld, fs %s file %s"
+		/*
+		 * we have likely failed because someone else
+		 * holds an exclusive lock on the whole file or we are
+		 * racing a writer in our range.   the other thread
+		 * may change zp->z_size or the ubc size (or both),
+		 * so we wait for an exclusive lock on the file under
+		 * which we can be more certain of file sizes and having
+		 * our ubc operations be safe
+		 */
+		printf("ZFS: %s:%d: %s not obtained, waiting on exclusive lock"
+		    " (aligned) off %llu, len %llu, uio_off %llu uio_resid %llu"
+		    " fs %s file %s"
 		    " (z_range_locks %d)\n",
-		    __func__, __LINE__, trunc_page_64(uio_offset(uio)),
-		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), fsname, fname, zp->z_range_locks);
+		    __func__, __LINE__,
+		    (rlocktype == RL_WRITER) ? "RL_WRITER" : "RL_READER",
+		    trunc_page_64(uio_offset(uio)), aligned_lock_len,
+		    uio_offset(uio), uio_resid(uio),
+		    fsname, fname, zp->z_range_locks);
+
+		rlocktype = RL_WRITER;
 
 		rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)),
-		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), RL_WRITER);
+		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), rlocktype);
 	}
 
 	tsd_set(rl_key, rl);
-
 
 	const size_t initial_z_size = zp->z_size;
 	const size_t initial_u_size = ubc_getsize(vp);
@@ -1692,6 +1730,13 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	 */
 
 	if (uio_offset(uio) >= zp->z_size) {
+		printf("ZFS: %s:%d: uio_offset %llu past end of file"
+		    " zsize %llu usize %llu fs %s file %s locktype %s rangelocks %d\n",
+		    __func__, __LINE__, uio_offset(uio),
+		    zp->z_size, ubc_getsize(vp),
+		    fsname, fname,
+		    (rlocktype == RL_WRITER) ? "RL_WRITER" : "RL_READER",
+		    zp->z_range_locks);
 		// can we?: think about truncation and pages
 		ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 		error = 0;
