@@ -2350,18 +2350,20 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * we hold RL_WRITER [0...UINT64_MAX] and we hold z_map_lock
 	 */
 
-	const uint64_t z_prev_size = zp->z_size;
 	uint64_t z_size_update_ctr = 0;
 	uint64_t z_n_end;
-	while ((z_n_end = zp->z_size) > end) {
+	const uint64_t z_prev_size = zp->z_size;
+	const uint64_t r_end = round_page_64(z_prev_size);
+
+	while ((z_n_end = zp->z_size) > r_end) {
 		z_size_update_ctr++;
-		(void) atomic_cas_64(&zp->z_size, z_n_end, end);
+		(void) atomic_cas_64(&zp->z_size, z_n_end, r_end);
 	}
 	if (z_size_update_ctr > 1) {
 		printf("ZFS: %s:%d: %llu tries to decrease"
-		    " zp->z_size from %lld to end %lld (it is now %lld), fs %s, file %s\n",
+		   " zp->z_size from %lld to (page-rounded) end %lld (it is now %lld), fs %s, file %s\n",
 		    __func__, __LINE__, z_size_update_ctr,
-		    z_prev_size, end, zp->z_size, fsname, fname);
+		    z_prev_size, r_end, zp->z_size, fsname, fname);
 	}
 	ASSERT3U(zp->z_size, ==, end);
 
