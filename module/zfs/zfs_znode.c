@@ -2350,23 +2350,6 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * we hold RL_WRITER [0...UINT64_MAX] and we hold z_map_lock
 	 */
 
-	uint64_t z_size_update_ctr = 0;
-	uint64_t z_n_end;
-	const uint64_t z_prev_size = zp->z_size;
-	const uint64_t r_end = round_page_64(z_prev_size);
-
-	while ((z_n_end = zp->z_size) > r_end) {
-		z_size_update_ctr++;
-		(void) atomic_cas_64(&zp->z_size, z_n_end, r_end);
-	}
-	if (z_size_update_ctr > 1) {
-		printf("ZFS: %s:%d: %llu tries to decrease"
-		   " zp->z_size from %lld to (page-rounded) end %lld (it is now %lld), fs %s, file %s\n",
-		    __func__, __LINE__, z_size_update_ctr,
-		    z_prev_size, r_end, zp->z_size, fsname, fname);
-	}
-	ASSERT3U(zp->z_size, ==, round_page_64(end));
-
 	const off_t ubc_at_start_of_loop = ubc_getsize(vp);
 	const hrtime_t loop_start = gethrtime();
 	hrtime_t print_after = loop_start + SEC2NSEC(1);
@@ -2430,6 +2413,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					printf("ZFS: %s:%d: cleaned after pass %d fs %s file %s (skip_shrink %d)\n",
 					    __func__, __LINE__, i, fsname, fname, skip_shrink);
 				}
+				if (zp->z_size > round_page_64(end)) zp->z_size = round_page_64(end);
 				break;
 			}
 			IOSleep(1);
@@ -2471,7 +2455,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		} else {
 			int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
-			if (eof_pg_delta > 0 && zp->z_size > PAGE_SIZE_64) {
+			if (eof_pg_delta > 0 && end > PAGE_SIZE_64) {
 				const off_t unchopped = ubc_getsize(vp);
 				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
 				/* this for loop is the core of a new zfs_ubc_setsize */
@@ -2520,6 +2504,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 							    fsname, fname, zp->z_in_pager_op);
 							setsize_trim_pages = B_FALSE;
 							break;
+						} else {
+							if (zp->z_size > chopat) zp->z_size = chopat;
 						}
 					} else if (ubc_getsize(vp) <= end) {
 						printf("ZFS: %s:%d: (iter %d) surprisingly"
@@ -2585,7 +2571,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 						.a_context = NULL,
 					};
 
+					zp->z_size = round_page_64(end);
 					int pageout_err = zfs_vnop_pageoutv2(&ap);
+					zp->z_size = end;
 					ASSERT0(pageout_err);
 					ZNODE_STAT_BUMP(trunc_cleaned_new_eof_page);
 
@@ -2605,7 +2593,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 						.a_context = NULL,
 					};
 
+					zp->z_size = round_page_64(end);
 					int pageout_err = zfs_vnop_pageoutv2(&ap);
+					zp->z_size = trunc_page_64(end);
 					ASSERT0(pageout_err);
 					ZNODE_STAT_BUMP(trunc_cleaned_only_page);
 					setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
