@@ -1535,8 +1535,8 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 
 	/* pull in any absent pages */
 
-	ASSERT3U(zp->z_size, >=, upl_file_offset + upl_size);
-	ASSERT3U(ubc_getsize(vp), >=, upl_file_offset + upl_size);
+	ASSERT3U(round_page_64(zp->z_size), >=, upl_file_offset + upl_size);
+	ASSERT3U(round_page_64(ubc_getsize(vp)), >=, upl_file_offset + upl_size);
 	err = fill_holes_in_range(vp, upl_file_offset, upl_size, FILL_FOR_READ);
 
 	if (err != 0) {
