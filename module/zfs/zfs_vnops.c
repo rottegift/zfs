@@ -1224,8 +1224,9 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	upl_page_info_t *pl = NULL;
 
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
-	if (upl_file_offset + upl_size > ubc_getsize(vp)) {
+	if (upl_file_offset > ubc_getsize(vp)) {
 		ASSERT(rw_write_held(&zp->z_map_lock));
+#if 0
 		if (rl->r_type == RL_WRITER) {
 			printf("ZFS: %s:%d: boosting ubc size %llu to UPL end %llu (zsize %llu) fs %s file %s\n",
 			    __func__, __LINE__, ubc_getsize(vp), upl_file_offset + upl_size,
@@ -1241,6 +1242,12 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			    __func__, __LINE__, ubc_getsize(vp),
 			    upl_file_offset + upl_size, zp->z_size, fsname, fname);
 		}
+#else
+		printf("ZFS: %s:%d: UPL start %llu (len %lu) outside of ubc size %llu (zsize %llu)"
+		    " locktype %d fs %s file %s\n", __func__, __LINE__,
+		    upl_file_offset, upl_size, ubc_getsize(vp), zp->z_size,
+		    rl->r_type, fsname, fname);
+#endif
 	}
 
 	const hrtime_t t_start = gethrtime();
