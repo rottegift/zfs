@@ -2592,11 +2592,19 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 					zp->z_size = round_page_64(end);
 					int pageout_err = zfs_vnop_pageoutv2(&ap);
-					zp->z_size = end;
 					ASSERT0(pageout_err);
+					int popflags = 0;
+					int popret = ubc_page_op(vp, trunc_page_64(end),
+					    0, NULL, &popflags);
+					if (popret == KERN_SUCCESS && popflags != 0) {
+						printf("ZFS: %s:%d: WARNING: unusual popflags 0x%x after pageout before"
+						    "zfs_trunc_lastbytes_post_pageout, page %llu, fs %s file %s\n",
+						    __func__, __LINE__, popflags,
+						    trunc_page_64(end), fsname, fname);
+					}
 					ZNODE_STAT_BUMP(trunc_cleaned_new_eof_page);
-
 					setsize_retval = zfs_trunc_lastbytes_post_pageout(vp, end);
+					zp->z_size = end;
 				}
 			} else if (eof_pg_delta > 0) {
 				if (final_page_unusual == B_FALSE) {
@@ -2614,10 +2622,19 @@ zfs_trunc(znode_t *zp, uint64_t end)
 
 					zp->z_size = round_page_64(end);
 					int pageout_err = zfs_vnop_pageoutv2(&ap);
-					zp->z_size = trunc_page_64(end);
 					ASSERT0(pageout_err);
+					int popflags = 0;
+					int popret = ubc_page_op(vp, trunc_page_64(end),
+					    0, NULL, &popflags);
+					if (popret == KERN_SUCCESS && popflags != 0) {
+						printf("ZFS: %s:%d: WARNING: unusual popflags 0x%x after pageout before"
+						    "zfs_trunc_onlybytes_post_pageout, page %llu, fs %s file %s\n",
+						    __func__, __LINE__, popflags,
+						    trunc_page_64(end), fsname, fname);
+					}
 					ZNODE_STAT_BUMP(trunc_cleaned_only_page);
 					setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
+					zp->z_size = trunc_page_64(end);
 				}
 			}  else if ((end & PAGE_MASK_64) != 0) {
 				setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
