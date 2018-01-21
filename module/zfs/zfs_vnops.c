@@ -2065,7 +2065,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 }
 
 int
-zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl)
+zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl, int ioflags)
 {
 	vnode_t *vp = ZTOV(zp);
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
@@ -2118,15 +2118,13 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		if (newblksz > zp->z_blksz)
 			zfs_grow_blocksize(zp, newblksz, tx);
 
-		zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
+		if ((ioflags & FAPPEND) == 0) {
+			/* see XXX comment in zfs_write's handling of FAPPEND */
+			zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
+		}
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		if (tsd_get(rl_key) == NULL)
 			tsd_set(rl_key, rl);
-
-		/*
-		 * uint64_t pre = zp->z_size;
-		 * zp->z_size = woff; ////////NO!
-		 */
 
 		ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
 
@@ -2136,16 +2134,6 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 
 		/* end the tx */
 		dmu_tx_commit(tx);
-
-		/*
-		 * if (zp->z_size != ubc_getsize(vp)) {
-		 * 	printf("ZFS: %s:%d: restoring z_size from %lld to ubc size %lld"
-		 * 	    "(woff = %lld, end = %lld, pre = %lld) file %s\n",
-		 * 	    __func__, __LINE__, zp->z_size, ubc_getsize(vp), woff, end, pre,
-		 * 	    zp->z_name_cache);
-		 * 	zp->z_size = ubc_getsize(vp);
-		 * }
-		 */
 	}
 	return (error);
 }
@@ -2795,7 +2783,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 	/* if we are appending, bump woff to the end of file */
 	if (ioflag & FAPPEND) {
-		const off_t old_woff = woff;
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		const off_t target_len = n;
 		const hrtime_t start_time = gethrtime();
@@ -2804,12 +2791,10 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		for ( ; ; ) {
 			extern void IOSleep(unsigned milliseconds);
 			/* try to lock the tail of the file */
-			rl = zfs_try_range_lock(zp, trunc_page_64(zp->z_size),
-			    UINT64_MAX, RL_WRITER);
+			rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 			if (rl != NULL) {
-				if (trunc_page_64(zp->z_size) != rl->r_off
-					&& rl->r_off != 0
-					&& rl->r_len != UINT64_MAX) {
+				if (rl->r_off != 0
+				    && rl->r_len != UINT64_MAX) {
 					printf("ZFS: %s:%d: range lock anomaly"
 					    " trunc_page_64(zp->z_size) == %llu"
 					    " rl->r_off == %llu, diff %lld,"
@@ -2844,17 +2829,43 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 				continue;
 			}
 		}
-		if (rl->r_off != 0)
-			ASSERT3U(trunc_page_64(zp->z_size), ==, rl->r_off);
+		/*
+		 * No other thread should change zp->z_size
+		 * from this point until we release
+		 * the range lock, since any changer
+		 * must lock the whole 0...UINT64_MAX.
+		 *
+		 * We need to adjust uio_offset to point to
+		 * the current z_size, then make sure that
+		 * z_size and ubc size are both big enough
+		 * to hold the entire uio, since we may
+		 * trigger paging actions, particularly
+		 * if zp->z_size is not page-aligned.
+		 */
+		ASSERT3U(rl->r_off, ==, 0);
+		const off_t new_filesize = zp->z_size + uio_resid(uio);
+		printf("ZFS: %s:%d: full file lock (%llu, %llu) obtained, bumping"
+		    " woff %llu and uio_offset %llu and usize %llu to zsize %llu"
+		    " and bumping zsize to %llu (includes uio_resid %llu)"
+		    " for fs %s file %s\n", __func__, __LINE__,
+		    rl->r_off, rl->r_len, woff, uio_offset(uio),
+		    ubc_getsize(vp), zp->z_size,
+		    new_filesize, uio_resid(uio), fsname, fname);
 		woff = zp->z_size;
-		if (woff != old_woff) {
-			printf("ZFS: %s:%d: append range lock says set woff to %lld from %lld"
-			    " rl->r_len %lld uio_offset %lld uio_resid %lld file %s\n",
-			    __func__, __LINE__, woff, old_woff, rl->r_len,
-			    uio_offset(uio), uio_resid(uio), zp->z_name_cache);
-		}
-		ASSERT3S(woff, ==, ubc_getsize(vp));
 		uio_setoffset(uio, woff);
+		if (new_filesize > ubc_getsize(vp)) {
+			int append_bump_setsize = ubc_setsize(vp, new_filesize);
+			ASSERT3S(append_bump_setsize, !=, 0); // 0 is success
+		}
+		ASSERT3U(woff, ==, zp->z_size);
+		zp->z_size = new_filesize;
+		ASSERT3U(woff, ==, ubc_getsize(vp));
+		ASSERT3U(woff, ==, uio_resid(uio));
+		ASSERT3U(zp->z_size, ==, woff + uio_resid(uio));
+		/* we can reduce the range here in principle ? */
+		/* zfs_range_reduce(rl, page_below_woff, page above new_filesize)' */
+		/* or in zfs_write_maybe_extend_file */
+		/* but let's get this working for highly racey appends first XXX */
 	} else {
 		ASSERT3S(start_resid, >, 0);
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
@@ -2886,7 +2897,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	/* on error, zfs_write_maybe_extend_file does zfs_range_unlock */
 	ASSERT3P(rl, !=, NULL);
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-        error = zfs_write_maybe_extend_file(zp, woff, start_resid, rl);
+	error = zfs_write_maybe_extend_file(zp, woff, start_resid, rl, ioflag);
 	if (error) {
 		ZFS_EXIT(zfsvfs);
 		printf("ZFS: %s:%d: (extend fail) returning error %d\n", __func__, __LINE__, error);
