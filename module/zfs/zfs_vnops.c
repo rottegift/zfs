@@ -2214,7 +2214,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			uint64_t prev_u_size = ubc_getsize(vp);
 			while ((n_end_size = zp->z_size) < end_size) {
 				size_update_ctr++;
-				zp->z_size = n_end_size; // atomic set not atomic cas, but so what?
+				zp->z_size = end_size; // atomic set not atomic cas, but so what?
 				ASSERT3S(error, ==, 0);
 			}
 			if (size_update_ctr > 1) {
@@ -2550,7 +2550,8 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			    def_deficit,
 			    uio_offset(uio), uio_resid(uio),
 			    zp->z_name_cache);
-			zp->z_size = def_woff_plus_resid_dispatched;
+			if (zp->z_size < def_woff_plus_resid_dispatched)
+				zp->z_size = def_woff_plus_resid_dispatched;
 			ASSERT3S(zp->z_size, >=, ubcsize_at_entry);
 			if (zp->z_size > ubc_getsize(vp)) {
 				int setsize_retval = ubc_setsize(vp, zp->z_size);
