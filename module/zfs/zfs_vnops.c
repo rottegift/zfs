@@ -2076,10 +2076,11 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 	off_t end = woff + start_resid;
 
 	ASSERT3P(tsd_get(rl_key), ==, rl);
-	if (rl->r_len == UINT64_MAX ||
-	    (end > zp->z_blksz &&
-		(!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz))) ||
-	    (end > zp->z_blksz && !dmu_write_is_safe(zp, woff, end))) {
+	if (rl->r_len == UINT64_MAX
+	    && rl->r_off == 0
+	    && ((end > zp->z_blksz &&
+		    (!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)))
+		|| (end > zp->z_blksz && !dmu_write_is_safe(zp, woff, end)))) {
 		uint64_t newblksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
 		/* start a transaction */
@@ -2118,7 +2119,9 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		if (newblksz > zp->z_blksz)
 			zfs_grow_blocksize(zp, newblksz, tx);
 
-		if ((ioflags & FAPPEND) == 0) {
+		if ((ioflags & FAPPEND) == 0
+		    && rl->r_off == 0
+		    && rl->r_len == UINT64_MAX) {
 			/* see XXX comment in zfs_write's handling of FAPPEND */
 			zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
 		}
@@ -2134,6 +2137,8 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 
 		/* end the tx */
 		dmu_tx_commit(tx);
+	} else {
+		ASSERT(dmu_write_is_safe(zp, woff, end)); // should return error?
 	}
 	return (error);
 }
