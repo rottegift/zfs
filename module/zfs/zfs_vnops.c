@@ -354,7 +354,7 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 	if (flag & (FSYNC | FDSYNC)) {
 		ASSERT3S(zp->z_sync_cnt, <, UINT32_MAX);
 		ASSERT3S(zp->z_sync_cnt, <, 1024);  // XXX: ARBITRARY
-		atomic_inc_32(&zp->z_sync_cnt);
+		atomic_inc_32((uint32_t *)&zp->z_sync_cnt);
 	}
 
 	mutex_enter(&zp->z_lock);
@@ -389,7 +389,7 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	/* Decrement the synchronous opens in the znode */
 	if ((flag & (FSYNC | FDSYNC)) && (count == 1)) {
 		ASSERT3S(zp->z_sync_cnt, >, 0);
-		atomic_dec_32(&zp->z_sync_cnt);
+		atomic_dec_32((uint32_t *)&zp->z_sync_cnt);
 	}
 
 	mutex_enter(&zp->z_lock);
@@ -2907,8 +2907,10 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 
 		ASSERT3U(woff, ==, uio_offset(uio));
 
-		rl = zfs_range_lock(zp, trunc_page_64(woff),
-				    round_page_64(start_resid + PAGE_SIZE_64), RL_WRITER);
+		const uint64_t rlower = trunc_page_64(woff);
+		const uint64_t rupper = round_page_64(woff + start_resid);
+		const uint64_t rlen = rupper - rlower;
+		rl = zfs_range_lock(zp, rlower, rlen, RL_WRITER);
 		tsd_set(rl_key, rl);
 	}
 
