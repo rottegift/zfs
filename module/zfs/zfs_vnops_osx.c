@@ -3308,21 +3308,21 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		uint64_t new_blksz = 0;
                 const int max_blksz = zfsvfs->z_max_blksz;
                 if (zp->z_blksz < max_blksz) {
-                        new_blksz = MIN(end_size,
+                        new_blksz = MIN(f_offset + write_size,
                             1 << highbit64(zp->z_blksz));
                 } else {
-                        new_blksz = MIN(end_size, max_blksz);
+                        new_blksz = MIN(f_offset + write_size, max_blksz);
                 }
                 if (ISP2(new_blksz) && new_blksz < max_blksz) {
                         uint64_t new_new_blksz = new_blksz + 1;
                         printf("ZFS: %s:%d: bumping new_blksz from %lld to %lld file %s\n",
-                            __func__, __LINE__, new_blksz, new_new_blksz, fname);
+                            __func__, __LINE__, new_blksz, new_new_blksz, zp->z_name_cache);
                         ASSERT(!ISP2(new_new_blksz));
                         new_blksz = new_new_blksz;
                 }
 		if (new_blksz > zp->z_blksz) {
-			printf("ZFS: %s:%d growing buffer to %llu (from %d) fs %s file %s\n",
-                            __func__, __LINE__, new_blksz, zp->z_blksz, fsname, fname);
+			printf("ZFS: %s:%d growing buffer to %llu (from %d) file %s\n",
+                            __func__, __LINE__, new_blksz, zp->z_blksz, zp->z_name_cache);
 			zfs_grow_blocksize(zp, new_blksz, tx);
 		}
 	}
