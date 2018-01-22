@@ -4307,10 +4307,11 @@ already_acquired_locks:
 	off_t end_size = MAX(zp->z_size, woff + a_size);
 	const off_t preserved_zsize = zp->z_size;
 
-	if (rl->r_len == UINT64_MAX
-	    || ((end_size > zp->z_blksz &&
-		    (!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)))
-		|| (end_size > zp->z_blksz && !dmu_write_is_safe(zp, woff, end_size)))) {
+        if (rl->r_len == UINT64_MAX ||
+            (end_size > zp->z_blksz &&
+             ((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
+              !dmu_write_is_safe(zp, woff, end_size)))) {
+
 		uint64_t new_blksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
 		if (zp->z_blksz < max_blksz) {
