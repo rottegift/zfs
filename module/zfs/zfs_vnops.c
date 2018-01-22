@@ -2376,7 +2376,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			const size_t align_to_sync = align_end - align_off;
 			ASSERT3U(align_to_sync, >=, PAGE_SIZE_64);
 			ASSERT3U(zp->z_size, >=, align_off);
-			ASSERT3U(zp->z_size, >=, align_off + align_to_sync);
+			ASSERT3U(round_page_64(zp->z_size), >=, align_off + align_to_sync);
 			struct vnop_pageout_args ap = {
 				.a_vp = vp,
 				.a_pl = NULL,
