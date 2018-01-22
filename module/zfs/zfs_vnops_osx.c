@@ -4303,7 +4303,7 @@ already_acquired_locks:
 	    && rl->r_off == 0
 	    && ((end_size > zp->z_blksz &&
 		    (!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)))
-		|| (end > zp->z_blksz && !dmu_write_is_safe(zp, woff, end_size)))) {
+		|| (end_size > zp->z_blksz && !dmu_write_is_safe(zp, woff, end_size)))) {
 		uint64_t new_blksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
 		if (zp->z_blksz < max_blksz) {
