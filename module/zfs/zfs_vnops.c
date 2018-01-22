@@ -2129,7 +2129,11 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		if (tsd_get(rl_key) == NULL)
 			tsd_set(rl_key, rl);
 
-		ASSERT3S(zp->z_size, ==, ubc_getsize(vp));
+		if (ioflags & FAPPEND) {
+			ASSERT3U(zp->z_size + start_resid, ==, ubc_getsize(vp));
+		} else {
+			ASSERT3U(zp->z_size, ==, ubc_getsize(vp));
+		}
 
 		VERIFY(0 == sa_update(zp->z_sa_hdl, SA_ZPL_SIZE(zp->z_zfsvfs),
 			&zp->z_size,
@@ -2864,8 +2868,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		}
 		ASSERT3U(woff, ==, zp->z_size);
 		zp->z_size = new_filesize;
-		ASSERT3U(woff, ==, ubc_getsize(vp));
-		ASSERT3U(woff, ==, uio_resid(uio));
+		ASSERT3U(woff, ==, uio_offset(uio));
+		ASSERT3U(ubc_getsize(vp), ==, woff + uio_resid(uio));
 		ASSERT3U(zp->z_size, ==, woff + uio_resid(uio));
 		/* we can reduce the range here in principle ? */
 		/* zfs_range_reduce(rl, page_below_woff, page above new_filesize)' */
@@ -2902,15 +2906,21 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	/* on error, zfs_write_maybe_extend_file does zfs_range_unlock */
 	ASSERT3P(rl, !=, NULL);
 	ASSERT3P(tsd_get(rl_key), ==, rl);
+	const off_t pre_maybe_zsize = zp->z_size;
+	if (ioflag & FAPPEND) {
+		ASSERT3U(pre_maybe_zsize, ==, woff + uio_resid(uio));
+	}
 	error = zfs_write_maybe_extend_file(zp, woff, start_resid, rl, ioflag);
 	if (error) {
 		ZFS_EXIT(zfsvfs);
 		printf("ZFS: %s:%d: (extend fail) returning error %d\n", __func__, __LINE__, error);
 		return (error);
 	}
-	if (woff > zp->z_size) {
-		dprintf("ZFS: %s:%d: woff %lld is past EOF %lld file %s\n",
-		    __func__, __LINE__, woff, zp->z_size, zp->z_name_cache);
+	if (zp->z_size != pre_maybe_zsize) {
+		printf("ZFS: %s:%d: zfs_write_maybe_extend_file changed zsize from %llu to %llu, putting it back"
+		    " usize %llu woff %llu ioflag 0x%x fs %s, file %s\n", __func__, __LINE__,
+		    pre_maybe_zsize, zp->z_size, ubc_getsize(vp), woff, ioflag, fsname, fname);
+		zp->z_size = pre_maybe_zsize;
 	}
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 
