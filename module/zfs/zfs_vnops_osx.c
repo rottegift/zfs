@@ -4297,9 +4297,10 @@ already_acquired_locks:
 	 */
 	off_t woff = ap->a_f_offset;
 	off_t end_size = MAX(zp->z_size, woff + a_size);
+	const off_t preserved_zsize = zp->z_size;
 
 	if (rl->r_len == UINT64_MAX
-	    || (end_size > zp->z_blksz &&
+	    && (end_size > zp->z_blksz &&
 		((!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)) ||
 		    !dmu_write_is_safe(zp, woff, end_size)))) {
 
@@ -4348,6 +4349,14 @@ already_acquired_locks:
 		  }
 		  ASSERT3U(trunc_page_64(rl->r_off), <=, rloff);
 		}
+	}
+
+	if (zp->z_size != preserved_zsize) {
+		printf("ZFS: %s:%d: zp->z_size %llu being reset to preserved_zsize %llu"
+		    " (usize %llu) (end_size %llu) fs %s file %s\n", __func__, __LINE__,
+		    zp->z_size, preserved_zsize, ubc_getsize(vp), end_size,
+		    fsname, fname);
+		zp->z_size = preserved_zsize;
 	}
 
 	if (ubc_getsize(vp) < zp->z_size) {
