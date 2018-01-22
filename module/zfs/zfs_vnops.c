@@ -2077,8 +2077,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 
 	ASSERT3P(tsd_get(rl_key), ==, rl);
 	if (rl->r_len == UINT64_MAX
-	    && rl->r_off == 0
-	    && ((end > zp->z_blksz &&
+	    || ((end > zp->z_blksz &&
 		    (!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)))
 		|| (end > zp->z_blksz && !dmu_write_is_safe(zp, woff, end)))) {
 		uint64_t newblksz = 0;
@@ -2119,11 +2118,15 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		if (newblksz > zp->z_blksz)
 			zfs_grow_blocksize(zp, newblksz, tx);
 
-		if ((ioflags & FAPPEND) == 0
-		    && rl->r_off == 0
-		    && rl->r_len == UINT64_MAX) {
+		if ((ioflags & FAPPEND) == 0 && rl->r_len == UINT64_MAX) {
 			/* see XXX comment in zfs_write's handling of FAPPEND */
 			zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
+		} else if (rl->r_len == UINT64_MAX) {
+			const off_t conservative_lower =
+			    (trunc_page_64(woff) < PAGE_SIZE_64)
+			    ? 0
+			    : trunc_page_64(woff) - PAGE_SIZE_64;
+			zfs_range_reduce(rl, conservative_lower, UINT64_MAX - 1ULL);
 		}
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		if (tsd_get(rl_key) == NULL)
@@ -2877,10 +2880,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		ASSERT3U(woff, ==, uio_offset(uio));
 		ASSERT3U(ubc_getsize(vp), ==, woff + uio_resid(uio));
 		ASSERT3U(zp->z_size, ==, woff + uio_resid(uio));
-		/* we can reduce the range here in principle ? */
-		/* zfs_range_reduce(rl, page_below_woff, page above new_filesize)' */
-		/* or in zfs_write_maybe_extend_file */
-		/* but let's get this working for highly racey appends first XXX */
+		/* This range is reduced in zfs_write_maybe_extend_file */
 	} else {
 		ASSERT3S(start_resid, >, 0);
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
@@ -2922,7 +2922,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		printf("ZFS: %s:%d: (extend fail) returning error %d\n", __func__, __LINE__, error);
 		return (error);
 	}
-	if (zp->z_size != pre_maybe_zsize) {
+	if (zp->z_size < pre_maybe_zsize) {
 		printf("ZFS: %s:%d: zfs_write_maybe_extend_file changed zsize from %llu to %llu, putting it back"
 		    " usize %llu woff %llu ioflag 0x%x fs %s, file %s\n", __func__, __LINE__,
 		    pre_maybe_zsize, zp->z_size, ubc_getsize(vp), woff, ioflag, fsname, fname);

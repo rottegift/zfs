@@ -4307,10 +4307,8 @@ already_acquired_locks:
 	off_t end_size = MAX(zp->z_size, woff + a_size);
 	const off_t preserved_zsize = zp->z_size;
 
-#if 0
 	if (rl->r_len == UINT64_MAX
-	    && rl->r_off == 0
-	    && ((end_size > zp->z_blksz &&
+	    || ((end_size > zp->z_blksz &&
 		    (!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz)))
 		|| (end_size > zp->z_blksz && !dmu_write_is_safe(zp, woff, end_size)))) {
 		uint64_t new_blksz = 0;
@@ -4347,8 +4345,8 @@ already_acquired_locks:
 			dmu_tx_commit(tx);
 		}
 		if (rl != tsd_get(rl_key) && rl != tsd_rl_at_entry
-		    && rl->r_len == 0 && rl->r_off == UINT64_MAX) {
-		  zfs_range_reduce(rl, rloff, rllen);
+		    && rl->r_len == UINT64_MAX && rl->r_off == 0) {
+			zfs_range_reduce(rl, rloff, rllen);
 		} else {
 		  const off_t rlsize = rloff + rllen;
 		  const off_t rlsize_or_fsize = MIN(rlsize, zp->z_size);
@@ -4359,9 +4357,8 @@ already_acquired_locks:
 		  ASSERT3U(trunc_page_64(rl->r_off), <=, rloff);
 		}
 	}
-#endif
 
-	if (zp->z_size != preserved_zsize) {
+	if (zp->z_size < preserved_zsize) {
 		printf("ZFS: %s:%d: zp->z_size %llu being reset to preserved_zsize %llu"
 		    " (usize %llu) (end_size %llu) fs %s file %s\n", __func__, __LINE__,
 		    zp->z_size, preserved_zsize, ubc_getsize(vp), end_size,
