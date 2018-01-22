@@ -432,6 +432,7 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 					    __func__, __LINE__, zp->z_size, ubc_getsize(vp), zp->z_name_cache);
 			}
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
+			zfs_range_unlock(rl);
 		}
 	}
 #if 0
