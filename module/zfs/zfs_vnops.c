@@ -2133,7 +2133,9 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			    (woff < PAGE_SIZE_64)
 			    ? 0
 			    : trunc_page_64(woff) - PAGE_SIZE_64;
-			zfs_range_reduce(rl, conservative_lower, UINT64_MAX - 1ULL);
+			const uint64_t conservative_len = PAGE_SIZE_64 +
+			    MAX(MAX_UPL_TRANSFER_BYTES, round_page_64(start_resid));
+			zfs_range_reduce(rl, conservative_lower, conservative_len);
 		}
 		ASSERT3P(tsd_get(rl_key), ==, rl);
 		if (tsd_get(rl_key) == NULL)

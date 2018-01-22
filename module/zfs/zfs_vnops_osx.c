@@ -3945,10 +3945,12 @@ start_3614_case:
 		} else if (ap->a_f_offset > rl->r_off + rl->r_len
 		    && trunc_page_64(ap->a_f_offset) > trunc_page_64(rl->r_off)) {
 			/* we'd fail the try if the offsets start in the same page */
-			printf("ZFS: %s:%d: locking [%llu..%llu] entirely above"
-			       " TSD RL [%llu..%llu], fs %s file %s (%lld bytes)\n",
-			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
+			printf("ZFS: %s:%d: locking [%llu..%llu] (sz %lu) entirely above"
+			    " TSD RL [%llu..%llu] (sz %llu), fs %s file %s (%lld bytes)\n",
+			    __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			    ap->a_size,
+			    rl->r_off, rl->r_off + rl->r_len, rl->r_len,
+			    fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
 			ASSERT3P(rl, !=, NULL);
 			if (rl != NULL) drop_rl = B_TRUE;
