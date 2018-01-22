@@ -357,9 +357,11 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 		atomic_inc_32((uint32_t *)&zp->z_sync_cnt);
 	}
 
-	mutex_enter(&zp->z_lock);
-	zp->z_open_cnt++;
-	mutex_exit(&zp->z_lock);
+	if (vnode_isreg(*vpp)) {
+		mutex_enter(&zp->z_lock);
+		zp->z_open_cnt++;
+		mutex_exit(&zp->z_lock);
+	}
 
 	if (vnode_isreg(*vpp)) { ASSERT3S(zp->z_size, ==, ubc_getsize(*vpp)); }
 
@@ -392,13 +394,15 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 		atomic_dec_32((uint32_t *)&zp->z_sync_cnt);
 	}
 
-	mutex_enter(&zp->z_lock);
-	if (zp->z_open_cnt <= 0) {
-		printf("ZFS: %s:%d: z_open_cnt underflow %d file %s\n",
-		    __func__, __LINE__, zp->z_open_cnt, zp->z_name_cache);
+	if (vnode_isreg(vp)) {
+		mutex_enter(&zp->z_lock);
+		if (zp->z_open_cnt <= 0) {
+			printf("ZFS: %s:%d: z_open_cnt underflow %d file %s\n",
+			    __func__, __LINE__, zp->z_open_cnt, zp->z_name_cache);
+		}
+		zp->z_open_cnt--;
+		mutex_exit(&zp->z_lock);
 	}
-	zp->z_open_cnt--;
-	mutex_exit(&zp->z_lock);
 
 	if (ubc_getsize(vp) != zp->z_size
 	    && vnode_isreg(vp)
