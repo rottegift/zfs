@@ -4299,6 +4299,7 @@ already_acquired_locks:
 	off_t end_size = MAX(zp->z_size, woff + a_size);
 	const off_t preserved_zsize = zp->z_size;
 
+#if 0
 	if (rl->r_len == UINT64_MAX
 	    && rl->r_off == 0
 	    && ((end_size > zp->z_blksz &&
@@ -4350,6 +4351,7 @@ already_acquired_locks:
 		  ASSERT3U(trunc_page_64(rl->r_off), <=, rloff);
 		}
 	}
+#endif
 
 	if (zp->z_size != preserved_zsize) {
 		printf("ZFS: %s:%d: zp->z_size %llu being reset to preserved_zsize %llu"
