@@ -3283,6 +3283,7 @@ start_tx:
 	ASSERT3S(error, ==, 0);
 	if (error != 0) {
 		dmu_tx_abort(tx);
+		zio_data_buf_free(safebuf, write_size);
 		printf("ZFS: %s:%d: dmu_tx_assign error %d, aborting range [%u..%d] file %s fs %s\n",
 		    __func__, __LINE__, error, upl_offset, size, zp->z_name_cache,
 		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
