@@ -3227,23 +3227,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		}
 	}
 
-	if (!dmu_write_is_safe(zp, f_offset, f_offset + write_size)) {
-		printf("ZFS: %s:%d: cannot safely write [%lld, %lld] z_blksz %d file %s\n",
-		    __func__, __LINE__, f_offset, f_offset + write_size,
-		    zp->z_blksz, zp->z_name_cache);
-		if (unmap) {
-			ubc_upl_unmap(upl);
-			*caller_unmapped = B_TRUE;
-		}
-		if (is_clcommit) {
-			int abortret = ubc_upl_abort_range(upl, upl_offset, size,
-			    UPL_ABORT_FREE_ON_EMPTY
-			    | UPL_ABORT_ERROR);
-			ASSERT3S(abortret, ==, KERN_SUCCESS);
-		}
-		return(EAGAIN);
-	}
-
 	dprintf("ZFS: %s:%d: beginning DMU transaction on %s\n", __func__, __LINE__,
 	    zp->z_name_cache);
 
@@ -3291,6 +3274,8 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	bcopy(pvaddr[upl_offset], safebuf, write_size);
 
+
+
 	tx = dmu_tx_create(zfsvfs->z_os);
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 	zfs_sa_upgrade_txholds(tx, zp);
@@ -3314,6 +3299,32 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			ASSERT3S(abort_ret, ==, KERN_SUCCESS);
 		}
 		return (error);
+	}
+
+	if (!dmu_write_is_safe(zp, f_offset, f_offset + write_size)) {
+		printf("ZFS: %s:%d: write safety problem [%lld, %lld] z_blksz %d file %s\n",
+		    __func__, __LINE__, f_offset, f_offset + write_size,
+		    zp->z_blksz, zp->z_name_cache);
+		uint64_t new_blksz = 0;
+                const int max_blksz = zfsvfs->z_max_blksz;
+                if (zp->z_blksz < max_blksz) {
+                        new_blksz = MIN(end_size,
+                            1 << highbit64(zp->z_blksz));
+                } else {
+                        new_blksz = MIN(end_size, max_blksz);
+                }
+                if (ISP2(new_blksz) && new_blksz < max_blksz) {
+                        uint64_t new_new_blksz = new_blksz + 1;
+                        printf("ZFS: %s:%d: bumping new_blksz from %lld to %lld file %s\n",
+                            __func__, __LINE__, new_blksz, new_new_blksz, fname);
+                        ASSERT(!ISP2(new_new_blksz));
+                        new_blksz = new_new_blksz;
+                }
+		if (new_blksz > zp->z_blksz) {
+			printf("ZFS: %s:%d growing buffer to %llu (from %d) fs %s file %s\n",
+                            __func__, __LINE__, new_blksz, zp->z_blksz, fsname, fname);
+			zfs_grow_blocksize(zp, new_blksz, tx);
+		}
 	}
 
 	dprintf("ZFS: %s:%d: dmu_write %lld bytes (of %d) from pvaddr[%u] to offset %lld in file %s\n",
