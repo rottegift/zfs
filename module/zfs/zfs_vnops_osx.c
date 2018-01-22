@@ -3274,11 +3274,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	bcopy(pvaddr[upl_offset], safebuf, write_size);
 
+	int tx_pass = 0;
 start_tx:
 	tx = dmu_tx_create(zfsvfs->z_os);
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-	zfs_sa_upgrade_txholds(tx, zp);
 	dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
+	zfs_sa_upgrade_txholds(tx, zp);
 	error = dmu_tx_assign(tx, TXG_WAIT);
 	ASSERT3S(error, ==, 0);
 	if (error != 0) {
@@ -3322,16 +3323,43 @@ start_tx:
                         new_blksz = new_new_blksz;
                 }
 		if (new_blksz > zp->z_blksz) {
-			printf("ZFS: %s:%d growing buffer to %llu (from %d) zsize %llu file %s\n",
+			printf("ZFS: %s:%d growing blocksize to %llu (from %d) zsize %llu file %s\n",
                             __func__, __LINE__, new_blksz, zp->z_blksz,
 			    zp->z_size, zp->z_name_cache);
 			const off_t prev_zsize = zp->z_size;
 			zfs_grow_blocksize(zp, new_blksz, tx);
+			printf("ZFS: %s:%d: (pass %d) blocksize now %u (wanted %llu) file %s\n",
+			    __func__, __LINE__, tx_pass, zp->z_blksz, new_blksz,
+			    zp->z_name_cache);
 			VERIFY0(sa_update(zp->z_sa_hdl, SA_ZPL_SIZE(zp->z_zfsvfs),
 				&zp->z_size, sizeof(zp->z_size), tx));
-			if (zp->z_size < prev_zsize) zp->z_size = prev_zsize;
+			ASSERT3U(zp->z_size, ==, prev_zsize);
 			dmu_tx_commit(tx);
-			goto start_tx;
+			tx_pass++;
+			if (tx_pass < 3 && !dmu_write_is_safe(zp, f_offset,
+				f_offset + write_size)) {
+				goto start_tx;
+			}
+			if (!dmu_write_is_safe(zp, f_offset, f_offset + write_size)) {
+				printf("ZFS: %s:%d: (pass %d) and still unsafe, failing IO"
+				    " [%llu-%llu] (sz %llu) file %s\n",
+				    __func__, __LINE__, tx_pass,
+				    f_offset, f_offset + write_size, write_size,
+				    zp->z_name_cache);
+				zio_data_buf_free(safebuf, write_size);
+				if (unmap) {
+					ubc_upl_unmap(upl);
+					*caller_unmapped = B_TRUE;
+				}
+				if (is_clcommit) {
+					kern_return_t abort_ret = ubc_upl_abort_range(upl,
+					    upl_offset, size,
+					    UPL_ABORT_FREE_ON_EMPTY
+					    | UPL_ABORT_ERROR);
+					ASSERT3S(abort_ret, ==, KERN_SUCCESS);
+				}
+				return (EIO);
+			}
 		}
 	}
 
