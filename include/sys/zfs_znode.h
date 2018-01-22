@@ -227,8 +227,8 @@ typedef struct znode {
 	boolean_t	z_is_zvol;	/* are we used by the zvol */
 	boolean_t	z_is_ctldir;	/* are we .zfs entry */
 #ifdef __APPLE__
-	uint32_t	z_sync_cnt;	/* synchronous open count */
-	uint32_t        z_open_cnt;     /* count of number of opens */
+	int32_t	        z_sync_cnt;	/* synchronous open count */
+	int32_t         z_open_cnt;     /* count of number of opens */
 	krwlock_t       z_map_lock;             /* page map lock */
 	const char      *z_map_lock_holder;     /* function that holds the rw_lock */
 

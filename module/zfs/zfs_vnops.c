@@ -393,7 +393,10 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	}
 
 	mutex_enter(&zp->z_lock);
-	ASSERT3S(zp->z_open_cnt, >, 0);
+	if (zp->z_open_cnt <= 0) {
+		printf("ZFS: %s:%d: z_open_cnt underflow %d file %s\n",
+		    __func__, __LINE__, zp->z_open_cnt, zp->z_name_cache);
+	}
 	zp->z_open_cnt--;
 	mutex_exit(&zp->z_lock);
 
