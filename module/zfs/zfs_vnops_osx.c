@@ -3187,6 +3187,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return (SET_ERROR(EINVAL));
 	}
 
+	ASSERT3U(filesize, ==, zp->z_size);
 	off_t write_size = size;
 	if (f_offset + size > filesize) {
 		ASSERT3S(filesize - f_offset, <, INT_MAX);
@@ -3216,6 +3217,13 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			    __func__, __LINE__,
 			    size, write_size,
 			    f_offset, filesize, zp->z_name_cache);
+		}
+		if (write_size < 1) {
+			printf("ZFS: %s:%d: write_size is %lld off %lld"
+			    " size %u filesize %llu zsize %llu write_space %llu file %s\n",
+			    __func__, __LINE__, write_size, f_offset,
+			    size, filesize, zp->z_size, write_space,  zp->z_name_cache);
+
 		}
 	}
 

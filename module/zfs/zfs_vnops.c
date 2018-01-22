@@ -2290,6 +2290,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 		ASSERT3S(ubc_getsize(vp), >=, end_size);
+		ASSERT3U(zp->z_size, >=, end_size);
 
 		ASSERT3S(uio_offset(uio), ==, this_off);
 		ASSERT3S(ubc_getsize(vp), >, uio_offset(uio));
@@ -2355,17 +2356,22 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		ASSERT3U(zp->z_size, >=, uio_offset(uio) + xfer_resid);
 		ASSERT3U(ubc_getsize(vp), >=, uio_offset(uio) + xfer_resid);
 		int cluster_copy_error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+		ASSERT0(cluster_copy_error);
 
 		if (!error && cluster_copy_error)
 			error = cluster_copy_error;
 
 		/* clean the data and copy it out to the DMU */
+		if (cluster_copy_error == 0) { ASSERT3U(xfer_resid, <, this_chunk); }
 		if (cluster_copy_error == 0 && xfer_resid < this_chunk) {
 			const size_t to_sync = this_chunk - xfer_resid;
 			const off_t sync_to_p = this_off + to_sync;
 			const off_t align_off = trunc_page_64(this_off);
 			const off_t align_end = round_page_64(sync_to_p);
 			const size_t align_to_sync = align_end - align_off;
+			ASSERT3U(align_to_sync, >=, PAGE_SIZE_64);
+			ASSERT3U(zp->z_size, >=, align_off);
+			ASSERT3U(zp->z_size, >=, align_off + align_to_sync);
 			struct vnop_pageout_args ap = {
 				.a_vp = vp,
 				.a_pl = NULL,
