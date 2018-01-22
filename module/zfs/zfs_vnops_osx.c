@@ -3278,7 +3278,11 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 start_tx:
 	tx = dmu_tx_create(zfsvfs->z_os);
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-	dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
+	if (tx_pass == 0 || dmu_write_is_safe(zp, f_offset, write_size)) {
+		dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
+	} else {
+		dmu_tx_hold_write(tx, zp->z_id, 0, write_size);
+	}
 	zfs_sa_upgrade_txholds(tx, zp);
 	error = dmu_tx_assign(tx, TXG_WAIT);
 	ASSERT3S(error, ==, 0);

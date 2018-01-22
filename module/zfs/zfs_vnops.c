@@ -1986,7 +1986,17 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 			woff = zp->z_size;
 			tx = dmu_tx_create(zfsvfs->z_os);
 			dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-			dmu_tx_hold_write(tx, zp->z_id, woff, start_resid);
+			if (dmu_write_is_safe(zp, woff, start_resid)) {
+				dmu_tx_hold_write(tx, zp->z_id, woff, start_resid);
+			} else {
+				printf("ZFS: %s:%d: write safety: woff %llu start_resid %llu"
+				    " z_blksz %u"
+				    " zsize %llu usize %llu file %s\n",
+				    __func__, __LINE__, woff, start_resid,
+				    zp->z_blksz, zp->z_size,
+				    ubc_getsize(vp), zp->z_name_cache);
+				dmu_tx_hold_write(tx, zp->z_id, 0, start_resid);
+			}
 			zfs_sa_upgrade_txholds(tx, zp);
 			error = dmu_tx_assign(tx, TXG_WAIT);
 			if (error) {
@@ -2097,7 +2107,17 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		/* start a transaction */
 		tx = dmu_tx_create(zfsvfs->z_os);
 		dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
-		dmu_tx_hold_write(tx, zp->z_id, woff, start_resid);
+		if (dmu_write_is_safe(zp, woff, start_resid)) {
+			dmu_tx_hold_write(tx, zp->z_id, woff, start_resid);
+		} else {
+			printf("ZFS: %s:%d: write safety: woff %llu start_resid %llu"
+			    " z_blksz %u"
+			    " zsize %llu usize %llu file %s\n",
+			    __func__, __LINE__, woff, start_resid,
+			    zp->z_blksz, zp->z_size,
+			    ubc_getsize(vp), zp->z_name_cache);
+			dmu_tx_hold_write(tx, zp->z_id, 0, start_resid);
+		}
 		zfs_sa_upgrade_txholds(tx, zp);
 		error = dmu_tx_assign(tx, TXG_WAIT);
 		if (error) {
