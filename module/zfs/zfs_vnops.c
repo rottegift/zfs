@@ -2902,6 +2902,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			    zp->z_name_cache);
 		}
 
+		ASSERT3U(woff, ==, uio_offset(uio));
+
 		rl = zfs_range_lock(zp, trunc_page_64(woff),
 				    round_page_64(start_resid + PAGE_SIZE_64), RL_WRITER);
 		tsd_set(rl_key, rl);
@@ -2940,6 +2942,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	 * Regular files get handled in a new way
 	 */
 
+	ASSERT3U(woff, ==, uio_offset(uio));
 	if (vnode_isreg(vp) && old_style != B_TRUE) {
 		/* Important: tail call: we use no actual stack space here */
 		return(zfs_write_isreg(vp, zp, zfsvfs, uio, ioflag,
