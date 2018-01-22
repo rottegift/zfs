@@ -2122,8 +2122,8 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			/* see XXX comment in zfs_write's handling of FAPPEND */
 			zfs_range_reduce(rl, trunc_page_64(woff), round_page_64(start_resid + PAGE_SIZE_64));
 		} else if (rl->r_len == UINT64_MAX) {
-			const off_t conservative_lower =
-			    (trunc_page_64(woff) < PAGE_SIZE_64)
+			const uint64_t conservative_lower =
+			    (woff < PAGE_SIZE_64)
 			    ? 0
 			    : trunc_page_64(woff) - PAGE_SIZE_64;
 			zfs_range_reduce(rl, conservative_lower, UINT64_MAX - 1ULL);

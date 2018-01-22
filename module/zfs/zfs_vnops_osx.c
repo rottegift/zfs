@@ -3936,7 +3936,7 @@ start_3614_case:
 		} else if (ap->a_f_offset + ap->a_size < rl->r_off
 		    && trunc_page_64(ap->a_f_offset) != trunc_page_64(rl->r_off)) {
 			printf("ZFS: %s:%d: locking [%lld..%lld] entirely below"
-			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
+			       " TSD RL [%llu..%llu], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
@@ -3945,8 +3945,8 @@ start_3614_case:
 		} else if (ap->a_f_offset > rl->r_off + rl->r_len
 		    && trunc_page_64(ap->a_f_offset) > trunc_page_64(rl->r_off)) {
 			/* we'd fail the try if the offsets start in the same page */
-			printf("ZFS: %s:%d: locking [%lld..%lld] entirely above"
-			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
+			printf("ZFS: %s:%d: locking [%llu..%llu] entirely above"
+			       " TSD RL [%llu..%llu], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__, ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			rl = zfs_try_range_lock(zp, ap->a_f_offset, ap->a_size, RL_WRITER);
@@ -3957,14 +3957,14 @@ start_3614_case:
 			/* we'd fail the try if the offsets start in the same page */
 			const off_t newlen = rl->r_off - ap->a_f_offset - 1;
 			if (newlen > PAGE_SIZE_64)
-				printf("ZFS: %s:%d: locking (sz %lld) [%lld..%lld] partially below"
-				    " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
+				printf("ZFS: %s:%d: locking (sz %llu) [%llu..%llu] partially below"
+				    " TSD RL [%llu..%llu], fs %s file %s (%lld bytes)\n",
 				    __func__, __LINE__, newlen,
 				    ap->a_f_offset, ap->a_f_offset + newlen,
 				    rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
 			else
-				dprintf("ZFS: %s:%d: locking (sz %lld) [%lld..%lld] partially below"
-				    " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
+				dprintf("ZFS: %s:%d: locking (sz %lld) [%llu..%llu] partially below"
+				    " TSD RL [%llu..%llu], fs %s file %s (%lld bytes)\n",
 				    __func__, __LINE__, newlen,
 				    ap->a_f_offset, ap->a_f_offset + newlen,
 				    rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
@@ -3978,8 +3978,8 @@ start_3614_case:
 			const off_t rlrangeend = rl->r_off + rl->r_len;
 			ASSERT3S(rlrangeend, <, aprangeend);
 			const off_t newlen = aprangeend - rlrangeend;
-			printf("ZFS: %s:%d: locking [%lld..%lld] partially above"
-			       " TSD RL [%lld..%lld], fs %s file %s (%lld bytes)\n",
+			printf("ZFS: %s:%d: locking [%llu..%llu] partially above"
+			       " TSD RL [%llu..%llu], fs %s file %s (%lld bytes)\n",
 			       __func__, __LINE__,
 			       rl->r_off + rl->r_len + 1, rl->r_off + rl->r_len + newlen,
 			       rl->r_off, rl->r_off + rl->r_len, fsname, fname, fsize);
