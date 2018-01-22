@@ -3274,8 +3274,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	bcopy(pvaddr[upl_offset], safebuf, write_size);
 
-
-
+start_tx:
 	tx = dmu_tx_create(zfsvfs->z_os);
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 	zfs_sa_upgrade_txholds(tx, zp);
@@ -3302,12 +3301,13 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 
 	if (!dmu_write_is_safe(zp, f_offset, f_offset + write_size)) {
-		printf("ZFS: %s:%d: write safety problem [%lld, %lld] z_blksz %d file %s\n",
+		printf("ZFS: %s:%d: write safety problem [%lld, %lld] z_blksz %d"
+		    " zsize %llu file %s\n",
 		    __func__, __LINE__, f_offset, f_offset + write_size,
-		    zp->z_blksz, zp->z_name_cache);
+		    zp->z_blksz, zp->z_size, zp->z_name_cache);
 		uint64_t new_blksz = 0;
                 const int max_blksz = zfsvfs->z_max_blksz;
-                if (zp->z_blksz < max_blksz) {
+                if (zp->z_blksz > max_blksz) {
                         new_blksz = MIN(f_offset + write_size,
                             1 << highbit64(zp->z_blksz));
                 } else {
@@ -3321,9 +3321,16 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
                         new_blksz = new_new_blksz;
                 }
 		if (new_blksz > zp->z_blksz) {
-			printf("ZFS: %s:%d growing buffer to %llu (from %d) file %s\n",
-                            __func__, __LINE__, new_blksz, zp->z_blksz, zp->z_name_cache);
+			printf("ZFS: %s:%d growing buffer to %llu (from %d) zsize %llu file %s\n",
+                            __func__, __LINE__, new_blksz, zp->z_blksz,
+			    zp->z_size, zp->z_name_cache);
+			const off_t prev_zsize = zp->z_size;
 			zfs_grow_blocksize(zp, new_blksz, tx);
+			VERIFY0(sa_update(zp->z_sa_hdl, SA_ZPL_SIZE(zp->z_zfsvfs),
+				&zp->z_size, sizeof(zp->z_size), tx));
+			if (zp->z_size < prev_zsize) zp->z_size = prev_zsize;
+			dmu_tx_commit(tx);
+			goto start_tx;
 		}
 	}
 
@@ -4327,7 +4334,7 @@ already_acquired_locks:
 
 		uint64_t new_blksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
-		if (zp->z_blksz < max_blksz) {
+		if (zp->z_blksz > max_blksz) {
 			new_blksz = MIN(end_size,
 			    1 << highbit64(zp->z_blksz));
 		} else {
