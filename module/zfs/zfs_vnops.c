@@ -2147,7 +2147,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			tsd_set(rl_key, rl);
 
 		if (ioflags & FAPPEND) {
-			ASSERT3U(zp->z_size + start_resid, ==, ubc_getsize(vp));
+			//ASSERT3U(zp->z_size + start_resid, ==, ubc_getsize(vp));
 		} else {
 			ASSERT3U(zp->z_size, ==, ubc_getsize(vp));
 		}
