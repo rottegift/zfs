@@ -1485,6 +1485,8 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			off_t resid_msync = 0;
 			VNOPS_STAT_BUMP(zfs_read_clean_on_read);
 			ASSERT0(vnode_isrecycled(vp));
+			ASSERT3U(rl->r_off, <=, upl_file_offset);
+			ASSERT3U(rl->r_off + rl->r_len, >=, upl_file_offset + upl_size);
 			int msync_retval = zfs_msync(zp, rl, upl_file_offset,
 			    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
 			if (msync_retval != 0) {
@@ -1959,7 +1961,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 		// that may be dirty, and we will sync that out anyway
 		if (ioflag & FAPPEND) {
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
-			rlock = zfs_range_lock(zp, 0, start_resid, RL_APPEND);
+			rlock = zfs_range_lock(zp, 0, alen, RL_APPEND);
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
 			tsd_set(rl_key, rlock);
 			ASSERT3S(rlock->r_off, ==, zp->z_size);
@@ -2308,6 +2310,8 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		ASSERT0(vnode_isrecycled(vp));
 		off_t msync_resid = 0;
+		ASSERT3U(rl->r_off, <=, this_off);
+		ASSERT3U(rl->r_off + rl->r_len, >=, this_off + this_chunk);
 		int msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
 		if (msync_err) {
 			printf("ZFS: %s:%d: error cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
