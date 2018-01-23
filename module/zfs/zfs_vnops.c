@@ -2292,30 +2292,47 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		/* increase ubc size if we are growing the file */
 		end_size = this_off + this_chunk;
 
-		if (end_size > ubc_getsize(vp)) {
+		if (end_size > zp->z_size || end_size > ubc_getsize(vp)) {
+			uint64_t size_update_ctr = 0;
+			uint64_t prev_size = zp->z_size;
+			uint64_t n_end_size;
 			uint64_t prev_u_size = ubc_getsize(vp);
-			if (ubc_getsize(vp) < end_size) {
-				int setsize_growval = ubc_setsize(vp, end_size);
+			while ((n_end_size = zp->z_size) < end_size) {
+				size_update_ctr++;
+				zp->z_size = end_size; // atomic set not atomic cas, but so what?
+				ASSERT3S(error, ==, 0);
+			}
+			if (size_update_ctr > 1) {
+				printf("ZFS: %s:%d: %llu tries to increase zp->z_size to end_size"
+				    "  %llu (it is now %llu, and was %llu) fs %s file %s\n",
+				    __func__, __LINE__, size_update_ctr,
+				    end_size, zp->z_size, prev_size, fname, fsname);
+			}
+			if (ubc_getsize(vp) < zp->z_size) {
+				int setsize_growval = ubc_setsize(vp, zp->z_size);
 				if (setsize_growval == 0) { // true on success
-					printf("ZFS: %s:%d: "
-					    " error growing usize from %llu to %llu (it is now %llu) zsize %llu"
+					printf("ZFS: %s:%d: after %lld steps grew zsize from %llu to %llu"
+					    " (it is now %llu),"
+					    " but error growing usize from %llu to %llu (it is now %llu)"
 					    " fs %s file %s\n",
-					    __func__, __LINE__,
-					    prev_u_size, end_size, ubc_getsize(vp), zp->z_size,
+					    __func__, __LINE__, size_update_ctr,
+					    prev_size, end_size, zp->z_size,
+					    prev_u_size, zp->z_size, ubc_getsize(vp),
 					    fsname, fname);
 				}
 			}
-			ASSERT3U(zp->z_size, <, end_size); // writing at least something
+			ASSERT3U(zp->z_size, >=, end_size);
 			ASSERT3U(ubc_getsize(vp), >=, end_size);
 		}
 
-		ASSERT3U(ubc_getsize(vp), >=, end_size);
-		ASSERT3U(zp->z_size, <, end_size);
+		ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
+		ASSERT3S(ubc_getsize(vp), >=, end_size);
+		ASSERT3U(zp->z_size, >=, end_size);
 
-		ASSERT3U(uio_offset(uio), ==, this_off);
-		ASSERT3U(ubc_getsize(vp), >, uio_offset(uio));
-		ASSERT3U(ubc_getsize(vp), >=, uio_offset(uio) + this_chunk);
-		ASSERT3U(ubc_getsize(vp), >=, ubcsize_at_entry);
+		ASSERT3S(uio_offset(uio), ==, this_off);
+		ASSERT3S(ubc_getsize(vp), >, uio_offset(uio));
+		ASSERT3S(ubc_getsize(vp), >=, uio_offset(uio) + this_chunk);
+		ASSERT3S(ubc_getsize(vp), >=, ubcsize_at_entry);
 
 		const uint64_t ubcsize_before_cluster_ops = ubc_getsize(vp);
 
@@ -2338,7 +2355,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
 		}
 
-		ASSERT3U(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
+		ASSERT3S(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
 		int xfer_resid = (int) this_chunk;
 
 		const off_t rstart = uio_offset(uio);
@@ -2375,7 +2392,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		int pageoutv2_error = 0;
 
 		/* here we do the magic */
-		ASSERT3U(zp->z_size, >=, uio_offset(uio));
+		ASSERT3U(zp->z_size, >=, uio_offset(uio) + xfer_resid);
 		ASSERT3U(ubc_getsize(vp), >=, uio_offset(uio) + xfer_resid);
 		int cluster_copy_error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
 		ASSERT0(cluster_copy_error);
@@ -2616,17 +2633,15 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		    ? def_woff_plus_resid_dispatched - def_z_size
 		    : 0;
 
-		/* did pageoutv2 not bump zp->z_size ? */
 		if (zp->z_size < def_woff_plus_resid_dispatched) {
 			printf("ZFS: %s:%d: WEIRD z_size %lld should be at least"
 			    " woff+resid_dispatched %lld, resid_dispatched %lld,"
 			    " size deficit %lld"
-			    " uio_off %lld uio_resid %lld (error %d pageoutv2_error %d) file %s\n",
+			    " uio_off %lld uio_resid %lld file %s\n",
 			    __func__, __LINE__,
 			    def_z_size, def_woff_plus_resid_dispatched, resid_dispatched,
 			    def_deficit,
 			    uio_offset(uio), uio_resid(uio),
-			    error, pageoutv2_error,
 			    zp->z_name_cache);
 			if (zp->z_size < def_woff_plus_resid_dispatched)
 				zp->z_size = def_woff_plus_resid_dispatched;
@@ -2884,13 +2899,12 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		ASSERT3U(rl->r_off, ==, 0);
 		const off_t new_filesize = zp->z_size + uio_resid(uio);
 		printf("ZFS: %s:%d: full file lock (%llu, %llu) obtained, bumping"
-		    " woff %llu and uio_offset %llu to zsize %llu"
-		    " and usize %llu to zsize+uio_resid %llu"
+		    " woff %llu and uio_offset %llu and usize %llu to zsize %llu"
+		    " and bumping zsize to %llu (includes uio_resid %llu)"
 		    " for fs %s file %s\n", __func__, __LINE__,
 		    rl->r_off, rl->r_len, woff, uio_offset(uio),
-		    zp->z_size,
-		    ubc_getsize(vp), new_filesize,
-		    fsname, fname);
+		    ubc_getsize(vp), zp->z_size,
+		    new_filesize, uio_resid(uio), fsname, fname);
 		woff = zp->z_size;
 		uio_setoffset(uio, woff);
 		if (new_filesize > ubc_getsize(vp)) {
@@ -2898,9 +2912,10 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			ASSERT3S(append_bump_setsize, !=, 0); // 0 is success
 		}
 		ASSERT3U(woff, ==, zp->z_size);
+		zp->z_size = new_filesize;
 		ASSERT3U(woff, ==, uio_offset(uio));
 		ASSERT3U(ubc_getsize(vp), ==, woff + uio_resid(uio));
-		ASSERT3U(woff, ==, zp->z_size);
+		ASSERT3U(zp->z_size, ==, woff + uio_resid(uio));
 		/* This range is reduced in zfs_write_maybe_extend_file */
 	} else {
 		ASSERT3S(start_resid, >, 0);

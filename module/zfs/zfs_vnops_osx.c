@@ -3417,11 +3417,8 @@ start_tx:
 
 	zio_data_buf_free(safebuf, write_size);
 
-	/* update z_size (if necessary) and SA and finish off transaction */
+	/* update SA and finish off transaction */
         if (error == 0) {
-		if (zp->z_size < f_offset + write_size)
-			zp->z_size = f_offset + write_size;
-
                 uint64_t mtime[2], ctime[2];
                 sa_bulk_attr_t bulk[4];
                 int count = 0;
