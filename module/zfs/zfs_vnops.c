@@ -2339,9 +2339,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		/* clean any dirty pages */
 
-
 		ASSERT0(vnode_isrecycled(vp));
-
 		int xfer_resid = (int) this_chunk;
 
 		if ((ioflag & FAPPEND) == 0) {
