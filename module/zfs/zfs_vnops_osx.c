@@ -4262,9 +4262,28 @@ acquire_locks:
 		VERIFY3P(rl, ==, NULL);
 		if (secs == 0)
 			secs = 1;
-		if ((rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER))
+		/*
+		 * we are here because we have not been called
+		 * directly by a zfs function (e.g. zfs_msync)
+		 * but rather by the kernel.  be conservative
+		 * to avoid ERROR 5 committing (precious) UPL range
+		 * below.
+		 *
+		 * if we are not mapped write AND we aren't
+		 * here as part of an UPL_MSYNC AND we get the
+		 * z_map_lock here immediately, then we can reduce
+		 * the range lock to rloff, rllen.  otherwise there
+		 * is contention enough that we should lock off
+		 * the whole file until we are done here.
+		 */
+	        if ((rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER))
 		    && rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
+			/* good to go, maybe reduce the range a bit */
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
+			if (!spl_ubc_is_mapped_writable(vp)
+			    && (ap->a_flags & UPL_MSYNC) == 0) {
+				zfs_range_reduce(rl, rloff, rllen);
+			}
 			tsd_set(rl_key, rl);
 			drop_rl = B_TRUE;
 			break;
