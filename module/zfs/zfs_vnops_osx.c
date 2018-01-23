@@ -2272,6 +2272,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		return (EIO);
 	}
 
+	zp->z_in_pager_op++;
+
 	int ubc_map_retval = 0;
 	if ((ubc_map_retval = ubc_upl_map(upl, (vm_offset_t *)&vaddr)) != KERN_SUCCESS) {
 		ASSERT3S(ubc_map_retval, ==, KERN_SUCCESS);
@@ -2282,6 +2284,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
 			ASSERT3S(aret, ==, KERN_SUCCESS);
 		}
+		zp->z_in_pager_op--;
+		ASSERT3S(zp->z_in_pager_op, >=, 0);
 		ZFS_EXIT(zfsvfs);
 		return (ENOMEM);
 	}
@@ -2302,7 +2306,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 		    __func__, __LINE__, off, file_sz, ubc_getsize(vp), fsname, fname);
 		int unmapret = ubc_upl_unmap(upl);
 		ASSERT3S(unmapret, ==, KERN_SUCCESS);
-		ZFS_EXIT(zfsvfs);
 		if (!(flags & UPL_NOCOMMIT)) {
 			printf("ZFS: %s:%d: aborting out-of-range UPL (off %lld file_sz %lld)"
 			    " fs %s file %s\n",
@@ -2311,6 +2314,9 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 			    (UPL_ABORT_ERROR | UPL_ABORT_FREE_ON_EMPTY));
 			ASSERT3S(aret, ==, KERN_SUCCESS);
 		}
+		zp->z_in_pager_op--;
+		ASSERT3S(zp->z_in_pager_op, >=, 0);
+		ZFS_EXIT(zfsvfs);
 		return (EFAULT);
 	}
 
@@ -2598,8 +2604,6 @@ norwlock:
 			zfs_range_unlock(rl);
 	}
 
-	ZFS_EXIT(zfsvfs);
-
 	if (error) {
 		printf("ZFS: %s:%d returning error %d for (%lld, %ld) in file %s\n", __func__, __LINE__,
 		    error, ap->a_f_offset, ap->a_size, zp->z_name_cache);
@@ -2609,6 +2613,11 @@ norwlock:
 		    __func__, __LINE__, error);
 		error = EIO;
 	}
+
+	zp->z_in_pager_op--;
+	ASSERT3S(zp->z_in_pager_op, >=, 0);
+	ZFS_EXIT(zfsvfs);
+
 	return (error);
 }
 
@@ -3002,8 +3011,9 @@ out:
 		}
 	}
 exit:
-	dec_z_in_pager_op(zp, fsname, fname);
 	if (err) printf("ZFS: %s:%d err %d\n", __func__, __LINE__, err);
+	dec_z_in_pager_op(zp, fsname, fname);
+	ASSERT3S(zp->z_in_pager_op, >=, 0);
 	ZFS_EXIT(zfsvfs);
 	return (err);
 }
@@ -3031,7 +3041,10 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	znode_t *zp = VTOZ(vp);
 	zfsvfs_t *zfsvfs = NULL;
 
-	if (!zp || !zp->z_zfsvfs) {
+	if (!zp
+	    || !POINTER_IS_VALID(zp)
+	    || !zp->z_sa_hdl
+	    || !zp->z_zfsvfs) {
 		if (!(flags & UPL_NOCOMMIT))
 			ubc_upl_abort(upl,
 			    (UPL_ABORT_DUMP_PAGES|UPL_ABORT_FREE_ON_EMPTY));
@@ -3040,6 +3053,9 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	}
 
 	zfsvfs = zp->z_zfsvfs;
+	ZFS_ENTER_NOERROR(zfsvfs);
+
+	zp->z_in_pager_op++;
 
 	dprintf("+vnop_pageout: off 0x%llx len 0x%lx upl_off 0x%lx: "
 	    "blksz 0x%x, z_size 0x%llx\n", off, len, upl_offset, zp->z_blksz,
@@ -3072,7 +3088,11 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	int retval =  zfs_pageout(zfsvfs, zp, upl, upl_offset, ap->a_f_offset,
 	    len, flags, B_TRUE, B_FALSE, B_TRUE);
 
+	zp->z_in_pager_op--;
+	ASSERT3S(zp->z_in_pager_op, >=, 0);
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
+
+	ZFS_EXIT(zfsvfs);
 
 	return (retval);
 }
@@ -3746,6 +3766,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
+	zp->z_in_pager_op++;
+
 	extern void IOSleep(unsigned milliseconds); // yields thread
 	extern void IODelay(unsigned microseconds); // x86_64 rep nop
 
@@ -3756,12 +3778,16 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 */
 	if (upl) {
 		printf("ZFS: Relaying vnop_pageoutv2 to vnop_pageout\n");
-		return zfs_vnop_pageout(ap);
+		zp->z_in_pager_op--;
+		ASSERT3S(zp->z_in_pager_op, >=, 0);
+		return (zfs_vnop_pageout(ap));
 	}
 
 	/* Short-circuit ZFS_ENTER_NOERROR */
 	if (!zp || !zp->z_zfsvfs || !zp->z_sa_hdl) {
 		printf("ZFS: vnop_pageout: null zp or zfsvfs\n");
+		zp->z_in_pager_op--;
+		ASSERT3S(zp->z_in_pager_op, >=, 0);
 		return (ENXIO);
 	}
 
@@ -3775,16 +3801,16 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * threads to block on vfs activities.
 	 */
 	if (zp && zp->z_sa_hdl &&
-	    (rw_write_held(&zp->z_map_lock) || zp->z_in_pager_op == 0)) {
+	    (rw_write_held(&zp->z_map_lock) || zp->z_in_pager_op == 1)) {
 		/* no collision, or we are re-entering, but whine about underflow */
-		if (zp->z_in_pager_op != 0)
-			printf("ZFS: %s:%d expected 0 in_pager_op see %d (lock held? %d) file %s\n",
+		if (zp->z_in_pager_op != 1)
+			printf("ZFS: %s:%d expected 1 in_pager_op see %d (lock held? %d) file %s\n",
 			    __func__, __LINE__, zp->z_in_pager_op,
 			    rw_write_held(&zp->z_map_lock), zp->z_name_cache);
 	} else {
 		if (zp) {
 			ASSERT3P(zp->z_sa_hdl, !=, NULL);
-			ASSERT0(zp->z_in_pager_op);
+			ASSERT3S(zp->z_in_pager_op, ==, 1);
 		}
 		if (zp && zp->z_sa_hdl && !rw_write_held(&zp->z_map_lock) && tsd_get(rl_key) == NULL) {
 			/*
@@ -3805,7 +3831,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		boolean_t lock_got = B_FALSE;
 		while (zp && zp->z_sa_hdl
 		    && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted
-		    && zp->z_in_pager_op > 0
+		    && zp->z_in_pager_op > 1
 		    && !rw_write_held(&zp->z_map_lock)) {
 			extern void IOSleep(unsigned milliseconds);
 			IOSleep(1);
@@ -5113,6 +5139,8 @@ skip_lock_acquisition:
 	ZFS_EXIT(zfsvfs);
 	if (error != 0)
 		VNOPS_OSX_STAT_BUMP(pageoutv2_error);
+	zp->z_in_pager_op--;
+	ASSERT3S(zp->z_in_pager_op, >=, 0);
 	return (error);
 
 pageout_done:
@@ -5169,6 +5197,8 @@ exit_abort:
 
 	if (zfsvfs)
 		ZFS_EXIT(zfsvfs);
+	zp->z_in_pager_op--;
+	ASSERT3S(zp->z_in_pager_op, >=, 0);
 	return (error);
 }
 
