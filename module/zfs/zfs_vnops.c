@@ -2213,6 +2213,8 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	int ccupl_ioresid = recov_resid_int;
 
 	/* do the magic */
+	ASSERT3U(zp->z_size, >=, recov_off_page_offset + recov_resid_int);
+	ASSERT3U(ubc_getsize(vp), >=, recov_off_page_offset + recov_resid_int);
 	int ccupl_retval = cluster_copy_upl_data(uio, mupl,
 		    recov_off_page_offset, &ccupl_ioresid);
 
