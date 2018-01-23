@@ -2416,7 +2416,17 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		/* here we do the magic */
 		ASSERT3U(zp->z_size, >=, uio_offset(uio) + xfer_resid);
 		ASSERT3U(ubc_getsize(vp), >=, uio_offset(uio) + xfer_resid);
+		if (zp->z_in_pager_op) {
+			printf("ZFS: %s:%d: see z_in_pager_op %d before cluster copy"
+			    " mmapped? %d writeable? %d our range [%lld..%lld] fs %s file %s\n",
+			    __func__, __LINE__, zp->z_in_pager_op,
+			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
+			    uio_offset(uio), uio_offset(uio) + xfer_resid,
+			    fsname, fname);
+		}
+
 		int cluster_copy_error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+
 		ASSERT0(cluster_copy_error);
 
 		if (!error && cluster_copy_error)
