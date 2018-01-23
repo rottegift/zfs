@@ -2333,7 +2333,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * so as to save some work under memory_object_lock_request, and below as well
 	 */
 	if (ubc_getsize(vp) < round_page_64(zp->z_size)) {
-		printf("ZFS: %s:%d: bumping ubc size from %llu to rounded-up z_size (%llu->%llu)"
+		dprintf("ZFS: %s:%d: bumping ubc size from %llu to rounded-up z_size (%llu->%llu)"
 		    " (trunc end: %llu) fs %s file %s\n",
 		    __func__, __LINE__, ubc_getsize(vp),
 		    zp->z_size, round_page_64(zp->z_size),
@@ -2478,11 +2478,14 @@ zfs_trunc(znode_t *zp, uint64_t end)
 				const off_t unchopped = ubc_getsize(vp);
 				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
 				/* this for loop is the core of a new zfs_ubc_setsize */
-				for (off_t tail =
+				for (uint32_t rounds = 0; off_t tail =
 					 (ubc_getsize(vp) & PAGE_MASK_64)
 					 ? ubc_getsize(vp)
 					 : MAX(ubc_getsize(vp) - PAGE_SIZE_64, round_page_64(end));
 				     tail > round_page_64(end); ) {
+					/* every 1 MiB cleared, yield */
+					if ((rounds % 256) == 0)
+						kpreempt(KPREEMPT_SYNC);
 					const off_t chopat = trunc_page_64(tail);
 					int chopflags = 0;
 					const int chop_pg_pop_retval = ubc_page_op(vp, chopat,
@@ -2522,6 +2525,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 							    chopat, ubc_getsize(vp), end, zp->z_size,
 							    fsname, fname, zp->z_in_pager_op);
 							setsize_trim_pages = B_FALSE;
+							kpreempt(KPREEMPT_SYNC);
 							break;
 						} else {
 							if (zp->z_size > chopat) zp->z_size = chopat;
@@ -2533,6 +2537,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 						    __func__, __LINE__, iter,
 						    ubc_getsize(vp), end, chopat, zp->z_size,
 						    fsname, fname);
+						kpreempt(KPREEMPT_SYNC);
 						break;
 					}
 					const off_t tusize = trunc_page_64(ubc_getsize(vp));
