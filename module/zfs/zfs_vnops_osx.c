@@ -5287,8 +5287,28 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		}
 	}
 
+        rl_type_t rltype = (a_flags & PROT_WRITE) ? RL_WRITER : RL_READER;
+	rl_t *rl = zfs_try_range_lock(zp, 0, UINT64_MAX, rltype);
+	if (rl == NULL) {
+		printf("ZFS: %s:%d: waiting for %s lock for file %s (z_in_pager_op %d)\n",
+		    __func__, __LINE__,
+		    (rltype == RL_WRITER) ? "RL_WRITER" : "RL_READER",
+		    zp->z_name_cache, zp->z_in_pager_op);
+		rl = zfs_range_lock(zp, 0, UINT64_MAX, rltype);
+	}
+	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+	uint64_t tries = z_map_rw_lock(zp, &need_release,
+	    &need_upgrade, __func__, __LINE__);
+
 	if (!spl_ubc_is_mapped(vp, NULL))
 		VNOPS_OSX_STAT_BUMP(mmap_file_first_mmapped);
+
+	z_map_drop_lock(zp, &need_release, &need_upgrade);
+	zfs_range_unlock(rl);
+	if (tries > 2) {
+		printf("ZFS: %s:%d: contention (tries %llu) on file %s\n",
+		    __func__, __LINE__, zp->z_name_cache);
+	}
 
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
