@@ -2240,6 +2240,21 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 
 	int poflags = (ioflags & IO_SYNC) ? UPL_IOSYNC : 0;
 
+	if (!dmu_write_is_safe(zp, upl_f_off, upl_f_off + PAGE_SIZE_64)) {
+		printf("ZFS: %s:%d: taking pageoutv2 route because of write safety issue"
+		    " zsize %llu z_blksz %u page offset %llu in file %s\n",
+		    __func__, __LINE__, zp->z_size, zp->z_blksz,
+		    upl_f_off, zp->z_name_cache);
+		struct vnop_pageout_args ap = {
+			.a_vp = vp,
+			.a_pl = NULL,
+			.a_f_offset = upl_f_off,
+			.a_size = PAGE_SIZE,
+			.a_context = NULL,
+		};
+		return(zfs_vnop_pageoutv2(&ap));
+	}
+
 	return (zfs_pageout(zfsvfs, zp, mupl, 0, upl_f_off, PAGE_SIZE, poflags,
 		B_FALSE, B_FALSE, B_FALSE));
 }
