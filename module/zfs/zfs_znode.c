@@ -89,6 +89,7 @@ typedef struct znode_stats {
 	kstat_named_t trunc_only_bytes;
 	kstat_named_t trunc_only_page;
 	kstat_named_t trunc_tail;
+	kstat_named_t trunc_to_zero;
 	kstat_named_t zfs_trunc_skip_shrink;
 	kstat_named_t rezget_setsize;
 	kstat_named_t rezget_setsize_shrink;
@@ -106,6 +107,7 @@ static znode_stats_t znode_stats = {
 	{"trunc_setsize_only_bytes",			KSTAT_DATA_UINT64 },
 	{"trunc_setsize_only_page",			KSTAT_DATA_UINT64 },
 	{"trunc_tail_setsize",				KSTAT_DATA_UINT64 },
+	{"trunc_to_zero",				KSTAT_DATA_UINT64 },
 	{"zfs_trunc_skip_shrink",			KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize",				KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize_shrink",			KSTAT_DATA_UINT64 },
@@ -2271,6 +2273,16 @@ zfs_trunc_tail_ubc_setsize(struct vnode *vp, off_t end)
 	return(ubc_setsize(vp, end));
 }
 
+noinline int
+zfs_trunc_to_zero_ubcsize(struct vnode *vp)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	ZNODE_STAT_BUMP(trunc_to_zero);
+	return(ubc_setsize(vp, 0));
+}
+
+
 static int
 zfs_trunc(znode_t *zp, uint64_t end)
 {
@@ -2363,6 +2375,18 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	int setsize_retval = 0;
 	extern void IOSleep(unsigned milliseconds);
 
+	/* shortcut for truncating to zero */
+	if (end == 0) {
+		int zeroretval = zfs_trunc_to_zero_ubcsize(vp);
+		if (zeroretval == 0) { // TRUE on success
+			printf("ZFS: %s:%d error %d truncating file to zero, proceeding to loop"
+			    " zsize %llu usize %llu fs %s file %s\n", __func__, __LINE__,
+			    error, zp->z_size, ubc_getsize(vp), fsname, fname);
+		} else {
+			goto ubc_cleaned;
+		}
+	}
+
 	/*
 	 * loop until we have set ubcsize to end (or smaller)
 	 *
@@ -2432,7 +2456,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					printf("ZFS: %s:%d: cleaned after pass %d fs %s file %s (skip_shrink %d)\n",
 					    __func__, __LINE__, i, fsname, fname, skip_shrink);
 				}
-				if (zp->z_size > round_page_64(end)) zp->z_size = round_page_64(end);
+				if (zp->z_size < round_page_64(end)) zp->z_size = round_page_64(end);
 				break;
 			}
 			IOSleep(1);
@@ -2528,7 +2552,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 							kpreempt(KPREEMPT_SYNC);
 							break;
 						} else {
-							if (zp->z_size > chopat) zp->z_size = chopat;
+							if (zp->z_size < chopat) zp->z_size = chopat;
 						}
 					} else if (ubc_getsize(vp) <= end) {
 						printf("ZFS: %s:%d: (iter %d) surprisingly"
@@ -2595,7 +2619,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 						.a_context = NULL,
 					};
 
-					zp->z_size = round_page_64(end);
+					if (zp->z_size < round_page_64(end))
+						zp->z_size = round_page_64(end);
 					int pageout_err = zfs_vnop_pageoutv2(&ap);
 					ASSERT0(pageout_err);
 					int popflags = 0;
@@ -2625,7 +2650,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 						.a_context = NULL,
 					};
 
-					zp->z_size = round_page_64(end);
+					if (zp->z_size < round_page_64(end))
+						zp->z_size = round_page_64(end);
 					int pageout_err = zfs_vnop_pageoutv2(&ap);
 					ASSERT0(pageout_err);
 					int popflags = 0;
@@ -2639,7 +2665,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					}
 					ZNODE_STAT_BUMP(trunc_cleaned_only_page);
 					setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
-					zp->z_size = trunc_page_64(end);
+					zp->z_size = end;
 				}
 			}  else if ((end & PAGE_MASK_64) != 0) {
 				setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
@@ -2676,6 +2702,8 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			IOSleep(100);
 		}
 	} // for ubcsize > end
+
+ubc_cleaned:
 
 	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
 	if (error) {
