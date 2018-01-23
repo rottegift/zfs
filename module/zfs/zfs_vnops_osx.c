@@ -3321,7 +3321,7 @@ start_tx:
 	if (tx_pass == 0 || dmu_write_is_safe(zp, f_offset, write_size)) {
 		dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
 	} else {
-		dmu_tx_hold_write(tx, zp->z_id, 0, write_size);
+		dmu_tx_hold_write(tx, zp->z_id, 0, f_offset + write_size);
 	}
 	zfs_sa_upgrade_txholds(tx, zp);
 	error = dmu_tx_assign(tx, TXG_WAIT);

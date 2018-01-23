@@ -1937,8 +1937,8 @@ out:
 	return (error);
 }
 
-
-int
+#if 0
+static int
 zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 {
 	vnode_t *vp = ZTOV(zp);
@@ -2083,6 +2083,7 @@ zfs_write_possibly_msync(znode_t *zp, off_t woff, off_t start_resid, int ioflag)
 	}
 	return (error);
 }
+#endif
 
 int
 zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl, int ioflags)
@@ -2116,7 +2117,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			    __func__, __LINE__, woff, start_resid,
 			    zp->z_blksz, zp->z_size,
 			    ubc_getsize(vp), zp->z_name_cache);
-			dmu_tx_hold_write(tx, zp->z_id, 0, start_resid);
+			dmu_tx_hold_write(tx, zp->z_id, 0, end);
 		}
 		zfs_sa_upgrade_txholds(tx, zp);
 		error = dmu_tx_assign(tx, TXG_WAIT);
@@ -2815,6 +2816,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		return (SET_ERROR(EINVAL));
 	}
 
+#if 0
 	if (vnode_isreg(vp) && (ioflag & FAPPEND) == 0) {
 		error = zfs_write_possibly_msync(zp, woff, start_resid, ioflag);
 		if (error) {
@@ -2824,6 +2826,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 			return (error);
 		}
 	}
+#endif
 
 	/*
 	 * The range lock principally protects us against
