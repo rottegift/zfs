@@ -3077,6 +3077,46 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	return (retval);
 }
 
+#include <sys/dsl_dataset.h>
+
+static off_t
+safe_write_amount(znode_t *zp, off_t offset, off_t length)
+{
+	dmu_buf_impl_t *db = (dmu_buf_impl_t *)sa_get_db(zp->z_sa_hdl);
+	dnode_t        *dn;
+
+	off_t safe_len = 0;
+
+	DB_DNODE_ENTER(db);
+	dn = DB_DNODE(db);
+	rw_enter(&dn->dn_struct_rwlock, RW_READER);
+
+	if (!dn->dn_datablkshift && offset + length > dn->dn_datablksz) {
+		ASSERT3S(dn->dn_datablksz, ==, zp->z_blksz);
+		const off_t blksz = dn->dn_datablksz;
+		const off_t tgt = offset + length;
+		ASSERT3U(tgt, <=, blksz);
+		const off_t diff = blksz - tgt;
+		printf("ZFS: %s:%d: would access past end of object"
+		    " (hex objset/object) %llx/%llx (datablk size=%u access=%llu+%llu),"
+		    " so proposing diff ((%llu)), z_id %llx z_size %llu file %s\n",
+		    __func__, __LINE__,
+		    (longlong_t)dn->dn_objset->os_dsl_dataset->ds_object,
+		    (longlong_t)dn->dn_object, dn->dn_datablksz,
+		    (longlong_t)offset, (longlong_t)length,
+		    diff,
+		    zp->z_id, zp->z_size, zp->z_name_cache);
+		safe_len = diff;
+	} else {
+		safe_len = length;
+	}
+
+	rw_exit(&dn->dn_struct_rwlock);
+	DB_DNODE_EXIT(db);
+
+	return (safe_len);
+}
+
 static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const upl_offset_t upl_offset, const off_t f_offset, const int size,
@@ -3307,10 +3347,12 @@ start_tx:
 	}
 
 	if (!dmu_write_is_safe(zp, f_offset, f_offset + write_size)) {
-		printf("ZFS: %s:%d: write safety problem [%lld, %lld] z_blksz %d"
-		    " zsize %llu file %s\n",
-		    __func__, __LINE__, f_offset, f_offset + write_size,
-		    zp->z_blksz, zp->z_size, zp->z_name_cache);
+		printf("ZFS: %s:%d: write safety problem [%llu, %llu] (sz %llu) z_blksz %d"
+		    " zsize %llu diff %llu file %s\n",
+		    __func__, __LINE__, f_offset, f_offset + write_size, write_size,
+		    zp->z_blksz, zp->z_size,
+		    safe_write_amount(zp, f_offset, write_size),
+		    zp->z_name_cache);
 		uint64_t new_blksz = 0;
                 const int max_blksz = zfsvfs->z_max_blksz;
                 if (zp->z_blksz > max_blksz) {
@@ -3346,9 +3388,10 @@ start_tx:
 			}
 			if (!dmu_write_is_safe(zp, f_offset, f_offset + write_size)) {
 				printf("ZFS: %s:%d: (pass %d) and still unsafe, failing IO"
-				    " [%llu-%llu] (sz %llu) file %s\n",
+				    " [%llu-%llu] (sz %llu) diff %llu file %s\n",
 				    __func__, __LINE__, tx_pass,
 				    f_offset, f_offset + write_size, write_size,
+				    safe_write_amount(zp, f_offset, write_size),
 				    zp->z_name_cache);
 				zio_data_buf_free(safebuf, write_size);
 				if (unmap) {
