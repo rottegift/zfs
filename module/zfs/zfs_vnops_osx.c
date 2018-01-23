@@ -3095,16 +3095,16 @@ safe_write_amount(znode_t *zp, off_t offset, off_t length)
 		ASSERT3S(dn->dn_datablksz, ==, zp->z_blksz);
 		const off_t blksz = dn->dn_datablksz;
 		const off_t tgt = offset + length;
-		ASSERT3U(tgt, <=, blksz);
-		const off_t diff = blksz - tgt;
+		ASSERT3U(tgt, >, blksz);
+		const off_t diff = tgt - blksz;
 		printf("ZFS: %s:%d: would access past end of object"
 		    " (hex objset/object) %llx/%llx (datablk size=%u access=%llu+%llu),"
-		    " so proposing diff ((%llu)), z_id %llx z_size %llu file %s\n",
+		    " so proposing/returning ((%llu)), z_id %llx z_size %llu file %s\n",
 		    __func__, __LINE__,
 		    (longlong_t)dn->dn_objset->os_dsl_dataset->ds_object,
 		    (longlong_t)dn->dn_object, dn->dn_datablksz,
 		    (longlong_t)offset, (longlong_t)length,
-		    diff,
+		    (longlong_t)diff,
 		    zp->z_id, zp->z_size, zp->z_name_cache);
 		safe_len = diff;
 	} else {
