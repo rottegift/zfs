@@ -4429,7 +4429,7 @@ already_acquired_locks:
 			dmu_tx_t *tx = dmu_tx_create(zfsvfs->z_os);
 			dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 			zfs_sa_upgrade_txholds(tx, zp);
-			dmu_tx_hold_write(tx, zp->z_id, ap->a_f_offset, ap->a_size);
+			dmu_tx_hold_write(tx, zp->z_id, 0, ap->a_f_offset + ap->a_size);
 			error = dmu_tx_assign(tx, TXG_WAIT);
 			ASSERT3S(error, ==, 0);
 			if (error != 0) {
