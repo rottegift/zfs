@@ -4859,8 +4859,9 @@ skip_lock_acquisition:
 					printf("ZFS: %s:%d: ERROR %d committing (precious) UPL range"
 					    " [%lld, %lld] (%lld pages) of UPL (0..%lld..%ld) at"
 					    " [%lld..%lld] fs %s file %s (mapped %d)"
-					    " zsize %llu usize %llu) (zholder %s"
-					    " rlholder %s %d rlocks %d)\n",
+					    " zsize %llu usize %llu) (rw held? %d zholder %s"
+					    " rlholder %s %d rlocks %d) (ismapped %d ismappedwrite %d)"
+					    " (flags & UPL_MSYNC? %d)\n",
 					    __func__, __LINE__,
 					    commit_precious_ret,
 					    start_of_range, end_of_range, pages_in_range,
@@ -4868,13 +4869,17 @@ skip_lock_acquisition:
 					    f_start_of_upl, f_end_of_upl,
 					    fsname, fname, mapped,
 					    zp->z_size, ubc_getsize(vp),
+					    rw_write_held(&zp->z_map_lock),
 					    (zp->z_map_lock_holder != NULL)
 					    ? zp->z_map_lock_holder
 					    : "(null)",
 					    (rl && rl->r_caller != NULL)
 					    ? rl->r_caller
 					    : "(null)",
-					    (rl) ? rl->r_line : 0, zp->z_range_locks);
+					    (rl) ? rl->r_line : 0, zp->z_range_locks,
+					    spl_ubc_is_mapped(vp, NULL),
+					    spl_ubc_is_mapped_writable(vp),
+					    ap->a_flags & UPL_MSYNC);
 					xxxbleat = B_TRUE;
 					pg_index = page_past_end_of_range;
 					continue;
