@@ -2478,7 +2478,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 				const off_t unchopped = ubc_getsize(vp);
 				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
 				/* this for loop is the core of a new zfs_ubc_setsize */
-				for (uint32_t rounds = 0; off_t tail =
+				for (off_t rounds = 0, tail =
 					 (ubc_getsize(vp) & PAGE_MASK_64)
 					 ? ubc_getsize(vp)
 					 : MAX(ubc_getsize(vp) - PAGE_SIZE_64, round_page_64(end));

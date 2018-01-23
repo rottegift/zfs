@@ -4874,7 +4874,7 @@ skip_lock_acquisition:
 					    (rl && rl->r_caller != NULL)
 					    ? rl->r_caller
 					    : "(null)",
-					    (rl) ? rl->r_line : 0, zp-z_range_locks);
+					    (rl) ? rl->r_line : 0, zp->z_range_locks);
 					xxxbleat = B_TRUE;
 					pg_index = page_past_end_of_range;
 					continue;
@@ -5287,7 +5287,9 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		}
 	}
 
-        rl_type_t rltype = (a_fflags & VM_PROT_WRITE) ? RL_WRITER : RL_READER;
+        const rl_type_t rltype = (ISSET(ap->a_fflags, VM_PROT_WRITE))
+	    ? RL_WRITER
+	    : RL_READER;
 	rl_t *rl = zfs_try_range_lock(zp, 0, UINT64_MAX, rltype);
 	if (rl == NULL) {
 		printf("ZFS: %s:%d: waiting for %s lock for file %s (z_in_pager_op %d)\n",
