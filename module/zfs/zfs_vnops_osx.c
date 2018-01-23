@@ -4870,11 +4870,11 @@ skip_lock_acquisition:
 					    zp->z_size, ubc_getsize(vp),
 					    (zp->z_map_lock_holder != NULL)
 					    ? zp->z_map_lock_holder
-					    : "(null)", zp->z_range_locks,
+					    : "(null)",
 					    (rl && rl->r_caller != NULL)
 					    ? rl->r_caller
 					    : "(null)",
-					    (rl) ? rl->r_line : 0);
+					    (rl) ? rl->r_line : 0, zp-z_range_locks);
 					xxxbleat = B_TRUE;
 					pg_index = page_past_end_of_range;
 					continue;
@@ -5287,7 +5287,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 		}
 	}
 
-        rl_type_t rltype = (a_flags & PROT_WRITE) ? RL_WRITER : RL_READER;
+        rl_type_t rltype = (a_fflags & VM_PROT_WRITE) ? RL_WRITER : RL_READER;
 	rl_t *rl = zfs_try_range_lock(zp, 0, UINT64_MAX, rltype);
 	if (rl == NULL) {
 		printf("ZFS: %s:%d: waiting for %s lock for file %s (z_in_pager_op %d)\n",
@@ -5307,7 +5307,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 	zfs_range_unlock(rl);
 	if (tries > 2) {
 		printf("ZFS: %s:%d: contention (tries %llu) on file %s\n",
-		    __func__, __LINE__, zp->z_name_cache);
+		    __func__, __LINE__, tries, zp->z_name_cache);
 	}
 
 	VNOPS_OSX_STAT_BUMP(mmap_calls);
