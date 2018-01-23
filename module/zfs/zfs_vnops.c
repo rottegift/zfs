@@ -2339,52 +2339,58 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		/* clean any dirty pages */
 
+
 		ASSERT0(vnode_isrecycled(vp));
-		off_t msync_resid = 0;
-		ASSERT3U(rl->r_off, <=, this_off);
-		ASSERT3U(rl->r_off + rl->r_len, >=, this_off + this_chunk);
-		int msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
-		if (msync_err) {
-			printf("ZFS: %s:%d: error cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
-			    __func__, __LINE__, this_off, this_off + this_chunk, msync_resid, fname, fsname);
-		}
 
-		/* fill any holes */
-		int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, FILL_FOR_WRITE);
-		if (fill_err) {
-			printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
-			    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
-		}
-
-		ASSERT3S(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
 		int xfer_resid = (int) this_chunk;
 
-		const off_t rstart = uio_offset(uio);
-		const off_t rend = uio_offset(uio) + xfer_resid;
-
-		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
-		int t_errs = zfs_ubc_range_all_flags(zp, vp, rstart, rend,
-		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-
-		if (t_dirty > 0 || t_busy > 0) {
-			// interested most in case where busy > 0 and EOF ~ usize
-			ASSERT0(vnode_isrecycled(vp));
-			off_t resid_msync = 0;
-			int msync_retval = zfs_msync(zp, rl, rstart, rend, &resid_msync, UBC_PUSHALL);
-			printf("ZFS: %s:%d: WARNING (msync_retval %d, resid %lld)"
-			    " (t_errs %d) busy %d dirty %d precious %d absent %d pageout %d"
-			    " of %llu pages in range [%llu..%llu] (zsize %llu usize %llu)"
-			    " of fs %s file %s before cluster copy\n",
-			    __func__, __LINE__, msync_retval, resid_msync,
-			    t_errs, t_busy, t_dirty, t_precious, t_absent, t_pageout,
-			    howmany(rend - rstart, PAGE_SIZE_64),
-			    rstart, rend, zp->z_size, ubc_getsize(vp),
-			    fsname, fname);
-			msync_resid = 0;
-			msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
+		if ((ioflag & FAPPEND) == 0) {
+			off_t msync_resid = 0;
+			ASSERT3U(rl->r_off, <=, this_off);
+			ASSERT3U(rl->r_off + rl->r_len, >=, this_off + this_chunk);
+			int msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
 			if (msync_err) {
-				printf("ZFS: %s:%d: error post-fill cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
+				printf("ZFS: %s:%d: error cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
 				    __func__, __LINE__, this_off, this_off + this_chunk, msync_resid, fname, fsname);
+			}
+
+			/* fill any holes */
+			int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, FILL_FOR_WRITE);
+			if (fill_err) {
+				printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
+				    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
+			}
+
+			ASSERT3S(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
+
+
+			const off_t rstart = uio_offset(uio);
+			const off_t rend = uio_offset(uio) + xfer_resid;
+
+			int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
+			int t_errs = zfs_ubc_range_all_flags(zp, vp, rstart, rend,
+			    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+
+			if (t_dirty > 0 || t_busy > 0) {
+				// interested most in case where busy > 0 and EOF ~ usize
+				ASSERT0(vnode_isrecycled(vp));
+				off_t resid_msync = 0;
+				int msync_retval = zfs_msync(zp, rl, rstart, rend, &resid_msync, UBC_PUSHALL);
+				printf("ZFS: %s:%d: WARNING (msync_retval %d, resid %lld)"
+				    " (t_errs %d) busy %d dirty %d precious %d absent %d pageout %d"
+				    " of %llu pages in range [%llu..%llu] (zsize %llu usize %llu)"
+				    " of fs %s file %s before cluster copy\n",
+				    __func__, __LINE__, msync_retval, resid_msync,
+				    t_errs, t_busy, t_dirty, t_precious, t_absent, t_pageout,
+				    howmany(rend - rstart, PAGE_SIZE_64),
+				    rstart, rend, zp->z_size, ubc_getsize(vp),
+				    fsname, fname);
+				msync_resid = 0;
+				msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
+				if (msync_err) {
+					printf("ZFS: %s:%d: error post-fill cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
+					    __func__, __LINE__, this_off, this_off + this_chunk, msync_resid, fname, fsname);
+				}
 			}
 		}
 
@@ -2902,11 +2908,11 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		ASSERT3U(rl->r_off, ==, 0);
 		const off_t new_filesize = zp->z_size + uio_resid(uio);
 		printf("ZFS: %s:%d: full file lock (%llu, %llu) obtained, bumping"
-		    " woff %llu and uio_offset %llu and usize %llu to zsize %llu"
-		    " and bumping zsize to %llu (includes uio_resid %llu)"
+		    " woff %llu and uio_offset %llu to zsize %llu"
+		    " and bumping usize (%llu) and zsize to %llu (includes uio_resid %llu)"
 		    " for fs %s file %s\n", __func__, __LINE__,
 		    rl->r_off, rl->r_len, woff, uio_offset(uio),
-		    ubc_getsize(vp), zp->z_size,
+		    zp->z_size, ubc_getsize(vp),
 		    new_filesize, uio_resid(uio), fsname, fname);
 		woff = zp->z_size;
 		uio_setoffset(uio, woff);
@@ -2916,8 +2922,12 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		}
 		ASSERT3U(woff, ==, zp->z_size);
 		zp->z_size = new_filesize;
+		if (ubc_getsize(vp) < new_filesize) {
+			int setsize_retval = ubc_setsize(vp, new_filesize);
+			ASSERT3U(setsize_retval, !=, 0); // TRUE on success
+		}
 		ASSERT3U(woff, ==, uio_offset(uio));
-		ASSERT3U(ubc_getsize(vp), ==, woff + uio_resid(uio));
+		ASSERT3U(ubc_getsize(vp), ==, new_filesize);
 		ASSERT3U(zp->z_size, ==, woff + uio_resid(uio));
 		/* This range is reduced in zfs_write_maybe_extend_file */
 	} else {
