@@ -1883,7 +1883,7 @@ zfs_write_isreg_safe_write_amount(znode_t *zp, off_t offset, int length,
 		ASSERT3U(tgt, >, blksz);
 		const off_t diff = tgt - blksz;
 		printf("ZFS: %s:%d: would access past end of object"
-		    " (hex objset/object) %llx/%llx (datablk size=%u access=%llu+%llu),"
+		    " (decimal objset/object) %llu/%llu (datablk size=%u access=%llu+%llu),"
 		    " so proposing/returning ((%llu)),"
 		    " z_id %llx z_size %llu fs %s file %s\n",
 		    __func__, __LINE__,
