@@ -5030,10 +5030,17 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	// msync conditionally
 	if (zil_commit_only == B_FALSE || allow_new_msync == B_TRUE) {
-		if (rl && rw_lock_held(&zp->z_map_lock)) {
+		if (rl
+		    && rw_lock_held(&zp->z_map_lock)
+		    && tsd_get(rl_key_vp_from_getvnode) == NULL) {
 			retval = zfs_msync(zp, rl, 0, ubc_getsize(vp), &resid_off, UBC_PUSHALL | ZFS_MSYNC_RECYCLED_OK);
 			VNOPS_STAT_BUMP(zfs_fsync_ubc_msync_new);
 		} else {
+			/*
+			 * this is almost certainly because we have an rl_key_vp_from_getvnode
+			 * we don't want to msync in this case because it does a lot of useless
+			 * work, producing a lot of distracting logspam
+			 */
 			retval = 0;
 			VNOPS_STAT_BUMP(zfs_fsync_ubc_msync_averted);
 		}
