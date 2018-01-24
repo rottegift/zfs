@@ -1699,10 +1699,14 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	ASSERT0(aligned_lock_len & PAGE_MASK_64);
 	ASSERT3U(aligned_lock_len, >=, uio_resid(uio));
 
+#if 0
 	rl_type_t rlocktype = (zp->z_size == ubc_getsize(vp)
 	    && ubc_getsize(vp) > aligned_lock_end)
 	    ? RL_READER
 	    : RL_WRITER;
+#else
+	rl_type_t rlocktype = RL_READER;
+#endif
 
 	rl = zfs_try_range_lock(zp, trunc_page_64(uio_offset(uio)), aligned_lock_len, rlocktype);
 
@@ -1726,7 +1730,11 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		    uio_offset(uio), uio_resid(uio),
 		    fsname, fname, zp->z_range_locks);
 
+#if 0
 		rlocktype = RL_WRITER;
+#else
+		rlocktype = RL_READER;
+#endif
 
 		rl = zfs_range_lock(zp, trunc_page_64(uio_offset(uio)),
 		    round_page_64(uio_resid(uio) + PAGE_SIZE_64), rlocktype);
