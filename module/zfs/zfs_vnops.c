@@ -2468,7 +2468,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 		int cluster_copy_error = 0;
 
-		if (!dmu_write_is_safe(zp, uio_offset(uio), uio_offset(uio) + xfer_resid)) {
+		if (dmu_write_is_safe(zp, uio_offset(uio), uio_offset(uio) + xfer_resid)) {
 			    /* do the magic safely */
 			    cluster_copy_error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
 		} else {
