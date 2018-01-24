@@ -1301,7 +1301,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			ASSERT3S(umapretval, ==, KERN_SUCCESS);
 			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
 			ASSERT3S(abortall, ==, KERN_SUCCESS);
-			return (0);
+			return (EIO);
 		}
 		if (upl_dirty_page(pl, pg_index)) {
 			/*
