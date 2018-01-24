@@ -1198,7 +1198,7 @@ ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte)
 }
 
 
-static int
+int
 zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
     __unused const int mark_dirty, const off_t upl_file_offset, const size_t upl_size,
     rl_t *rl)
@@ -1234,28 +1234,10 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
 	if (upl_file_offset > ubc_getsize(vp)) {
 		ASSERT(rw_write_held(&zp->z_map_lock));
-#if 0
-		if (rl->r_type == RL_WRITER) {
-			printf("ZFS: %s:%d: boosting ubc size %llu to UPL end %llu (zsize %llu) fs %s file %s\n",
-			    __func__, __LINE__, ubc_getsize(vp), upl_file_offset + upl_size,
-			    zp->z_size, fsname, fname);
-			int setsize_retval = ubc_setsize(vp, upl_file_offset + upl_size);
-			if (setsize_retval == 0) { // ubc_setsize returns TRUE on success
-				printf("ZFS: %s:%d: ubc_setsize(vp, %lld) failed for fs %s file %s\n",
-				    __func__, __LINE__, zp->z_size, fsname, fname);
-			}
-		} else {
-			printf("ZFS: %s:%d: WARNING ubc size %llu is less than upl end %llu"
-			    " zsise %llu and we do not have RL_WRITER exclusivity fs %s file %s\n",
-			    __func__, __LINE__, ubc_getsize(vp),
-			    upl_file_offset + upl_size, zp->z_size, fsname, fname);
-		}
-#else
 		printf("ZFS: %s:%d: UPL start %llu (len %lu) outside of ubc size %llu (zsize %llu)"
 		    " locktype %d fs %s file %s\n", __func__, __LINE__,
 		    upl_file_offset, upl_size, ubc_getsize(vp), zp->z_size,
 		    rl->r_type, fsname, fname);
-#endif
 	}
 
 	const hrtime_t t_start = gethrtime();
@@ -1308,22 +1290,28 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			 * (pagein), which we do not want to do in this
 			 * context
 			 */
-			printf("ZFS: %s:%d WARNING non-valid page at index %d of %d"
+			printf("ZFS: %s:%d DOUBLE WARNING (returning short read) non-valid page"
+			    " at index %d of %d"
 			    " (resid %d, uio_resid %lld,"
-			    " *bytes_to_copy %d), upl foff %lld sz %ld fs %s file %s\n",
+			    " *bytes_to_copy %d), upl foff %lld sz %ld zid %lld fs %s file %s\n",
 			    __func__, __LINE__,
 			    pg_index, upl_num_pgs, resid, uio_resid(uio), *bytes_to_copy,
-			    upl_file_offset, upl_size, fsname, fname);
+			    upl_file_offset, upl_size, zp->z_id, fsname, fname);
+			int umapretval = ubc_upl_unmap(upl);
+			ASSERT3S(umapretval, ==, KERN_SUCCESS);
+			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+			ASSERT3S(abortall, ==, KERN_SUCCESS);
+			return (0);
 		}
 		if (upl_dirty_page(pl, pg_index)) {
 			/*
 			 * it is OK to read this page, because it is already valid;
 			 * we do not change its dirty/busy state with our abort below
 			 */
-			dprintf("ZFS: %s:%d: WARNING dirty page at index %d (resid %d, uio_resid %lld)"
-			    "uiooff %lld upl foff %lld sz %ld fs %s file %s\n",
+			printf("ZFS: %s:%d: WARNING dirty page at index %d (resid %d, uio_resid %lld)"
+			    "uiooff %lld upl foff %lld sz %ld zid %lld fs %s file %s\n",
 			    __func__, __LINE__, pg_index, resid, uio_resid(uio), uio_offset(uio),
-			    upl_file_offset, upl_size, fsname, fname);
+			    upl_file_offset, upl_size, zp->z_id, fsname, fname);
 		}
 
 		uio_setrw(uio, UIO_READ);
@@ -2251,10 +2239,11 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 	int poflags = (ioflags & IO_SYNC) ? UPL_IOSYNC : 0;
 
 	if (!dmu_write_is_safe(zp, upl_f_off, upl_f_off + PAGE_SIZE_64)) {
+		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 		printf("ZFS: %s:%d: taking pageoutv2 route because of write safety issue"
-		    " zsize %llu z_blksz %u page offset %llu in file %s\n",
+		    " zsize %llu z_blksz %u page offset %llu in zid %lld fs %s file %s\n",
 		    __func__, __LINE__, zp->z_size, zp->z_blksz,
-		    upl_f_off, zp->z_name_cache);
+		    upl_f_off, zp->z_id, fsname, zp->z_name_cache);
 		struct vnop_pageout_args ap = {
 			.a_vp = vp,
 			.a_pl = NULL,
