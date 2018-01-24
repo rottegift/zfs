@@ -2218,6 +2218,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 
 		/* end the tx */
 		dmu_tx_commit(tx);
+		ASSERT(dmu_write_is_safe(zp, woff, end)); // should return error?
 	} else {
 		ASSERT(dmu_write_is_safe(zp, woff, end)); // should return error?
 	}
