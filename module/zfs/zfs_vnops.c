@@ -4817,7 +4817,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	const char *fname = zp->z_name_cache;
 
-
 	if (zfsvfs->z_unmounted || zfsvfs->z_is_unmounting) {
 		printf("ZFS: %s:%d: unmount(ed/ing) [%d/%d] zfsvfs for file %s\n", __func__, __LINE__,
 		    zfsvfs->z_unmounted, zfsvfs->z_is_unmounting, fname);
@@ -4865,7 +4864,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		return (EPERM);
 	}
 
-	if (!vnode_isreg(vp)) {
+	if (!vnode_isreg(vp) && tsd_get(rl_key_vp_from_getvnode) == NULL) {
 		dprintf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
 		    zp->z_name_cache);
 		zil_commit(zfsvfs->z_log, zp->z_id);
@@ -5003,9 +5002,19 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		zfs_range_unlock(rl);
 	}
 
-	if (do_zil_commit == B_TRUE && have_trl == B_FALSE) {
+	if (do_zil_commit == B_TRUE
+	    && have_trl == B_FALSE
+	    && tsd_get(rl_key_vp_from_getvnode) == NULL) {
 		VNOPS_STAT_BUMP(zfs_fsync_zil_commit_reg_vn);
 		zil_commit(zfsvfs->z_log, zp->z_id);
+	}
+	if (tsd_get(rl_key_vp_from_getvnode) != NULL
+	    && tsd_get(rl_key_vp_from_getvnode) != vp) {
+		printf("ZFS: %s:%d mismatched rl_key_vp_from_getvnode, but zil_commit"
+		    " avoided (do_zil_commit? %d have tsd rl? %d) for file %s\n",
+		    __func__, __LINE__,
+		    do_zil_commit, have_trl,
+		    zp->z_name_cache);
 	}
 	ZFS_EXIT(zfsvfs);
         return (retval);
