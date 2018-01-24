@@ -1859,6 +1859,49 @@ dmu_write_is_safe(znode_t *zp, off_t woff, off_t end_range)
 	return (is_safe);
 }
 
+/*
+ * Debugging
+ */
+#include <sys/dsl_dataset.h>
+static off_t
+zfs_write_isreg_safe_write_amount(znode_t *zp, off_t offset, int length,
+	const char *fsname)
+{
+	dmu_buf_impl_t *db = (dmu_buf_impl_t *)sa_get_db(zp->z_sa_hdl);
+	dnode_t        *dn;
+
+	off_t safe_len = 0;
+
+	DB_DNODE_ENTER(db);
+	dn = DB_DNODE(db);
+	rw_enter(&dn->dn_struct_rwlock, RW_READER);
+
+	if (!dn->dn_datablkshift && offset + length > dn->dn_datablksz) {
+		ASSERT3S(dn->dn_datablksz, ==, zp->z_blksz);
+		const off_t blksz = dn->dn_datablksz;
+		const off_t tgt = offset + length;
+		ASSERT3U(tgt, >, blksz);
+		const off_t diff = tgt - blksz;
+		printf("ZFS: %s:%d: would access past end of object"
+		    " (hex objset/object) %llx/%llx (datablk size=%u access=%llu+%llu),"
+		    " so proposing/returning ((%llu)),"
+		    " z_id %llx z_size %llu fs %s file %s\n",
+		    __func__, __LINE__,
+		    (longlong_t)dn->dn_objset->os_dsl_dataset->ds_object,
+		    (longlong_t)dn->dn_object, dn->dn_datablksz,
+		    (longlong_t)offset, (longlong_t)length,
+		    (longlong_t)diff,
+		    zp->z_id, zp->z_size, fsname, zp->z_name_cache);
+		safe_len = diff;
+	} else {
+		safe_len = length;
+	}
+
+	rw_exit(&dn->dn_struct_rwlock);
+	DB_DNODE_EXIT(db);
+
+	return (safe_len);
+}
 
 int
 dmu_write_wait_safe(znode_t *zp, off_t woff, off_t end_range)
@@ -2422,7 +2465,19 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			    fsname, fname);
 		}
 
-		int cluster_copy_error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+		int cluster_copy_error = 0;
+
+		if (!dmu_write_is_safe(zp, uio_offset(uio), uio_offset(uio) + xfer_resid)) {
+			    /* do the magic safely */
+			    cluster_copy_error = cluster_copy_ubc_data(vp, uio, &xfer_resid, 1);
+		} else {
+			printf("ZFS: %s:%d: dmu_write_is_safe returned false for [%llu..%llu] (sz %d)"
+			    " safe_write_amount %llu zid %llu fs %s file %s\n",
+			    __func__, __LINE__, uio_offset(uio), uio_offset(uio) + xfer_resid, xfer_resid,
+			    zfs_write_isreg_safe_write_amount(zp, uio_offset(uio), xfer_resid, fsname),
+			    zp->z_id, fsname, fname);
+			error = EIO;
+		}
 
 		ASSERT0(cluster_copy_error);
 
