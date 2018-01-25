@@ -2750,7 +2750,6 @@ zfs_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl, const vm_offset_t upl_offs
 
 	inc_z_in_pager_op(zp, fsname, fname);
 
-	ASSERT(vn_has_cached_data(ZTOV(zp)));
 	ASSERT(ubc_pages_resident(ZTOV(zp)));
 	/* ASSERT(zp->z_dbuf_held); */ /* field no longer present in znode. */
 
