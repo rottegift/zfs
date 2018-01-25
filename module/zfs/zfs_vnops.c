@@ -2843,10 +2843,6 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		    new_filesize, uio_resid(uio), fsname, fname);
 		woff = zp->z_size;
 		uio_setoffset(uio, woff);
-		if (new_filesize > ubc_getsize(vp)) {
-			int append_bump_setsize = ubc_setsize(vp, new_filesize);
-			ASSERT3S(append_bump_setsize, !=, 0); // 0 is success
-		}
 		ASSERT3U(woff, ==, zp->z_size);
 		ASSERT3U(woff, ==, ubc_getsize(vp));
 		ASSERT3U(woff, ==, uio_offset(uio));
