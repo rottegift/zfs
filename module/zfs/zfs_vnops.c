@@ -2847,10 +2847,10 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		ASSERT3U(woff, ==, zp->z_size);
 		ASSERT3U(woff, ==, ubc_getsize(vp));
 		ASSERT3U(woff, ==, uio_offset(uio));
-		int setsize_addone = ubc_setsize(vp, zp->z_size + 1ULL);
-		ASSERT3S(setsize_addone, !=, 0);
-		int setsize_backone = ubc_setsize(vp, zp->z_size);
-		ASSERT3S(setsize_backone, !=, 0);
+		int setsize_addpage = ubc_setsize(vp, round_page_64(zp->z_size + PAGE_SIZE_64));
+		ASSERT3S(setsize_addpage, !=, 0);
+		int setsize_to_zsize = ubc_setsize(vp, zp->z_size);
+		ASSERT3S(setsize_to_zsize, !=, 0);
 		/* This range is reduced in zfs_write_maybe_extend_file */
 	} else {
 		ASSERT3S(start_resid, >, 0);
