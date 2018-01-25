@@ -2837,6 +2837,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		printf("ZFS: %s:%d: full file lock (%llu, %llu) obtained, bumping"
 		    " woff %llu and uio_offset %llu to zsize %llu"
 		    " usize %llu vs new_filesize which is %llu (includes resid %llu)"
+		    " and bouncing ubc to clear out tail of current EOF"
 		    " for fs %s file %s\n", __func__, __LINE__,
 		    rl->r_off, rl->r_len, woff, uio_offset(uio),
 		    zp->z_size, ubc_getsize(vp),
@@ -2846,6 +2847,10 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		ASSERT3U(woff, ==, zp->z_size);
 		ASSERT3U(woff, ==, ubc_getsize(vp));
 		ASSERT3U(woff, ==, uio_offset(uio));
+		int setsize_addone = ubc_setsize(vp, zp->z_size + 1ULL);
+		ASSERT3S(setsize_addone, !=, 0);
+		int setsize_backone = ubc_setsize(vp, zp->z_size);
+		ASSERT3S(setsize_backone, !=, 0);
 		/* This range is reduced in zfs_write_maybe_extend_file */
 	} else {
 		ASSERT3S(start_resid, >, 0);
