@@ -3767,10 +3767,26 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	zp->z_in_pager_op++;
 
+	if (tsd_get(rl_key_vp_from_getvnode) != NULL) {
+		printf("ZFS: %s:%d: got key from getvnode, equals ap->a_vp? %d ubc size %llu"
+		    " ubc_pages_resident %d clean? %d zp != NULL? %d zsize %lld zid %lld znamecache %s\n",
+		    __func__, __LINE__, vp == tsd_get(rl_key_vp_from_getvnode),
+		    ubc_getsize(vp), zp != NULL,
+		    ubc_pages_resident(vp),
+		    is_file_clean(vp, ubc_getsize(vp)) == 0,
+		    (zp) ? zp->z_size : 0,
+		    (zp) ? zp->z_id : 0,
+		    (zp) ? zp->z_name_cache : "(null zp)");
+	}
+
+	ASSERT3U(ubc_pages_resident(vp), !=, 0);
+
 	extern void IOSleep(unsigned milliseconds); // yields thread
 	extern void IODelay(unsigned microseconds); // x86_64 rep nop
 
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
+
+	ASSERT3U(ubcsize_at_entry, !=, 0);
 
 	/* We can still get into this function as non-v2 style, by the default
 	 * pager (ie, swap - when we eventually support it)
