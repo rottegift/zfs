@@ -2638,7 +2638,19 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 	ASSERT3S(error, ==, 0);
 	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 
-	/* we have now committed everything to the DMU layer, give up locks */
+	/* we have now committed everything to the DMU layer */
+
+	if ((uio_offset(uio) == ubc_getsize(vp)
+		|| uio_offset(uio) == zp->z_size)
+	    && (ubc_getsize(vp) & PAGE_MASK_64) != 0
+	    && ubc_getsize(vp) <= zp->z_size) {
+		int setsize_tail_trim_grow = ubc_setsize(vp,
+		    round_page_64(ubc_getsize(vp) + PAGE_SIZE_64));
+		ASSERT3S(setsize_tail_trim_grow, !=, 0);
+		int setsize_tail_trim_to_z_size = ubc_setsize(vp,
+		    zp->z_size);
+		ASSERT3S(setsize_tail_trim_to_z_size, !=, 0);
+	}
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 
