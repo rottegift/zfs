@@ -1290,7 +1290,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			 * (pagein), which we do not want to do in this
 			 * context
 			 */
-			printf("ZFS: %s:%d DOUBLE WARNING (returning short read) non-valid page"
+			printf("ZFS: %s:%d DOUBLE WARNING (returning EIO) non-valid page"
 			    " at index %d of %d"
 			    " (resid %d, uio_resid %lld,"
 			    " *bytes_to_copy %d), upl foff %lld sz %ld zid %lld fs %s file %s\n",
@@ -1299,7 +1299,7 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			    upl_file_offset, upl_size, zp->z_id, fsname, fname);
 			int umapretval = ubc_upl_unmap(upl);
 			ASSERT3S(umapretval, ==, KERN_SUCCESS);
-			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
 			ASSERT3S(abortall, ==, KERN_SUCCESS);
 			return (EIO);
 		}
@@ -1308,10 +1308,19 @@ zfs_ubc_to_uio(znode_t *zp, vnode_t *vp, struct uio *uio, int *bytes_to_copy,
 			 * it is OK to read this page, because it is already valid;
 			 * we do not change its dirty/busy state with our abort below
 			 */
-			printf("ZFS: %s:%d: WARNING dirty page at index %d (resid %d, uio_resid %lld)"
-			    "uiooff %lld upl foff %lld sz %ld zid %lld fs %s file %s\n",
+			printf("ZFS: %s:%d: WARNING (returning short read)"
+			    " dirty page at index %d (resid %d, uio_resid %llu)"
+			    " uiooff %llu upl foff %llu sz %ld zid %llu"
+			    " usize %llu zsize %llu fs %s file %s\n",
 			    __func__, __LINE__, pg_index, resid, uio_resid(uio), uio_offset(uio),
-			    upl_file_offset, upl_size, zp->z_id, fsname, fname);
+			    upl_file_offset, upl_size, zp->z_id,
+			    ubc_getsize(vp), zp->z_size,
+			    fsname, fname);
+			int umapretval = ubc_upl_unmap(upl);
+			ASSERT3S(umapretval, ==, KERN_SUCCESS);
+			int abortall = ubc_upl_abort(upl, UPL_ABORT_FREE_ON_EMPTY);
+			ASSERT3S(abortall, ==, KERN_SUCCESS);
+			return (0);
 		}
 
 		uio_setrw(uio, UIO_READ);
