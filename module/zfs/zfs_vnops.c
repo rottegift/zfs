@@ -2645,7 +2645,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 	    && (ubc_getsize(vp) & PAGE_MASK_64) != 0
 	    && ubc_getsize(vp) <= zp->z_size) {
 		int setsize_tail_trim_grow = ubc_setsize(vp,
-		    round_page_64(ubc_getsize(vp) + PAGE_SIZE_64));
+		    round_page_64(ubc_getsize(vp)));
 		ASSERT3S(setsize_tail_trim_grow, !=, 0);
 		int setsize_tail_trim_to_z_size = ubc_setsize(vp,
 		    zp->z_size);
