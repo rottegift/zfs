@@ -2640,7 +2640,8 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 
 	/* we have now committed everything to the DMU layer */
 
-	if ((uio_offset(uio) == ubc_getsize(vp)
+	if (error == 0
+	    &&(uio_offset(uio) == ubc_getsize(vp)
 		|| uio_offset(uio) == zp->z_size)
 	    && (ubc_getsize(vp) & PAGE_MASK_64) != 0
 	    && ubc_getsize(vp) <= zp->z_size) {
