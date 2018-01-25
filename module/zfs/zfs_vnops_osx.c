@@ -2497,15 +2497,31 @@ norwlock:
 	vaddr += upl_offset;
 
 	/* Can't read beyond EOF - but we need to zero those extra bytes. */
+
 	if (off + len > file_sz) {
 		ASSERT3U(file_sz, ==, ubc_getsize(vp));
-		uint64_t newend = file_sz - off;
+		ASSERT3U(off, <, file_sz);
+		const off_t  eof_in_upl = file_sz - off;
+		const size_t   zero_len = eof_in_upl + len;
 
-		dprintf("ZFS: pagein zeroing offset 0x%llx for 0x%llx bytes.\n",
-				newend, len - newend);
-		memset(&vaddr[newend], 0, len - newend);
-		len = newend;
+		memset(&vaddr[eof_in_upl], 0, zero_len);
+
+		ASSERT0(upl_offset);
+		len = eof_in_upl - upl_offset;
+
+		if (upl_offset != 0
+		    || eof_in_upl <= upl_offset
+		    || trunc_page_64(file_sz) < trunc_page_64(off + len)) {
+			printf("ZFS:%s:%d: zero-filling past EOF at UPL pos %llu,"
+			    " fill length %lu (new len %lu upl_offset %u)"
+			    " upl-in-file [%llu..%llu] (sz %lu) file %s\n",
+			    __func__, __LINE__,
+			    eof_in_upl, zero_len, len, upl_offset,
+			    off, off + ap->a_size, ap->a_size, zp->z_name_cache);
+		}
+
 	}
+
 	/*
 	 * Fill pages with data from the file.
 	 */
