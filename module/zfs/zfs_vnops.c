@@ -2149,6 +2149,8 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		    " zsize %llu z_blksz %u page offset %llu in zid %lld fs %s file %s\n",
 		    __func__, __LINE__, zp->z_size, zp->z_blksz,
 		    upl_f_off, zp->z_id, fsname, zp->z_name_cache);
+		int commit_mupl_ret = ubc_upl_commit(mupl);
+		ASSERT3U(commit_mupl_ret, ==, KERN_SUCCESS);
 		struct vnop_pageout_args ap = {
 			.a_vp = vp,
 			.a_pl = NULL,
