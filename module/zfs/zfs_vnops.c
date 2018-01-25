@@ -2904,7 +2904,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	ASSERT3P(tsd_get(rl_key), ==, rl);
 	const off_t pre_maybe_zsize = zp->z_size;
 	if (ioflag & FAPPEND) {
-		ASSERT3U(pre_maybe_zsize, ==, woff + uio_resid(uio));
+		ASSERT3U(pre_maybe_zsize, ==, woff);
 	}
 	error = zfs_write_maybe_extend_file(zp, woff, start_resid, rl, ioflag);
 	if (error) {
