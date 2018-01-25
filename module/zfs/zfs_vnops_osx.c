@@ -2502,7 +2502,9 @@ norwlock:
 		ASSERT3U(file_sz, ==, ubc_getsize(vp));
 		ASSERT3U(off, <, file_sz);
 		const off_t  eof_in_upl = file_sz - off;
-		const size_t   zero_len = eof_in_upl + len;
+		ASSERT3U(eof_in_upl, <, len);
+		const size_t   zero_len = (off + len) - file_sz;
+		ASSERT3U(file_sz + zero_len, ==, off + len);
 
 		memset(&vaddr[eof_in_upl], 0, zero_len);
 
