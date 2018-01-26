@@ -2657,13 +2657,17 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 				" def_woff_plus_resid_dispatched %llu,"
 				" uio_resid(uio) %llu start_resid %lu,"
 				" resid_dispatched %llu"
-				" usize %llu"
+				" usize %llu start_off %llu"
+				" fixing z_size and ubc size"
 				" file %s\n",
 				__func__, __LINE__, zp->z_size,
 				uio_offset(uio), def_woff_plus_resid_dispatched,
 				uio_resid(uio), start_resid, resid_dispatched,
-				ubc_getsize(vp),
+				ubc_getsize(vp), start_off,
 				zp->z_name_cache);
+			    zp->z_size = uio_offset(uio);
+			    int setsize_uiosize = ubc_setsize(vp, uio_offset(uio));
+			    ASSERT3S(setsize_uiosize, !=, 0); // true on success
 		}
 
 	} // for
