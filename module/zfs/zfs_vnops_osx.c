@@ -5511,8 +5511,30 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	dprintf("+vnop_reclaim zp %p/%p type %d\n", zp, vp, vnode_vtype(vp));
 	if (!zp) goto out;
 
+
+	ASSERT3P(zp->z_sa_hdl, !=, NULL);
+
+	if (vnode_isreg(vp) && vnode_isinuse(vp, 0)) {
+		printf("ZFS: %s:%d: vnode_isinuse(f, 0) %d"
+		    "isinuse(f, 1) %d isrecycled %d for file %s\n",
+		    __func__, __LINE__, vnode_isinuse(vp, 0),
+		    vnode_isinuse(vp, 1), vnode_isrecycled(vp), zp->z_name_cache);
+	}
+
+
+	zfsvfs = zp->z_zfsvfs;
+
+	if (!zfsvfs) {
+		printf("ZFS: vnop_reclaim with zfsvfs == NULL - tell lundman\n");
+		return 0;
+	}
+
+	if (zfsctl_is_node(vp)) {
+		printf("ZFS: vnop_reclaim with ctldir node - tell lundman\n");
+		return 0;
+	}
+
 	off_t ubcsize = ubc_getsize(vp);
-	ASSERT3S(ubcsize, >=, 0);
 	if (ubcsize == 0)
 		ASSERT0(ubc_pages_resident(vp));
 	if (ubcsize > 0) {
@@ -5520,6 +5542,10 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		ASSERT0(spl_ubc_is_mapped_writable(vp));
 		ASSERT0(spl_ubc_is_mapped(vp, NULL));
 		ASSERT3S(zp->z_size, ==, ubcsize);
+		ASSERT0(is_file_clean(vp, ubcsize));
+		ASSERT0(vnode_isrecycled(vp));
+#if 0
+		/* note, would need to ZFS_ENTER_NOERROR here to protect zp */
 		if (is_file_clean(vp, ubcsize)) {
 			    // nonzero is unclean
 			printf("ZFS: %s:%d: (syncing out) unclean file %s size %lld\n",
@@ -5554,27 +5580,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		if (retval != 0)
 			ASSERT3S(resid_off, ==, ubcsize);
 		ASSERT0(ubc_pages_resident(vp));
-	}
-	ASSERT3P(zp->z_sa_hdl, !=, NULL);
-
-	if (vnode_isreg(vp) && vnode_isinuse(vp, 0)) {
-		printf("ZFS: %s:%d: vnode_isinuse(f, 0) %d"
-		    "isinuse(f, 1) %d isrecycled %d for file %s\n",
-		    __func__, __LINE__, vnode_isinuse(vp, 0),
-		    vnode_isinuse(vp, 1), vnode_isrecycled(vp), zp->z_name_cache);
-	}
-
-
-	zfsvfs = zp->z_zfsvfs;
-
-	if (!zfsvfs) {
-		printf("ZFS: vnop_reclaim with zfsvfs == NULL - tell lundman\n");
-		return 0;
-	}
-
-	if (zfsctl_is_node(vp)) {
-		printf("ZFS: vnop_reclaim with ctldir node - tell lundman\n");
-		return 0;
+#endif
 	}
 
 	ZTOV(zp) = NULL;
