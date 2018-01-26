@@ -105,7 +105,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
 	kstat_named_t mnomap_shrink_ubc;
-	kstat_named_t setattr_shrink_ubc;
 	kstat_named_t pageoutv2_dismiss_shrink_ubc;
 	kstat_named_t zfs_msync_calls;
 	kstat_named_t zfs_msync_pages;
@@ -141,7 +140,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
 	{ "mnomap_shrink_ubc",                 KSTAT_DATA_UINT64 },
-	{ "setattr_shrink_ubc",                KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dismiss_shrink_ubc",      KSTAT_DATA_UINT64 },
 	{ "zfs_msync_calls",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msynced_pages",	               KSTAT_DATA_UINT64 },
@@ -1895,99 +1893,6 @@ zfs_vnop_setattr(struct vnop_setattr_args *ap)
 			ASSERT3U(vap->va_size, ==, ubc_getsize(ap->a_vp));
 
 			VATTR_SET_SUPPORTED(vap, va_data_size);
-
-			if (vap->va_size != ubc_getsize(ap->a_vp)) {
-
-				znode_t *zp = VTOZ(ap->a_vp);
-				zfsvfs_t *zfsvfs = zp->z_zfsvfs;
-
-				ZFS_ENTER(zfsvfs);
-				ZFS_VERIFY_ZP(zp);
-
-				ASSERT3U(vap->va_size, ==, zp->z_size);
-
-				rl_t *tsdrl = tsd_get(rl_key);
-				rl_t *rl = NULL;
-				znode_t *tsdzp = NULL;
-
-				if (tsdrl != NULL) {
-					tsdzp = tsdrl->r_zp;
-					if (tsdzp != zp) {
-						printf("ZFS: %s:%d bogus tsd rl type %d off %lld len %lld"
-						    " file %s curubcsize %lld curfilesize %lld"
-						    " argfilesize %lld ourfile %s\n",
-						    __func__, __LINE__, tsdrl->r_type,
-						    tsdrl->r_off, tsdrl->r_len,
-						    (tsdzp != NULL) ? tsdzp->z_name_cache : "(null zp)",
-						    ubc_getsize(ap->a_vp),
-						    zp->z_size, vap->va_size, zp->z_name_cache);
-					} else {
-						printf("ZFS: %s:%d: RL for our zp in tsd: type %d"
-						    " off %lld len %lld curubcsize %lld curfilesize %lld"
-						    " argfilesize %lld ourfile %s\n",
-						    __func__, __LINE__, tsdrl->r_type,
-						    tsdrl->r_off, tsdrl->r_len,
-						    ubc_getsize(ap->a_vp), zp->z_size, vap->va_size,
-						    zp->z_name_cache);
-					}
-				}
-
-				if (vnode_isreg(ap->a_vp)
-				    && !vnode_isswap(ap->a_vp)
-				    && !vnode_isrecycled(ap->a_vp)
-				    && rl == NULL
-				    && (tsdrl == NULL || tsdrl->r_zp != zp)) {
-					rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-					if (rl == NULL) {
-						printf("ZFS: %s:%d: failed to range lock file %s"
-						    " (z_map_lock held? %d) (will wait now? %d)\n",
-						    __func__, __LINE__, zp->z_name_cache,
-						    rw_write_held(&zp->z_map_lock),
-						    vap->va_size < ubc_getsize(ap->a_vp));
-						/*
-						 * we do not want to just chop down a file
-						 * that someone is relying on, or to fall
-						 * into the black hole of a memory_object lock
-						 */
-						rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-					}
-					ASSERT3P(tsd_get(rl_key), ==, NULL);
-					tsd_set(rl_key, rl);
-
-					boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-					uint64_t tries = z_map_rw_lock(zp, &need_release,
-					    &need_upgrade, __func__, __LINE__);
-
-					int setsize_retval = 0;
-
-					if (ubc_getsize(ap->a_vp) > vap->va_size
-					    && vnode_isreg(ap->a_vp)
-					    && !vnode_isswap(ap->a_vp)
-					    && !vnode_isrecycled(ap->a_vp)
-					    && vnode_isinuse(ap->a_vp, 1) == 0
-					    && !spl_ubc_is_mapped(ap->a_vp, NULL)
-					    && zp->z_in_pager_op == 0) {
-						/* be careful about when we shrink */
-						setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
-						VNOPS_OSX_STAT_BUMP(setattr_shrink_ubc);
-					} else if (ubc_getsize(ap->a_vp) < vap->va_size
-					    && vnode_isreg(ap->a_vp)) {
-						/* growing is safe */
-						setsize_retval = ubc_setsize(ap->a_vp, vap->va_size);
-					}
-
-					z_map_drop_lock(zp, &need_release, &need_upgrade);
-					ASSERT3S(tries, <=, 2);
-					ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
-
-					ASSERT3S(zp->z_size, ==, ubc_getsize(ap->a_vp));
-
-					ASSERT3P(tsd_get(rl_key), ==, rl);
-					tsd_set(rl_key, NULL);
-					zfs_range_unlock(rl);
-					tsd_set(rl_key, tsdrl);
-				}
-			}
 		}
 		if (VATTR_IS_ACTIVE(vap, va_mode))
 			VATTR_SET_SUPPORTED(vap, va_mode);
