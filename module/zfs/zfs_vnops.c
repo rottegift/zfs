@@ -2241,6 +2241,25 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		/* increase ubc size if we are growing the file */
 		end_size = this_off + this_chunk;
 
+		/*
+		 * if we are appending, read in the last page of the file:
+		 * do this before bumping up z_size
+		 */
+		if (ioflag & FAPPEND) {
+			int fappend_fill_err = ubc_fill_holes_in_range(vp,
+			    trunc_page_64(this_off), this_off & PAGE_SIZE_64, FILL_FOR_WRITE);
+			if (fappend_fill_err) {
+				printf("ZFS: %s:%d: FAPPEND, error %d filling last bytes of file"
+				    " zsize %llu usize %llu this_off %llu"
+				    " fill_off %llu fill_len %llu (these get rounded anyway)"
+				    " fs %s file %s\n",
+				    __func__, __LINE__, fappend_fill_err,
+				    zp->z_size, ubc_getsize(vp),
+				    trunc_page_64(this_off), this_off & PAGE_SIZE_64,
+				    this_off, fsname, fname);
+			}
+		}
+
 		if (end_size > zp->z_size || end_size > ubc_getsize(vp)) {
 			uint64_t size_update_ctr = 0;
 			uint64_t prev_size = zp->z_size;
