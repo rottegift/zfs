@@ -2063,6 +2063,9 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
     const off_t upl_f_off)
 {
 
+	ASSERT3U(uio_offset(uio), <=, zp->z_size);
+	ASSERT3U(uio_offset(uio), <=, ubc_getsize(vp));
+
 	/* Modify the page: "leave pages busy
 	 * in the original object, if a page list
 	 * structure was specified." (vm_pageout.c)
@@ -2104,32 +2107,78 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		}
 		return (ccupl_retval);
 	}
-	/* hand off to zfs_pageout */
-	dprintf("ZFS: %s:%d: cluster_copy_upl_data done OK, handing off to zfs_pageout,"
-	    " %lld @ file %s\n",  __func__, __LINE__, upl_f_off, zp->z_name_cache);
 
-	int poflags = (ioflags & IO_SYNC) ? UPL_IOSYNC : 0;
+	/*
+	 * if it's the last page in the file and we aren't
+	 * writing to the end-of-page, map the page in and
+	 * zero out the tail
+	 */
+
+	ASSERT3U(uio_offset(uio), <=, zp->z_size);
+	ASSERT3U(uio_offset(uio), <=, ubc_getsize(vp));
+
+	if (uio_offset(uio) == zp->z_size
+	    && (uio_offset(uio) & PAGE_MASK_64) != 0) {
+		caddr_t vaddr = NULL;
+		int muplmapret = ubc_upl_map(mupl, (vm_offset_t *)&vaddr);
+		if (muplmapret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: failed to ubc_upl_map err %d upl_f_off %llu file %s\n",
+			    __func__, __LINE__, muplmapret, upl_f_off,
+			    zp->z_name_cache);
+			int kret_abort = ubc_upl_abort(mupl, UPL_ABORT_ERROR);
+			ASSERT3S(kret_abort, ==, KERN_SUCCESS);
+			return (EIO);
+		}
+		const off_t start_in_page = uio_offset(uio) & PAGE_MASK_64;
+		ASSERT3S(start_in_page, >, 0);
+		ASSERT3S(start_in_page, <, PAGE_MASK_64);
+		const off_t zero_length = PAGE_SIZE_64 - start_in_page - 1;
+		ASSERT3S(zero_length, >, 0);
+		ASSERT3S(zero_length, <, PAGE_SIZE_64);
+
+		ASSERT3U(start_in_page + zero_length + 1, ==, PAGE_SIZE_64);
+
+		memset(&vaddr[start_in_page], 0, zero_length);
+
+		printf("ZFS: %s:%d: zerored out page tail @ foff %llu, zsize %llu usize %llu,"
+		    " start_in_page %llu zero_length %llu file %s\n",
+		    __func__, __LINE__, upl_f_off, zp->z_size, ubc_getsize(vp),
+		    start_in_page, zero_length, zp->z_name_cache);
+
+		int unmapret = ubc_upl_unmap(mupl);
+		ASSERT3S(unmapret, ==, KERN_SUCCESS);
+	} else {
+		printf(" ZFS: %s:%d: (last page? %d) (page aligned? %d),"
+		    " upl_f_offset %llu uio_offset %llu diff %llu"
+		    " zsize %llu usize %llu file %s\n",
+		    __func__, __LINE__,
+		    uio_offset(uio) == zp->z_size,
+		    (uio_offset(uio) & PAGE_MASK_64) == 0,
+		    upl_f_off, uio_offset(uio),
+		    uio_offset(uio) - upl_f_off,
+		    zp->z_size, ubc_getsize(vp), zp->z_name_cache);
+	}
 
 	if (!dmu_write_is_safe(zp, upl_f_off, upl_f_off + PAGE_SIZE_64)) {
 		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
-		printf("ZFS: %s:%d: taking pageoutv2 route because of write safety issue"
-		    " zsize %llu z_blksz %u page offset %llu in zid %lld fs %s file %s\n",
-		    __func__, __LINE__, zp->z_size, zp->z_blksz,
+		printf("ZFS: %s:%d: write safety issue"
+		    " usize %llu zsize %llu z_blksz %u page offset %llu in zid %lld fs %s file %s\n",
+		    __func__, __LINE__, ubc_getsize(vp), zp->z_size, zp->z_blksz,
 		    upl_f_off, zp->z_id, fsname, zp->z_name_cache);
-		int commit_mupl_ret = ubc_upl_commit(mupl);
-		ASSERT3U(commit_mupl_ret, ==, KERN_SUCCESS);
-		struct vnop_pageout_args ap = {
-			.a_vp = vp,
-			.a_pl = NULL,
-			.a_f_offset = upl_f_off,
-			.a_size = PAGE_SIZE,
-			.a_context = NULL,
-		};
-		return(zfs_vnop_pageoutv2(&ap));
 	}
 
-	return (zfs_pageout(zfsvfs, zp, mupl, 0, upl_f_off, PAGE_SIZE, poflags,
-		B_FALSE, B_FALSE, B_FALSE));
+	int commit_mupl_ret = ubc_upl_commit(mupl);
+	ASSERT3U(commit_mupl_ret, ==, KERN_SUCCESS);
+
+	struct vnop_pageout_args ap = {
+		.a_vp = vp,
+		.a_pl = NULL,
+		.a_f_offset = upl_f_off,
+		.a_size = PAGE_SIZE,
+		.a_flags = UPL_MSYNC,
+		.a_context = NULL,
+	};
+	return(zfs_vnop_pageoutv2(&ap));
 }
 
 static inline int
