@@ -2081,6 +2081,17 @@ zfs_write_modify_write(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio,
 		    __func__, __LINE__, muplret, upl_f_off, zp->z_name_cache);
 		return (muplret);
 	}
+
+	upl_page_info_t *pl = ubc_upl_pageinfo(mupl);
+
+	printf("ZFS: %s:%d: valid? %d present? %d dirty? %d for"
+	    " page @ %llu file %s\n",
+	    __func__, __LINE__,
+	    upl_valid_page(pl, 0), upl_page_present(pl, 0),
+	    upl_dirty_page(pl, 0),
+	    upl_f_off,
+	    zp->z_name_cache);
+
 	int ccupl_ioresid = recov_resid_int;
 
 	/* do the magic */
