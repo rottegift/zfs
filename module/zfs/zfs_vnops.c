@@ -2473,7 +2473,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 							    __func__, __LINE__,
 							    bytes_progressed,
 							    zp->z_name_cache);
-							continue;
+							goto committed_to_dmu;
 						} else {
 							printf("ZFS: %s:%d uio not progressed for"
 							    " file %s, resid_at_break %lld"
@@ -2496,7 +2496,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 					    zp->z_name_cache, uioresid);
 					ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
                                         ASSERT3S(zp->z_size, >=, recov_off + bytes_moved);
-					continue;
+					goto committed_to_dmu;
 				drop_and_return_to_retry:
 					/*
 					 * if we are here that we made no progress in
@@ -2601,6 +2601,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		}
 	} // for
 
+committed_to_dmu:
 	/* everything's committed to the DMU layer except the SA updates, do that now */
 
 	tx = dmu_tx_create(zfsvfs->z_os);
@@ -2640,7 +2641,13 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 	ASSERT3S(error, ==, 0);
 	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 
-	/* we have now committed everything to the DMU layer */
+	/*
+	 * We have now committed everything to the DMU layer;
+	 * if we are at the end of the file, trim the last page
+	 * so that everything past the EOF is zero-filled rather
+	 * than random garbage.   This is important for any client
+	 * who is mmapping the last page.
+	 */
 
 	if (error == 0
 	    &&(uio_offset(uio) == ubc_getsize(vp)
