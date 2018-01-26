@@ -4134,12 +4134,44 @@ acquire_locks:
 
 	VERIFY3S(drop_rl, ==, B_FALSE);
 
-	rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER);
+	/*
+	 * If we can range_lock the whole file at once, do so, then reduce
+	 * the locked range, typically to rloff, rllen.   However, reduce
+	 * to a whole UPL (16 MiB) after the current end-of-file if
+	 * may be coming from a userland ubc_msync() or from
+	 * the ubc_msync in vclean().
+	 *
+	 * Set variables appropriately for debugging below.
+	 */
+	boolean_t range_lock_uncontended_range = B_FALSE;
+	boolean_t range_lock_uncontended_whole_file = B_FALSE;
+	boolean_t range_lock_reduced_conservatively = B_FALSE;
+
+	rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 
 	if (rl != NULL) {
+		range_lock_uncontended_whole_file = B_TRUE;
 		drop_rl = B_TRUE;
 		ASSERT3P(tsd_get(rl_key), ==, NULL);
 		tsd_set(rl_key, rl);
+		if ((ap->a_flags & UPL_MSYNC) == 0
+		    && tsd_get(rl_key_vp_from_getvnode) == NULL
+		    && spl_ubc_is_mapped_writable(vp) == 0) {
+			zfs_range_reduce(rl, rloff, rllen);
+		} else {
+			const uint64_t conservative_end =
+			    round_page_64(MAX(zp->z_size, ubc_getsize(vp))) +
+			    MAX_UPL_SIZE_BYTES;
+			zfs_range_reduce(rl, 0, conservative_end);
+			range_lock_reduced_conservatively = B_TRUE;
+		}
+
+	}
+
+	if (rl == NULL) {
+		rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER);
+		if (rl != NULL)
+			range_lock_uncontended_range = B_TRUE;
 	}
 
 	if (rl == NULL) {
@@ -4219,8 +4251,15 @@ acquire_locks:
 			/* good to go, maybe reduce the range a bit */
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
 			if (!spl_ubc_is_mapped_writable(vp)
+			    && tsd_get(rl_key_vp_from_getvnode) == NULL
 			    && (ap->a_flags & UPL_MSYNC) == 0) {
 				zfs_range_reduce(rl, rloff, rllen);
+			} else {
+				const uint64_t conservative_end =
+				    round_page_64(MAX(zp->z_size, ubc_getsize(vp))) +
+				    MAX_UPL_SIZE_BYTES;
+				zfs_range_reduce(rl, 0, conservative_end);
+				range_lock_reduced_conservatively = B_TRUE;
 			}
 			tsd_set(rl_key, rl);
 			drop_rl = B_TRUE;
@@ -4823,9 +4862,17 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
                         }
-			const int commit_precious_flags =
-			    UPL_COMMIT_CLEAR_PRECIOUS
-			    | UPL_COMMIT_FREE_ON_EMPTY;
+			int commit_precious_flags = UPL_COMMIT_FREE_ON_EMPTY;
+			/*
+			 * set the COMMIT_CLEAR_PRECIOUS flag if we probably aren't
+			 * dealing with vclean() or a userland msync on a writable map
+			 *
+			 * c.f. osfmk/vm/vm_map.c after the vm_object sync:
+			 * * only send a m_o_s if we returned pages or if the entry
+			 * * is writable (ie dirty pages may have already been sent back)"
+			 */
+			if (!range_lock_reduced_conservatively)
+				commit_precious_flags |= UPL_COMMIT_CLEAR_PRECIOUS;
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
 			if (commit_precious_ret != KERN_SUCCESS) {
@@ -4844,7 +4891,9 @@ skip_lock_acquisition:
 					    " [%lld..%lld] fs %s file %s (mapped %d)"
 					    " zsize %llu usize %llu) (rw held? %d zholder %s"
 					    " rlholder %s %d rlocks %d) (ismapped %d ismappedwrite %d)"
-					    " (flags & UPL_MSYNC? %d)\n",
+					    " (flags & UPL_MSYNC? %d"
+					    " uncontended range? %d uncontended whole file? %d"
+					    " reduced conservatively? %d)\n",
 					    __func__, __LINE__,
 					    commit_precious_ret,
 					    start_of_range, end_of_range, pages_in_range,
@@ -4862,7 +4911,10 @@ skip_lock_acquisition:
 					    (rl) ? rl->r_line : 0, zp->z_range_locks,
 					    spl_ubc_is_mapped(vp, NULL),
 					    spl_ubc_is_mapped_writable(vp),
-					    ap->a_flags & UPL_MSYNC);
+					    ap->a_flags & UPL_MSYNC,
+					    range_lock_uncontended_range,
+					    range_lock_uncontended_whole_file,
+					    range_lock_reduced_conservatively);
 					xxxbleat = B_TRUE;
 					pg_index = page_past_end_of_range;
 					continue;
