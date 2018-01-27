@@ -5031,6 +5031,19 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
         return (retval);
 
 zero:
+	if (vnode_isrecycled(vp)
+	    && vnode_isreg(vp)
+	    && ubc_getsize(vp) > 0
+	    && is_file_clean(vp, ubc_getsize(vp))) {
+		if (zp) {
+			printf("ZFS: %s:%d: WARNING vnode_isrecycled + file dirty but skipping sync"
+			    " zsize %llu zid %llu fs %s file %s\n",
+			    __func__, __LINE__, zp->z_size, zp->z_id, fname, fsname);
+		} else {
+			printf("ZFS: %s:%d: SUPER WARNING vnode_isrecycled + file dirty + skipping sync"
+			    " and NO ZP! (usize %llu)\n", __func__, __LINE__, ubc_getsize(vp));
+		}
+	}
 	ZFS_EXIT(zfsvfs);
 	VNOPS_STAT_BUMP(zfs_fsync_skipped);
 	return (0);
