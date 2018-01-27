@@ -4880,7 +4880,8 @@ skip_lock_acquisition:
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
 #else
-			const int commit_precious_ret = KERN_SUCCESS;
+			const int commit_precious_ret = ubc_upl_abort_range(upl, start_of_range,
+			    end_of_range, UPL_ABORT_FREE_ON_EMPTY);
 #endif
 
 			if (commit_precious_ret != KERN_SUCCESS) {
