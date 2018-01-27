@@ -4654,6 +4654,7 @@ skip_lock_acquisition:
 		ASSERT3S(commit_all_unmap_ret, ==, KERN_SUCCESS);
 		if (commit_all_unmap_ret == KERN_SUCCESS)
 			mapped = B_FALSE;
+		// WE CAN COMMIT EVERYTHING HERE, THE UPL IS DEALLOCATED
 		int commit_all = ubc_upl_commit(upl);
 		ASSERT3S(commit_all, ==, KERN_SUCCESS);
 		error = commit_all;
@@ -4671,8 +4672,15 @@ skip_lock_acquisition:
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    f_start_of_upl, f_end_of_upl, fsname, fname);
+#if 0
+		// DO NOT UPL_COMMIT_FREE_ON_ERROR HERE
 		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail,
-			UPL_COMMIT_CLEAR_PRECIOUS);
+		    UPL_COMMIT_CLEAR_PRECIOUS);
+#else
+		// DO NOT UPL_ABORT_FREE_ON_ERROR HERE
+		int commit_tail = ubc_upl_abort_range(upl, start_of_tail, end_of_tail, 0);
+#endif
+
 		if (commit_tail != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: error %d range committing tail of upl (%d..%d),"
 			    " (%d of %d pages dismissed, lowest page left %d),"
@@ -4686,8 +4694,15 @@ skip_lock_acquisition:
 			for (off_t uoff = start_of_tail;
 			     uoff < end_of_tail;
 			     uoff += PAGE_SIZE_64) {
+#if 0
+				// DO NOT UPL_COMMIT_FREE_ON_ERROR HERE
 				int cpgret = ubc_upl_commit_range(upl, uoff, uoff + PAGE_SIZE_64,
 					UPL_COMMIT_CLEAR_PRECIOUS);
+#else
+				// DO NOT UPL_ABORT_FREE_ON_ERROR HERE
+				int cpgret = ubc_upl_abort_range(upl, uoff, uoff + PAGE_SIZE_64,
+				    UPL_ABORT_ERROR);
+#endif
 				if (cpgret != KERN_SUCCESS) {
 					pgaborts++;
 					int popflags = 0;
@@ -4863,6 +4878,7 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
                         }
+#if 0
 			int commit_precious_flags = UPL_COMMIT_FREE_ON_EMPTY;
 			/*
 			 * set the COMMIT_CLEAR_PRECIOUS flag if we probably aren't
@@ -4876,7 +4892,7 @@ skip_lock_acquisition:
 			    && !range_lock_reduced_conservatively) {
 				commit_precious_flags |= UPL_COMMIT_CLEAR_PRECIOUS;
 			}
-#if 0
+
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
 #else
