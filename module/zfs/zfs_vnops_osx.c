@@ -4876,8 +4876,13 @@ skip_lock_acquisition:
 			    && !range_lock_reduced_conservatively) {
 				commit_precious_flags |= UPL_COMMIT_CLEAR_PRECIOUS;
 			}
+#if 0
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
+#else
+			const int commit_precious_ret = KERN_SUCCESS;
+#endif
+
 			if (commit_precious_ret != KERN_SUCCESS) {
 				/*
 				 * This is an error there is still a valid page
