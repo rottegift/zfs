@@ -4891,7 +4891,7 @@ skip_lock_acquisition:
 				if (mapped || commit_precious_ret != KERN_FAILURE) {
 					printf("ZFS: %s:%d: ERROR %d committing (precious) UPL range"
 					    " [%lld, %lld] (%lld pages) of UPL (0..%lld..%ld) at"
-					    " [%lld..%lld] fs %s file %s (mapped %d)"
+					    " [%lld..%lld] zid %llu fs %s file %s (mapped %d)"
 					    " zsize %llu usize %llu) (rw held? %d zholder %s"
 					    " rlholder %s %d rlocks %d) (ismapped %d ismappedwrite %d)"
 					    " (flags & UPL_MSYNC? %d"
@@ -4902,6 +4902,7 @@ skip_lock_acquisition:
 					    start_of_range, end_of_range, pages_in_range,
 					    trimmed_upl_size, ap->a_size,
 					    f_start_of_upl, f_end_of_upl,
+					    zp->z_id,
 					    fsname, fname, mapped,
 					    zp->z_size, ubc_getsize(vp),
 					    rw_write_held(&zp->z_map_lock),
