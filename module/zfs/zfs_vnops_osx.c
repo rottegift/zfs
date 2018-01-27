@@ -4265,9 +4265,9 @@ acquire_locks:
 		    && rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
 			/* good to go, maybe reduce the range a bit */
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
-			if (!spl_ubc_is_mapped_writable(vp)
+			if ((ap->a_flags & UPL_MSYNC) == 0
+			    && !spl_ubc_is_mapped_writable(vp)
 			    && tsd_get(rl_key_vp_from_getvnode) == NULL
-			    && (ap->a_flags & UPL_MSYNC) == 0
 			    && !(end_of_pageout > zp->z_blksz && (!ISP2(zp->z_blksz) ||
 				    zp->z_blksz < zp->z_zfsvfs->z_max_blksz))) {
 				/* !... condition from zfs_rlock.c */
@@ -4714,26 +4714,6 @@ skip_lock_acquisition:
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
 
-	/* maybe try to reduce ubc size */
-	if (upl_pages_after_boundary > 0
-	    && !vnode_isswap(vp)
-	    && rw_write_held(&zp->z_map_lock)
-	    && vnode_isinuse(vp, 1) == 0
-	    && (ap->a_flags & UPL_MSYNC) == 0) {
-		ASSERT3P(rl, !=, NULL);
-		int setsize_retval = ubc_setsize(ap->a_vp,
-		    MAX(dismissal_boundary, round_page_64(zp->z_size)));
-		VNOPS_OSX_STAT_BUMP(pageoutv2_dismiss_shrink_ubc);
-		if (setsize_retval == 0) // returns true on error
-			printf("ZFS: %s:%d: failed to ubc_setsize "
-			    " (tgt: %lld usize: %lld zsize %lld (round %lld) foff %lld"
-			    " fs %s file %s\n",
-			    __func__, __LINE__, dismissal_boundary,
-			    ubc_getsize(ap->a_vp), zp->z_size,
-			    round_page_64(zp->z_size), ap->a_f_offset,
-			    fsname, fname);
-	}
-
 	const off_t trimmed_upl_size = (off_t)ap->a_size - ((off_t)upl_pages_dismissed * PAGE_SIZE_64);
 	ASSERT3S(trimmed_upl_size, >=, PAGE_SIZE_64);
 
@@ -4891,8 +4871,10 @@ skip_lock_acquisition:
 			 * * only send a m_o_s if we returned pages or if the entry
 			 * * is writable (ie dirty pages may have already been sent back)"
 			 */
-			if (!range_lock_reduced_conservatively)
+			if (!range_lock_uncontended_whole_file
+			    && !range_lock_reduced_conservatively) {
 				commit_precious_flags |= UPL_COMMIT_CLEAR_PRECIOUS;
+			}
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
 			    end_of_range, commit_precious_flags);
 			if (commit_precious_ret != KERN_SUCCESS) {
