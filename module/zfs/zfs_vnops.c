@@ -4805,10 +4805,11 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	ZFS_VERIFY_ZP(zp);
 
 	const char *fname = zp->z_name_cache;
+	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 	if (zfsvfs->z_unmounted || zfsvfs->z_is_unmounting) {
-		printf("ZFS: %s:%d: unmount(ed/ing) [%d/%d] zfsvfs for file %s\n", __func__, __LINE__,
-		    zfsvfs->z_unmounted, zfsvfs->z_is_unmounting, fname);
+		printf("ZFS: %s:%d: unmount(ed/ing) [%d/%d] zfsvfs for fs %s file %s\n", __func__, __LINE__,
+		    zfsvfs->z_unmounted, zfsvfs->z_is_unmounting, fsname, fname);
 	}
 
 	/*
@@ -4821,8 +4822,9 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	boolean_t allow_new_msync = B_FALSE;
 	boolean_t zil_commit_only = B_FALSE;
 
-	if (zp->z_no_fsync != B_FALSE
-	    || zp->z_in_pager_op > 0) {
+	if (!vnode_isrecycled(vp)
+	    && (zp->z_no_fsync != B_FALSE
+		|| zp->z_in_pager_op > 0)) {
 		zil_commit_only = B_TRUE;
 	}
 
@@ -4834,7 +4836,8 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 /* otherwise proceed to try to sync */
 
-	if (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED || zfsvfs->z_log == NULL) {
+	if (!vnode_isrecycled(vp) &&
+	    (zfsvfs->z_os->os_sync == ZFS_SYNC_DISABLED || zfsvfs->z_log == NULL)) {
 		VNOPS_STAT_BUMP(zfs_fsync_disabled);
 		goto zero;
 	}
@@ -4856,16 +4859,19 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	if (!vnode_isreg(vp) && tsd_get(rl_key_vp_from_getvnode) == NULL) {
 		dprintf("ZFS: %s:%d: not a regular file %s\n", __func__, __LINE__,
 		    zp->z_name_cache);
-		zil_commit(zfsvfs->z_log, zp->z_id);
+		ASSERT3P(zfsvfs->z_log, !=, NULL);
+		if (zfsvfs->z_log != NULL)
+			zil_commit(zfsvfs->z_log, zp->z_id);
 		goto zero;
 	}
 
 	if (spl_ubc_is_mapped(vp, NULL) && is_file_clean(vp, ubc_getsize(vp))) {
 		// is_file_clean returns 22 (i.e. true)  when dirty
-		printf("ZFS: %s:%d: skipping msync called on mapped file (writable? %d) (dirty? %d)"
-		    " (size %lld) %s\n",
+		printf("ZFS: %s:%d: msync called on mapped file (writable? %d) (dirty? %d)"
+		    " (recycled? %d) (size %lld) %s\n",
 		    __func__, __LINE__, spl_ubc_is_mapped_writable(vp),
 		    is_file_clean(vp, ubc_getsize(vp)),
+		    vnode_isrecycled(vp),
 		    zp->z_size, zp->z_name_cache);
 		allow_new_msync = B_TRUE;
 		zil_commit_only = B_TRUE;
@@ -4878,10 +4884,13 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	 * empty, wholly-nonresident, or clean now; otherwise it will
 	 * almost certainly cause pageoutv2 to do a zil_commit.
 	 *
+	 * But try anyway if isrecycled is set, because there may be
+	 * precious pages to clean.
 	 */
 
-	if (ubc_getsize(vp) == 0 || ubc_pages_resident(vp) == 0 ||
-	    is_file_clean(vp, ubc_getsize(vp)) == 0) {
+	if (!vnode_isrecycled(vp)
+	    && (ubc_getsize(vp) == 0 || ubc_pages_resident(vp) == 0
+		|| is_file_clean(vp, ubc_getsize(vp)) == 0)) {
 		// remember the semantics error = is_file_clean()
 		// in particular is_file_clean is EINVAL if the
 		// file has any dirty pages
@@ -4902,6 +4911,11 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	rl_t *rl = NULL;
 	if (tsd_get(rl_key) == NULL) {
 		rl = zfs_try_range_lock(zp, 0, round_page_64(ubc_getsize(vp)), RL_WRITER);
+		if (rl == NULL && vnode_isrecycled(vp)) {
+			printf("ZFS: %s:%d: isrecycled set so waiting to lock zid %llu fs %s file %s\n",
+			    __func__, __LINE__, zp->z_id, fsname, fname);
+			rl = zfs_range_lock(zp, 0, round_page_64(ubc_getsize(vp)), RL_WRITER);
+		}
 		if (rl != NULL) {
 			tsd_set(rl_key, rl);
 			do_zil_commit = B_TRUE;
@@ -5000,6 +5014,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 
 	if (do_zil_commit == B_TRUE
 	    && have_trl == B_FALSE
+	    && zfsvfs->z_log
 	    && tsd_get(rl_key_vp_from_getvnode) == NULL) {
 		VNOPS_STAT_BUMP(zfs_fsync_zil_commit_reg_vn);
 		zil_commit(zfsvfs->z_log, zp->z_id);
