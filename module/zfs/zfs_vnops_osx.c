@@ -3504,11 +3504,6 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	if (ubc_pages_resident(vp) == 0)
 		return (0);
 
-	if (vnode_isrecycled(vp) && (a_flags & ZFS_MSYNC_RECYCLED_OK) == 0) {
-		printf("ZFS: %s:%d: vnode recycled! file %s\n", __func__, __LINE__,
-		    zp->z_name_cache);
-	}
-
 	if (end <= start)
 		return (EINVAL);
 
@@ -3517,6 +3512,11 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 
 	const char *fname = zp->z_name_cache;
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+
+	if (vnode_isrecycled(vp) /*&& (a_flags & ZFS_MSYNC_RECYCLED_OK) == 0*/) {
+		printf("ZFS: %s:%d: vnode recycled! zsize %llu zid %llu fs %s file %s\n", __func__, __LINE__,
+		    zp->z_size, zp->z_id, fsname, fname);
+	}
 
 	const off_t range_start = trunc_page_64(start);
 	const off_t range_end = MIN(round_page_64(end), ubc_getsize(vp));
@@ -3632,11 +3632,12 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 		    " in [%llu-%llu] (%llu pages)"
 		    " (ibusy %u iabsent %u ipageout %u,"
 		    " obusy %u oabsent %u opageout %u)"
-		    " fs %s fn %s\n",
+		    " recycled? %d zid %llu fs %s fn %s\n",
 		    __func__, __LINE__, kerrs, cleaned_dirty, cleaned_precious, totproc,
 		    start, end, howmany(end - start, PAGE_SIZE_64),
 		    inner_noted_busy, inner_noted_absent, inner_noted_pageout,
 		    outer_noted_busy, outer_noted_absent, outer_noted_pageout,
+		    vnode_isrecycled(vp), zp->z_id,
 		    fsname, fname);
 	}
 
