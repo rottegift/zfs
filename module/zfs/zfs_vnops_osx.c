@@ -3685,6 +3685,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	rl_t *rl;
 	boolean_t mapped = B_FALSE;
 	boolean_t must_lock = B_FALSE;
+	const off_t end_of_pageout = ap->a_f_offset + ap->a_size;
+
 
 	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
@@ -4147,7 +4149,10 @@ acquire_locks:
 	boolean_t range_lock_uncontended_whole_file = B_FALSE;
 	boolean_t range_lock_reduced_conservatively = B_FALSE;
 
-	rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+	if (tsd_get(rl_key) == NULL)
+		rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+	else
+		rl = NULL;
 
 	if (rl != NULL) {
 		range_lock_uncontended_whole_file = B_TRUE;
@@ -4156,22 +4161,32 @@ acquire_locks:
 		tsd_set(rl_key, rl);
 		if ((ap->a_flags & UPL_MSYNC) == 0
 		    && tsd_get(rl_key_vp_from_getvnode) == NULL
-		    && spl_ubc_is_mapped_writable(vp) == 0) {
+		    && spl_ubc_is_mapped_writable(vp) == 0
+		    && zp->z_blksz >= end_of_pageout
+		    && !(end_of_pageout > zp->z_blksz && (!ISP2(zp->z_blksz) ||
+                            zp->z_blksz < zp->z_zfsvfs->z_max_blksz))) {
+			/* last test condition from zfs_rlock.c */
+			/* i.e. if range_lock wouldn't have given us 0, UINT64_MAX */
 			zfs_range_reduce(rl, rloff, rllen);
-		} else {
+
+		} else if (!(end_of_pageout > zp->z_blksz && (!ISP2(zp->z_blksz) ||
+			zp->z_blksz < zp->z_zfsvfs->z_max_blksz))) {
+			/* test condition from zfs_rlock.c */
+			/* i.e. if range_lock wouldn't have given us 0, UINT64_MAX */
 			const uint64_t conservative_end =
 			    round_page_64(MAX(zp->z_size, ubc_getsize(vp))) +
 			    MAX_UPL_SIZE_BYTES;
 			zfs_range_reduce(rl, 0, conservative_end);
 			range_lock_reduced_conservatively = B_TRUE;
 		}
-
-	}
-
-	if (rl == NULL) {
+	} else if (tsd_get(rl_key) == NULL) {
 		rl = zfs_try_range_lock(zp, rloff, rllen, RL_WRITER);
-		if (rl != NULL)
+		if (rl != NULL) {
 			range_lock_uncontended_range = B_TRUE;
+			drop_rl = B_TRUE;
+			ASSERT3P(tsd_get(rl_key), ==, NULL);
+			tsd_set(rl_key, rl);
+		}
 	}
 
 	if (rl == NULL) {
@@ -4252,9 +4267,14 @@ acquire_locks:
 			ASSERT3P(tsd_get(rl_key), ==, NULL);
 			if (!spl_ubc_is_mapped_writable(vp)
 			    && tsd_get(rl_key_vp_from_getvnode) == NULL
-			    && (ap->a_flags & UPL_MSYNC) == 0) {
+			    && (ap->a_flags & UPL_MSYNC) == 0
+			    && !(end_of_pageout > zp->z_blksz && (!ISP2(zp->z_blksz) ||
+				    zp->z_blksz < zp->z_zfsvfs->z_max_blksz))) {
+				/* !... condition from zfs_rlock.c */
 				zfs_range_reduce(rl, rloff, rllen);
-			} else {
+			} else if (!(end_of_pageout > zp->z_blksz && (!ISP2(zp->z_blksz) ||
+				    zp->z_blksz < zp->z_zfsvfs->z_max_blksz))){
+				/* if range_lock wouldn't have given us 0, UINT64_MAX */
 				const uint64_t conservative_end =
 				    round_page_64(MAX(zp->z_size, ubc_getsize(vp))) +
 				    MAX_UPL_SIZE_BYTES;
