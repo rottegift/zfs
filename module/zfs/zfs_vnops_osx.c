@@ -4943,15 +4943,35 @@ skip_lock_acquisition:
 					continue;
 				}
 			} else {
-				dprintf("ZFS: %s:%d: successfully committed precious (mapped %d)"
-				    " UPL range [%lld..%lld] of file range [%lld..%lld] fs %s file %s"
-				    " pg_index %lld page_past_end_of_range %lld upl_end_pg %lld (done: %d)\n",
-				    __func__, __LINE__, mapped,
-				    start_of_range, end_of_range,
+				printf("ZFS: %s:%d: IGNORED committing (precious) UPL range"
+				    " [%lld, %lld] (%lld pages) of UPL (0..%lld..%ld) at"
+				    " [%lld..%lld] zid %llu fs %s file %s (mapped %d)"
+				    " zsize %llu usize %llu) (rw held? %d zholder %s"
+				    " rlholder %s %d rlocks %d) (ismapped %d ismappedwrite %d)"
+				    " (flags & UPL_MSYNC? %d"
+				    " uncontended range? %d uncontended whole file? %d"
+				    " reduced conservatively? %d)\n",
+				    __func__, __LINE__,
+				    start_of_range, end_of_range, pages_in_range,
+				    trimmed_upl_size, ap->a_size,
 				    f_start_of_upl, f_end_of_upl,
-				    fsname, fname, pg_index, page_past_end_of_range, upl_end_pg,
-				    page_past_end_of_range > upl_end_pg);
-				// xxxbleat = B_TRUE;
+				    zp->z_id,
+				    fsname, fname, mapped,
+				    zp->z_size, ubc_getsize(vp),
+				    rw_write_held(&zp->z_map_lock),
+				    (zp->z_map_lock_holder != NULL)
+				    ? zp->z_map_lock_holder
+				    : "(null)",
+				    (rl && rl->r_caller != NULL)
+				    ? rl->r_caller
+				    : "(null)",
+				    (rl) ? rl->r_line : 0, zp->z_range_locks,
+				    spl_ubc_is_mapped(vp, NULL),
+				    spl_ubc_is_mapped_writable(vp),
+				    ap->a_flags & UPL_MSYNC,
+				    range_lock_uncontended_range,
+				    range_lock_uncontended_whole_file,
+				    range_lock_reduced_conservatively);
 			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_cleaned, pages_in_range);
 			pg_index = page_past_end_of_range;
