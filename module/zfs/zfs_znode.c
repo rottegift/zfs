@@ -2499,8 +2499,21 @@ zfs_trunc(znode_t *zp, uint64_t end)
 			int setsize_trim_pages = B_TRUE; // TRUE on success or skip
 
 			if (eof_pg_delta > 0 && end > PAGE_SIZE_64) {
-				const off_t unchopped = ubc_getsize(vp);
 				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
+#if 1
+				int choptailret = zfs_trunc_tail_ubc_setsize(vp,
+				    round_page_64(end));
+				if (choptailret == 0) { // true on success, 0 on failure
+					printf("ZFS: %s:%d: (chop) ubc_setsize failure"
+					    " from: zsize %llu usize %llu to (round end): %llu"
+					    " zid %llu fs %s fn %s (z_in_pager_op %d)\n",
+					    __func__, __LINE__,
+					    zp->z_size, ubc_getsize(vp),
+					    round_page_64(end), zp->z_id,
+					    fsname, fname, zp->z_in_pager_op);
+				}
+#else
+				const off_t unchopped = ubc_getsize(vp);
 				/* this for loop is the core of a new zfs_ubc_setsize */
 				for (off_t rounds = 0, tail =
 					 (ubc_getsize(vp) & PAGE_MASK_64)
@@ -2567,7 +2580,9 @@ zfs_trunc(znode_t *zp, uint64_t end)
 					const off_t tusize = trunc_page_64(ubc_getsize(vp));
 					tail = MIN(chopat - PAGE_SIZE_64, tusize);
 				} // for chopat
+#endif
 			}
+
 
 			if (setsize_trim_pages == 0) { // TRUE on success or skip
 				printf("ZFS: %s:%d (iter %d) ubc_setsize error trimming pages"
