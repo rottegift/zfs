@@ -3506,7 +3506,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
 
 	if (vnode_isrecycled(vp) /*&& (a_flags & ZFS_MSYNC_RECYCLED_OK) == 0*/) {
-		printf("ZFS: %s:%d: vnode recycled! zsize %llu zid %llu fs %s file %s\n", __func__, __LINE__,
+		dprintf("ZFS: %s:%d: vnode recycled! zsize %llu zid %llu fs %s file %s\n", __func__, __LINE__,
 		    zp->z_size, zp->z_id, fsname, fname);
 	}
 
@@ -3620,7 +3620,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	}
 
 	if ((cleaned_dirty > 0 || cleaned_precious > 0) && vnode_isreg(vp)) {
-		printf("ZFS: %s:%d: kerrs %u cleaned (dirty %u precious %u) processed pages %u"
+		dprintf("ZFS: %s:%d: kerrs %u cleaned (dirty %u precious %u) processed pages %u"
 		    " in [%llu-%llu] (%llu pages)"
 		    " (ibusy %u iabsent %u ipageout %u,"
 		    " obusy %u oabsent %u opageout %u)"
