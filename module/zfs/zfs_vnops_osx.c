@@ -3423,6 +3423,7 @@ start_tx:
 			}
 		} else {
 			int commitflags = UPL_COMMIT_CLEAR_PRECIOUS
+			    | UPL_COMMIT_INACTIVATE
 			    | UPL_COMMIT_CLEAR_DIRTY;
 			kern_return_t commitret = ubc_upl_commit_range(upl, upl_offset, size, commitflags);
 			if (commitret != KERN_SUCCESS) {
@@ -4649,10 +4650,22 @@ skip_lock_acquisition:
 		if (commit_all_unmap_ret == KERN_SUCCESS)
 			mapped = B_FALSE;
 		// WE CAN COMMIT EVERYTHING HERE, THE UPL IS DEALLOCATED
-		int commit_all = ubc_upl_commit(upl);
+		int commit_inactivate = ubc_upl_commit_range(upl, 0, ap->a_size,
+			UPL_COMMIT_INACTIVATE);
+		if (commit_inactivate != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: ERROR %d committing whole UPL as a range"
+			    " 0..%lu at file offset %llu zid %llu fs %s file %s\n",
+			    __func__, __LINE__,
+			    commit_inactivate,
+			    ap->a_size, ap->a_f_offset,
+			    zp->z_id, fsname, fname);
+			error = commit_inactivate;
+		}
+		int finish_upl = ubc_upl_abort(upl, 0);
 		upl = NULL;
-		ASSERT3S(commit_all, ==, KERN_SUCCESS);
-		error = commit_all;
+		ASSERT3S(finish_upl, ==, KERN_SUCCESS);
+		if (error == 0 && finish_upl != KERN_SUCCESS)
+			error = finish_upl;
 		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		goto pageout_done;
@@ -4670,7 +4683,8 @@ skip_lock_acquisition:
 #if 1
 		// DO NOT UPL_COMMIT_FREE_ON_EMPTY HERE
 		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail,
-		    UPL_COMMIT_CLEAR_PRECIOUS);
+		    UPL_COMMIT_INACTIVATE
+		    | UPL_COMMIT_CLEAR_PRECIOUS);
 #else
 		// DO NOT UPL_ABORT_FREE_ON_EMPTY HERE
 		int commit_tail = ubc_upl_abort_range(upl, start_of_tail, end_of_tail, 0);
@@ -4692,7 +4706,8 @@ skip_lock_acquisition:
 #if 0
 				// DO NOT UPL_COMMIT_FREE_ON_EMPTY HERE
 				int cpgret = ubc_upl_commit_range(upl, uoff, uoff + PAGE_SIZE_64,
-					UPL_COMMIT_CLEAR_PRECIOUS);
+				    UPL_COMMIT_INACTIVATE
+				    | UPL_COMMIT_CLEAR_PRECIOUS);
 #else
 				// DO NOT UPL_ABORT_FREE_ON_EMPTY HERE
 				int cpgret = ubc_upl_abort_range(upl, uoff, uoff + PAGE_SIZE_64,
@@ -4889,7 +4904,8 @@ skip_lock_acquisition:
 			 */
 			if (!range_lock_uncontended_whole_file
 			    && !range_lock_reduced_conservatively) {
-				commit_precious_flags |= UPL_COMMIT_CLEAR_PRECIOUS;
+				commit_precious_flags |= UPL_COMMIT_CLEAR_PRECIOUS
+				    | UPL_COMMIT_INACTIVATE;
 			}
 
 			const int commit_precious_ret = ubc_upl_commit_range(upl, start_of_range,
