@@ -80,15 +80,8 @@
 #include "zfs_comutil.h"
 
 typedef struct znode_stats {
-	kstat_named_t trunc_cleaned_new_eof_page;
-	kstat_named_t trunc_cleaned_only_page;
-	kstat_named_t trunc_lastbytes_post_pageout;
-	kstat_named_t trunc_onlybytes_post_pageout;
-	kstat_named_t trunc_lastbytes;
-	kstat_named_t trunc_lastpage;
-	kstat_named_t trunc_only_bytes;
-	kstat_named_t trunc_only_page;
-	kstat_named_t trunc_tail;
+	kstat_named_t trunc_pageunalign;
+	kstat_named_t trunc_pagealign;
 	kstat_named_t trunc_to_zero;
 	kstat_named_t zfs_trunc_skip_shrink;
 	kstat_named_t rezget_setsize;
@@ -98,15 +91,8 @@ typedef struct znode_stats {
 } znode_stats_t;
 
 static znode_stats_t znode_stats = {
-	{"trunc_cleaned_new_eof_page",			KSTAT_DATA_UINT64 },
-	{"trunc_cleaned_only_page",			KSTAT_DATA_UINT64 },
-	{"t_setsize_lastbytes_pageout",			KSTAT_DATA_UINT64 },
-	{"t_setsize_onlybytes_pageout",			KSTAT_DATA_UINT64 },
-	{"trunc_setsize_lastbytes",			KSTAT_DATA_UINT64 },
-	{"trunc_setsize_lastpage",			KSTAT_DATA_UINT64 },
-	{"trunc_setsize_only_bytes",			KSTAT_DATA_UINT64 },
-	{"trunc_setsize_only_page",			KSTAT_DATA_UINT64 },
-	{"trunc_tail_setsize",				KSTAT_DATA_UINT64 },
+	{"trunc_pageunalign",				KSTAT_DATA_UINT64 },
+	{"trunc_pagealign",				KSTAT_DATA_UINT64 },
 	{"trunc_to_zero",				KSTAT_DATA_UINT64 },
 	{"zfs_trunc_skip_shrink",			KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize",				KSTAT_DATA_UINT64 },
@@ -2211,65 +2197,20 @@ zfs_free_range(znode_t *zp, uint64_t off, uint64_t len)
  */
 
 noinline int
-zfs_trunc_lastbytes_post_pageout(struct vnode *vp, off_t end)
+zfs_trunc_pageunalign_ubcsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
-	ZNODE_STAT_BUMP(trunc_lastbytes_post_pageout);
+	ZNODE_STAT_BUMP(trunc_pageunalign);
 	return(ubc_setsize(vp, end));
 }
 
 noinline int
-zfs_trunc_onlybytes_post_pageout(struct vnode *vp, off_t end)
+zfs_trunc_pagealign_ubcsize(struct vnode *vp, off_t end)
 	__attribute__((noinline))
 	__attribute__((optnone))
 {
-	ZNODE_STAT_BUMP(trunc_onlybytes_post_pageout);
-	return(ubc_setsize(vp, end));
-}
-
-noinline int
-zfs_trunc_lastbytes_ubc_setsize(struct vnode *vp, off_t end)
-	__attribute__((noinline))
-	__attribute__((optnone))
-{
-	ZNODE_STAT_BUMP(trunc_lastbytes);
-	return(ubc_setsize(vp, end));
-}
-
-noinline int
-zfs_trunc_lastpage_ubc_setsize(struct vnode *vp, off_t end)
-	__attribute__((noinline))
-	__attribute__((optnone))
-{
-	ZNODE_STAT_BUMP(trunc_lastpage);
-	return(ubc_setsize(vp, end));
-}
-
-noinline int
-zfs_trunc_only_bytes_ubc_setsize(struct vnode *vp, off_t end)
-	__attribute__((noinline))
-	__attribute__((optnone))
-{
-	ZNODE_STAT_BUMP(trunc_only_bytes);
-	return(ubc_setsize(vp, end));
-}
-
-noinline int
-zfs_trunc_only_page_ubc_setsize(struct vnode *vp, off_t end)
-	__attribute__((noinline))
-	__attribute__((optnone))
-{
-	ZNODE_STAT_BUMP(trunc_only_page);
-	return(ubc_setsize(vp, end));
-}
-
-noinline int
-zfs_trunc_tail_ubc_setsize(struct vnode *vp, off_t end)
-	__attribute__((noinline))
-	__attribute__((optnone))
-{
-	ZNODE_STAT_BUMP(trunc_tail);
+	ZNODE_STAT_BUMP(trunc_pagealign);
 	return(ubc_setsize(vp, end));
 }
 
@@ -2326,6 +2267,7 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	 * Nothing to do if file already at desired length.
 	 */
 	if (end >= zp->z_size) {
+		ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 		zfs_range_unlock(rl);
 		return (0);
 	}
@@ -2354,300 +2296,39 @@ zfs_trunc(znode_t *zp, uint64_t end)
 		ASSERT3S(boost_setsize_retval, !=, 0); // true on success
 	}
 
-
-	const off_t sync_eof = round_page_64(MAX(zp->z_size, ubc_getsize(vp)));
-	const off_t sync_new_eof = trunc_page_64(end);
-	//const off_t sync_page_after_new_eof = sync_new_eof + PAGE_SIZE_64; // for dumping pages
-	const off_t bytes_after_new_eof =  MAX(zp->z_size, ubc_getsize(vp)) - end;
-	const off_t eof_pg_delta = howmany(bytes_after_new_eof, PAGE_SIZE_64) - 1;
-
-	IMPLY(bytes_after_new_eof < PAGE_SIZE_64, eof_pg_delta == 0);
-
-	/*
-	 * Clear any mapped pages in the truncated region.  This has to
-	 * happen outside of the transaction to avoid the possibility of
-	 * a deadlock with someone trying to push a page that we are
-	 * about to invalidate.
-	 */
-
 	ASSERT3U(ubc_getsize(vp), >, end);
 
-	int setsize_retval = 0;
-	extern void IOSleep(unsigned milliseconds);
+	/*
+	 * Reduce the UBCSIZE; this needs to be done before changing
+	 * zp->z_size so that
+	 * ubc_setsize>memory_object_lock_request>zfs_vnop_pageoutv2
+	 * can clean up the pages; m_o_l_r will wait on successful
+	 * disposition of the UPLs, and will hang if any UPL or mapping
+	 * is left dangling.
+	 */
 
-	/* shortcut for truncating to zero */
 	if (end == 0) {
 		int zeroretval = zfs_trunc_to_zero_ubcsize(vp);
 		if (zeroretval == 0) { // TRUE on success
-			printf("ZFS: %s:%d error %d truncating file to zero, proceeding to loop"
-			    " zsize %llu usize %llu fs %s file %s\n", __func__, __LINE__,
-			    error, zp->z_size, ubc_getsize(vp), fsname, fname);
-		} else {
-			goto ubc_cleaned;
+			printf("ZFS: %s:%d ERROR truncating file to zero,"
+			    " zsize %llu usize %llu zid %llu fs %s file %s\n", __func__, __LINE__,
+			    zp->z_size, ubc_getsize(vp), zp->z_id, fsname, fname);
+		}
+	} else if ((end & PAGE_MASK_64) == 0) {
+		int retval = zfs_trunc_pagealign_ubcsize(vp, end);
+		if (retval == 0) { // TRUE ON SUCCESS
+			printf("ZFS: %s:%d: ERROR truncating file to %llu, "
+			    " zsize %llu usize %llu zid %llu fs %s file %s\n", __func__, __LINE__,
+			    end, zp->z_size, ubc_getsize(vp), zp->z_id, fsname, fname);
+		}
+	} else {
+		int retval = zfs_trunc_pageunalign_ubcsize(vp, end);
+		if (retval == 0) {
+			printf("ZFS: %s:%d: ERROR truncating file to %llu, "
+			    " zsize %llu usize %llu zid %llu fs %s file %s\n", __func__, __LINE__,
+			    end, zp->z_size, ubc_getsize(vp), zp->z_id, fsname, fname);
 		}
 	}
-
-	/*
-	 * loop until we have set ubcsize to end (or smaller)
-	 *
-	 * we hold RL_WRITER [0...UINT64_MAX] and we hold z_map_lock
-	 */
-
-	const off_t ubc_at_start_of_loop = ubc_getsize(vp);
-	const hrtime_t loop_start = gethrtime();
-	hrtime_t print_after = loop_start + SEC2NSEC(1);
-
-	for (int iter = 0; ubc_getsize(vp) > end; iter++) {
-
-		ASSERT3P(rl, !=, NULL);
-		ASSERT3P(tsd_get(rl_key), ==, rl);
-		ASSERT(rw_write_held(&zp->z_map_lock));
-
-		// step 1 : clean unusual pages from the page containing the EOF onwards
-
-		boolean_t skip_shrink = B_FALSE;
-
-		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
-		int t_errs = 0;
-		const int MAXCLEANPASS = 3;
-		int i;
-
-		for (i = 0; i < MAXCLEANPASS; i++) {
-			off_t msync_resid = 0;
-
-			ASSERT0(vnode_isrecycled(vp));
-			int zfs_msync_ret = zfs_msync(zp, rl, sync_new_eof, sync_eof, &msync_resid, UBC_PUSHALL);
-
-			if (zfs_msync_ret != 0) {
-				printf("ZFS: %s:%d: (iter %d) (pass %d) %s %d (resid %lld) cleaning range"
-				    " [%lld..%lld] (truncing to %lld) (-pages %lld) (zsize %llu usize %llu)"
-				    " fs %s file %s\n",
-				    __func__, __LINE__, iter, i,
-				    (msync_resid == 0) ? "ERROR (skipping shrink)" : "error",
-				    zfs_msync_ret, msync_resid,
-				    sync_new_eof, sync_eof, end, eof_pg_delta + 1,
-				    zp->z_size, ubc_getsize(vp),
-				    fsname, fname);
-				if (msync_resid == 0)
-					skip_shrink = B_TRUE;
-			}
-
-			zfs_ubc_range_all_flags(zp, vp, sync_new_eof,
-			    sync_eof, __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-
-			if (t_pageout > 0 || t_busy > 0 || t_dirty > 0) {
-				if (t_busy > 0 || t_pageout > 0)
-					skip_shrink = B_TRUE;
-				printf("ZFS: %s:%d: (iter %d) (pass %d) for about-to-be-truncated tail of file [%llu..%llu]:"
-				    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
-				    " (tot pages %llu) (msync ret %d resid %llu) (mapped? %d write? %d)"
-				    " (zsize %lld usize %lld)%s"
-				    " fs %s file %s\n",
-				    __func__, __LINE__, iter, i,
-				    sync_new_eof, sync_eof,
-				    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
-				    eof_pg_delta + 1, zfs_msync_ret, msync_resid,
-				    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-				    zp->z_size, ubc_getsize(vp),
-				    (skip_shrink == B_TRUE) ? "(skipping shrink)" : "",
-				    fsname, fname);
-			} else if (t_pageout == 0 && t_busy == 0 && t_dirty == 0 && t_precious == 0) {
-				if (i > 0) {
-					printf("ZFS: %s:%d: cleaned after pass %d fs %s file %s (skip_shrink %d)\n",
-					    __func__, __LINE__, i, fsname, fname, skip_shrink);
-				}
-				if (zp->z_size < round_page_64(end)) zp->z_size = round_page_64(end);
-				break;
-			}
-			IOSleep(1);
-		}
-
-		// step 2: ubc_setsize to trim the pages after the end of the new last page
-
-		if (!vnode_isreg(vp) // excluded at top
-		    || vnode_isswap(vp) // excluded at top
-		    || vnode_isrecycled(vp)
-		    || zp->z_in_pager_op > 0) {
-			printf("ZFS: %s:%d: (iter %d) skipping shrink (pass %d inuse? %d mapped? %d mappedwrite? %d"
-			    " in pager op? %d)"
-			    " new-eof %llu zsize %llu usize %llu (diff %llu)"
-			    " isreg? %d isswap? %d, isrecycled? %d"
-			    " fs %s file %s\n",
-			    __func__, __LINE__, iter, i, vnode_isinuse(vp, 1),
-			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-			    zp->z_in_pager_op,
-			    end, zp->z_size, ubc_getsize(vp), ubc_getsize(vp) - end,
-			    vnode_isreg(vp), vnode_isswap(vp), vnode_isrecycled(vp),
-			    fsname, fname);
-			skip_shrink = B_TRUE;
-		}
-
-		if (i >= MAXCLEANPASS) {
-			printf("ZFS: %s:%d: (iter %d) could not clean out after %d passes, skipping shrink? %d"
-			    " new-eof %llu zsize %llu usize %llu (diff %llu)"
-			    " t_pageout %d t_busy %d t_precious %d t_dirty %d t_absent %d"
-			    " fs %s file %s\n",
-			    __func__, __LINE__, iter, i, skip_shrink,
-			    end, zp->z_size, ubc_getsize(vp), ubc_getsize(vp) - end,
-			    t_pageout, t_busy, t_precious, t_dirty, t_absent,
-			    fsname, fname);
-		}
-
-		if (skip_shrink == B_TRUE) {
-			ZNODE_STAT_BUMP(zfs_trunc_skip_shrink);
-		} else {
-			int setsize_trim_pages = B_TRUE; // TRUE on success or skip
-
-			if (eof_pg_delta > 0 && end > PAGE_SIZE_64) {
-				ASSERT3U(round_page_64(end), <=, trunc_page_64(ubc_getsize(vp)));
-				int choptailret = zfs_trunc_tail_ubc_setsize(vp,
-				    round_page_64(end));
-				if (choptailret == 0) { // true on success, 0 on failure
-					printf("ZFS: %s:%d: (chop) ubc_setsize failure"
-					    " from: zsize %llu usize %llu to (round end): %llu"
-					    " zid %llu fs %s fn %s (z_in_pager_op %d)\n",
-					    __func__, __LINE__,
-					    zp->z_size, ubc_getsize(vp),
-					    round_page_64(end), zp->z_id,
-					    fsname, fname, zp->z_in_pager_op);
-				}
-			}
-
-			if (setsize_trim_pages == 0) { // TRUE on success or skip
-				printf("ZFS: %s:%d (iter %d) ubc_setsize error trimming pages"
-				    " %lld -> %lld (trunc to %lld) (-pages %lld)"
-				    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d)"
-				    " usize %llu zsize %llu end %llu\n",
-				    __func__, __LINE__, iter,
-				    sync_eof, sync_new_eof, end, eof_pg_delta + 1,
-				    fsname, fname,
-				    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-				    is_file_clean(vp, sync_new_eof) != 0,
-				    ubc_getsize(vp), zp->z_size, end);
-				continue;
-			}
-
-			// step 3: ubc_setsize to the desired value
-
-			boolean_t final_page_unusual = B_FALSE;
-
-			if ((end & PAGE_MASK_64) != 0) {
-				t_dirty = 0; t_pageout = 0; t_precious = 0; t_absent = 0; t_busy = 0;
-				t_errs = zfs_ubc_range_all_flags(zp, vp, trunc_page_64(end),
-				    round_page_64(end), __func__,
-				    &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-				if (t_pageout > 0 || t_dirty > 0 || t_absent > 0 || t_busy > 0 || t_precious > 0) {
-					printf("ZFS: %s:%d: (iter %d) for final page of file [%llu..%llu] (new end %llu):"
-					    " errs %d dirty %d pageout %d precious %d absent %d busy %d"
-					    " fs %s file %s\n",
-					    __func__, __LINE__, iter,
-					    trunc_page_64(end), round_page_64(end), end,
-					    t_errs, t_dirty, t_pageout, t_precious, t_absent, t_busy,
-					    fsname, fname);
-				}
-				if (t_pageout > 0 || t_dirty > 0 || t_absent > 0 || t_busy > 0 || t_precious > 0)
-					final_page_unusual = B_TRUE;
-			}
-
-			if (eof_pg_delta > 0 && (end & PAGE_MASK_64) !=0) {
-				if (final_page_unusual == B_FALSE) {
-					setsize_retval = zfs_trunc_lastbytes_ubc_setsize(vp, end);
-				} else {
-					// clean the page within the current locking context
-					struct vnop_pageout_args ap = {
-						.a_vp = vp,
-						.a_pl = NULL,
-						.a_f_offset = trunc_page_64(end),
-						.a_size = PAGE_SIZE,
-						.a_flags = UPL_MSYNC,
-						.a_context = NULL,
-					};
-
-					if (zp->z_size < round_page_64(end))
-						zp->z_size = round_page_64(end);
-					int pageout_err = zfs_vnop_pageoutv2(&ap);
-					ASSERT0(pageout_err);
-					int popflags = 0;
-					int popret = ubc_page_op(vp, trunc_page_64(end),
-					    0, NULL, &popflags);
-					if (popret == KERN_SUCCESS && popflags != 0) {
-						printf("ZFS: %s:%d: WARNING: unusual popflags 0x%x after pageout before"
-						    "zfs_trunc_lastbytes_post_pageout, page %llu, fs %s file %s\n",
-						    __func__, __LINE__, popflags,
-						    trunc_page_64(end), fsname, fname);
-					}
-					ZNODE_STAT_BUMP(trunc_cleaned_new_eof_page);
-					setsize_retval = zfs_trunc_lastbytes_post_pageout(vp, end);
-					zp->z_size = end;
-				}
-			} else if (eof_pg_delta > 0) {
-				if (final_page_unusual == B_FALSE) {
-					setsize_retval = zfs_trunc_lastpage_ubc_setsize(vp, end);
-				} else {
-					// clean the page within the current locking context
-					struct vnop_pageout_args ap = {
-						.a_vp = vp,
-						.a_pl = NULL,
-						.a_f_offset = trunc_page_64(end),
-						.a_size = PAGE_SIZE,
-						.a_flags = UPL_MSYNC,
-						.a_context = NULL,
-					};
-
-					if (zp->z_size < round_page_64(end))
-						zp->z_size = round_page_64(end);
-					int pageout_err = zfs_vnop_pageoutv2(&ap);
-					ASSERT0(pageout_err);
-					int popflags = 0;
-					int popret = ubc_page_op(vp, trunc_page_64(end),
-					    0, NULL, &popflags);
-					if (popret == KERN_SUCCESS && popflags != 0) {
-						printf("ZFS: %s:%d: WARNING: unusual popflags 0x%x after pageout before"
-						    "zfs_trunc_onlybytes_post_pageout, page %llu, fs %s file %s\n",
-						    __func__, __LINE__, popflags,
-						    trunc_page_64(end), fsname, fname);
-					}
-					ZNODE_STAT_BUMP(trunc_cleaned_only_page);
-					setsize_retval = zfs_trunc_onlybytes_post_pageout(vp, end);
-					zp->z_size = end;
-				}
-			}  else if ((end & PAGE_MASK_64) != 0) {
-				setsize_retval = zfs_trunc_only_bytes_ubc_setsize(vp, end);
-			} else {
-				setsize_retval = zfs_trunc_only_page_ubc_setsize(vp, end);
-			}
-
-			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true for success
-
-			if (setsize_retval == 0) {
-				printf("ZFS: %s:%d: (iter %d) (setsize_retval bad? %d)"
-				    " setting size to %lld from %lld (now ubcsize %lld, z_size %lld))"
-				    " fs %s file %s (mapped? %d) (writable? %d) (dirty? %d) (isinuse? %d)\n",
-				    __func__, __LINE__, iter, setsize_retval,
-				    end, ubcsize_at_entry, ubc_getsize(vp), zp->z_size,
-				    fsname, fname,
-				    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-				    is_file_clean(vp, sync_new_eof) != 0, vnode_isinuse(vp, 1));
-			}
-
-		} // skip_shrink
-
-		IOSleep(10);
-
-		const hrtime_t now = gethrtime();
-		if (now > print_after) {
-			print_after = now + SEC2NSEC(1);
-			printf("ZFS: %s:%d: (iter %d, secs %llu)"
-			    " still trying to move ubc size from %llu (now %llu) to %llu"
-			    " for fs %s file %s\n",
-			    __func__, __LINE__, iter, NSEC2SEC(now - loop_start),
-			    ubc_at_start_of_loop, ubc_getsize(vp), end,
-			    fsname, fname);
-			IOSleep(100);
-		}
-	} // for ubcsize > end
-
-ubc_cleaned:
 
 	error = dmu_free_long_range(zfsvfs->z_os, zp->z_id, end,  -1);
 	if (error) {
