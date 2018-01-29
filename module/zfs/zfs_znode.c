@@ -83,7 +83,6 @@ typedef struct znode_stats {
 	kstat_named_t trunc_pageunalign;
 	kstat_named_t trunc_pagealign;
 	kstat_named_t trunc_to_zero;
-	kstat_named_t zfs_trunc_skip_shrink;
 	kstat_named_t rezget_setsize;
 	kstat_named_t rezget_setsize_shrink;
 	kstat_named_t rezget_setsize_shrink_nonaligned;
@@ -94,7 +93,6 @@ static znode_stats_t znode_stats = {
 	{"trunc_pageunalign",				KSTAT_DATA_UINT64 },
 	{"trunc_pagealign",				KSTAT_DATA_UINT64 },
 	{"trunc_to_zero",				KSTAT_DATA_UINT64 },
-	{"zfs_trunc_skip_shrink",			KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize",				KSTAT_DATA_UINT64 },
 	{"zfs_rezget_setsize_shrink",			KSTAT_DATA_UINT64 },
 	{"rezget_shrink_nonaligned",			KSTAT_DATA_UINT64 },
