@@ -124,6 +124,7 @@ typedef struct vnops_stats {
 	kstat_named_t fill_holes_upl_valid_pages_skipped;
 	kstat_named_t fill_holes_upl_absent_pages_filled;
 	kstat_named_t zfs_write_calls;
+	kstat_named_t zfs_write_low_mem_sleep;
 	kstat_named_t zfs_write_clean_on_write;
 	kstat_named_t zfs_write_clean_on_write_sync;
 	kstat_named_t zfs_write_cluster_copy_ok;
@@ -162,6 +163,7 @@ static vnops_stats_t vnops_stats = {
 	{ "fill_holes_upl_valid_pages_skipped",          KSTAT_DATA_UINT64 },
 	{ "fill_holes_upl_absent_pages_filled",          KSTAT_DATA_UINT64 },
 	{ "zfs_write_calls",                             KSTAT_DATA_UINT64 },
+	{ "zfs_write_low_mem_sleep",                     KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write",                    KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write_sync",               KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_copy_ok",              KSTAT_DATA_UINT64 },
@@ -2828,8 +2830,8 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	sa_bulk_attr_t	bulk[4];
 	uint64_t	mtime[2], ctime[2];
 
+	VNOPS_STAT_BUMP(zfs_write_calls);
 
-    VNOPS_STAT_BUMP(zfs_write_calls);
 	/*
 	 * Fasttrack empty write
 	 */
@@ -2837,6 +2839,20 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	if (n == 0) {
 		VNOPS_STAT_BUMP(zfs_zero_length_write);
 		return (0);
+	}
+
+	/*
+	 * If we are low on memory, then throttle this write for
+	 * a millisecond -- writes generate memory pressure in
+	 * several ways, so let's give the kernel a bit of time
+	 * to deal with memory pressure.
+	 */
+
+	if (spl_free_manual_pressure_wrapper() > 0
+	    || spl_free_wrapper() < 2ULL * MAX_UPL_TRANSFER_BYTES) {
+		VNOPS_STAT_BUMP(zfs_write_low_mem_sleep);
+		extern void IOSleep(unsigned milliseconds);
+		IOSleep(1);
 	}
 
 	if (limit == RLIM64_INFINITY || limit > MAXOFFSET_T)
