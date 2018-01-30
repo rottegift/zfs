@@ -426,7 +426,7 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 				VNOPS_STAT_BUMP(zfs_close_low_memory_clean);
 				off_t resid = 0;
 				int msync_ret = ubc_msync(vp,
-				    (off_t)0, ubc_getsize(vp), NULL,
+				    (off_t)0, ubc_getsize(vp), &resid,
 				    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
 				if (msync_ret == 0) { // 0 on failure
 					const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
