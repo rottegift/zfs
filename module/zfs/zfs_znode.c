@@ -1961,7 +1961,7 @@ zfs_extend(znode_t *zp, uint64_t end)
 	if (!vnode_isswap(vp)) {
 		/* don't ever shrink an isswap file */
 		if (spl_ubc_is_mapped_writable(vp) || vnode_isinuse(vp, 1)) {
-			printf("ZFS: %s:%d: NOTE: file mapped writable %d or inuse %d"
+			dprintf("ZFS: %s:%d: NOTE: file mapped writable %d or inuse %d"
 			    " usize %llu end %lld file %s\n",
 			    __func__, __LINE__,
 			    spl_ubc_is_mapped_writable(vp), vnode_isinuse(vp, 1),
