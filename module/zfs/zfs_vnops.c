@@ -119,7 +119,6 @@ extern int cluster_copy_upl_data(uio_t *, upl_t, int, int *);
 int zfs_vnop_force_formd_normalized_output = 0; /* disabled by default */
 
 typedef struct vnops_stats {
-	kstat_named_t fill_holes_ubc_satisfied_all;
 	kstat_named_t fill_holes_rop_present_total_skip;
 	kstat_named_t fill_holes_rop_present_bytes_skipped;
 	kstat_named_t fill_holes_upl_valid_pages_skipped;
@@ -158,7 +157,6 @@ typedef struct vnops_stats {
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
-	{ "fill_holes_ubc_satisfied_all",                KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_total_skip",           KSTAT_DATA_UINT64 },
 	{ "fill_holes_rop_present_bytes_skipped",        KSTAT_DATA_UINT64 },
 	{ "fill_holes_upl_valid_pages_skipped",          KSTAT_DATA_UINT64 },
@@ -1150,11 +1148,6 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 
 	VNOPS_STAT_INCR(fill_holes_upl_valid_pages_skipped, valid_pages_skipped);
 	VNOPS_STAT_INCR(fill_holes_upl_absent_pages_filled, absent_pages_filled);
-
-	if (err == 0) {
-		if (absent_pages_filled == 0 && upl_size > 0)
-			VNOPS_STAT_BUMP(fill_holes_ubc_satisfied_all);
-	}
 
 	return (err);
 }
