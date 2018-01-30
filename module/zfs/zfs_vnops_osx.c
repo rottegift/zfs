@@ -4299,7 +4299,7 @@ acquire_locks:
 			 * as we have the range lock we can now safely wait on the
 			 * z_map_lock
 			 */
-			for (uint64_t tries = 0; ; tries++) {
+			for (uint64_t tries = 0; !rw_write_held(&zp->z_map_lock); tries++) {
 				if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
 					need_release = B_TRUE;
 					break;
@@ -4322,26 +4322,49 @@ acquire_locks:
 					    (zp->z_map_lock_holder != NULL)
 					    ? zp->z_map_lock_holder
 					    : "(null holder!)");
+					const uint64_t conservative_end =
+					    round_page_64(MAX(zp->z_size, ubc_getsize(vp))) +
+					    MAX_UPL_SIZE_BYTES;
+					zfs_range_reduce(rl, 0, conservative_end);
+					range_lock_reduced_conservatively = B_TRUE;
 					goto skip_lock_acquisition;
 				}
+			}
+			if ((ap->a_flags & UPL_MSYNC) == 0
+			    && !spl_ubc_is_mapped_writable(vp)
+			    && tsd_get(rl_key_vp_from_getvnode) == NULL
+			    && !(end_of_pageout > zp->z_blksz && (!ISP2(zp->z_blksz) ||
+				    zp->z_blksz < zp->z_zfsvfs->z_max_blksz))) {
+				/* !... condition from zfs_rlock.c */
+				zfs_range_reduce(rl, rloff, rllen);
+			} else if (!(end_of_pageout > zp->z_blksz && (!ISP2(zp->z_blksz) ||
+				    zp->z_blksz < zp->z_zfsvfs->z_max_blksz))){
+				/* if range_lock wouldn't have given us 0, UINT64_MAX */
+				const uint64_t conservative_end =
+				    round_page_64(MAX(zp->z_size, ubc_getsize(vp))) +
+				    MAX_UPL_SIZE_BYTES;
+				zfs_range_reduce(rl, 0, conservative_end);
+				range_lock_reduced_conservatively = B_TRUE;
 			}
 			break;
 		}
 		if (secs > 10) {
 			/* scream and break out */
-			if (!rw_tryenter (&zp->z_map_lock, RW_WRITER)) {
+			if (!rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
 				printf("ZFS: %s:%d: proceeding to pageout WITHOUT LOCKS"
-				    " off %lld len %lld for file %s\n", __func__, __LINE__,
-				    rloff, rllen, zp->z_name_cache);
-				ASSERT3P(rl, ==, NULL);
+				    " (rw held? %d) off %lld len %lld for zid %llu fs %s file %s\n", __func__, __LINE__,
+				    rw_write_held(&zp->z_map_lock),
+				    rloff, rllen, zp->z_id, fsname, fname);
+				VERIFY3P(rl, ==, NULL);
 				drop_rl = B_FALSE;
 				need_release = B_FALSE;
 				goto skip_lock_acquisition;
 			} else {
-				printf("ZFS: %s:%d: couldn't get RL off %lld len %lld for file %s,"
+				printf("ZFS: %s:%d: couldn't get RL off %lld len %lld for"
+				    " zid %llu fs %s file %s,"
 				    " but acquired z_map_lock, proceeding\n", __func__, __LINE__,
-				    rloff, rllen, zp->z_name_cache);
-				ASSERT3P(rl, ==, NULL);
+				    rloff, rllen, zp->z_id, fsname, fname);
+				VERIFY3P(rl, ==, NULL);
 				drop_rl = B_FALSE;
 				need_release = B_TRUE;
 				zp->z_map_lock_holder = __func__;
@@ -4367,9 +4390,11 @@ acquire_locks:
 				ASSERT3P(tsd_get(rl_key), ==, rl);
 				tsd_set(rl_key, NULL);
 				zfs_range_unlock(rl);
-				printf("ZFS: %s:%d range lock dropped for [%lld, %ld] for fs %s file %s"
+				rl = NULL;
+				printf("ZFS: %s:%d RANGE LOCK DROPPED for [%lld, %ld] for zid %llu fs %s file %s"
 				    " (z_in_pager_op %d)\n",
-				    __func__, __LINE__, ap->a_f_offset, a_size, fsname, fname,
+				    __func__, __LINE__, ap->a_f_offset, a_size,
+				    zp->z_id, fsname, fname,
 				    zp->z_in_pager_op);
 			}
 			IOSleep(10); // we hold no locks, so let work be done
