@@ -4213,7 +4213,7 @@ acquire_locks:
 				break;
 			}
 			VNOPS_OSX_STAT_BUMP(pageoutv2_want_lock);
-			if ((tries % 1000) == 0) {
+			if ((tries % 1000) == 0 && tries > 0) {
 				printf("ZFS: %s:%d: (%lld msec) trying to get z_map_lock for file %s"
 				    " (held by %s)\n", __func__, __LINE__, tries,
 				    zp->z_name_cache,
