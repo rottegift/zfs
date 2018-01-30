@@ -152,6 +152,7 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t zfs_fsync_disabled;
 	kstat_named_t zfs_fsync_skipped;
+	kstat_named_t zfs_close;
 	kstat_named_t zfs_close_low_memory_clean;
 	kstat_named_t zfs_close_low_memory_rl_miss;
 } vnops_stats_t;
@@ -190,6 +191,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_skipped",                           KSTAT_DATA_UINT64 },
+	{ "zfs_close", 			                 KSTAT_DATA_UINT64 },
 	{ "zfs_close_low_memory_clean",                  KSTAT_DATA_UINT64 },
 	{ "zfs_close_low_memory_rl_miss",                KSTAT_DATA_UINT64 },
 };
@@ -447,6 +449,8 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 			VNOPS_STAT_BUMP(zfs_close_low_memory_rl_miss);
 		}
 	}
+
+	VNOPS_STAT_BUMP(zfs_close);
 
 #if 0
 	if (!zfs_has_ctldir(zp) && zp->z_zfsvfs->z_vscan &&
