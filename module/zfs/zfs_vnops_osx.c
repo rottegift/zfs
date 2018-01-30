@@ -4733,15 +4733,17 @@ skip_lock_acquisition:
 					int popflags = 0;
 					int poperr = ubc_page_op(vp, uoff + ap->a_f_offset,
 					    0, NULL, &popflags);
-					printf("ZFS: %s:%d: DOUBLE WARNING"
-					    " (recovering from range committing tail fail)"
-					    " page commit error %d for upl page %lld @"
-					    " %lld in fs %s file %s"
-					    " (zsize %lld usize %lld poperr %d popflags 0x%x)\n",
-					    __func__, __LINE__,
-					    cpgret, uoff / PAGE_SIZE_64,
-					    uoff + ap->a_f_offset, fsname, fname,
-					    zp->z_size, ubc_getsize(vp), poperr, popflags);
+					if (popflags != 0) {
+						printf("ZFS: %s:%d: DOUBLE WARNING"
+						    " (recovering from range committing tail fail)"
+						    " page commit error %d for upl page %lld @"
+						    " %lld in fs %s file %s"
+						    " (zsize %lld usize %lld poperr %d popflags 0x%x)\n",
+						    __func__, __LINE__,
+						    cpgret, uoff / PAGE_SIZE_64,
+						    uoff + ap->a_f_offset, fsname, fname,
+						    zp->z_size, ubc_getsize(vp), poperr, popflags);
+					}
 				} else {
 					pgcommits++;
 				}
