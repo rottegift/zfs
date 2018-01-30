@@ -109,6 +109,11 @@ typedef struct vnops_osx_stats {
 	kstat_named_t zfs_msync_calls;
 	kstat_named_t zfs_msync_pages;
 	kstat_named_t zfs_msync_ranged_pages;
+	kstat_named_t msync_busy;
+	kstat_named_t msync_pageout;
+	kstat_named_t msync_absent;
+	kstat_named_t msync_cleaned_precious;
+	kstat_named_t msync_cleaned_dirty;
 	kstat_named_t bluster_pageout_calls;
 	kstat_named_t bluster_pageout_dmu_bytes;
 	kstat_named_t bluster_pageout_pages;
@@ -144,6 +149,11 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "zfs_msync_calls",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msynced_pages",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msync_ranged_pages",	       KSTAT_DATA_UINT64 },
+	{ "msync_busy",			       KSTAT_DATA_UINT64 },
+	{ "msync_pageout",		       KSTAT_DATA_UINT64 },
+	{ "msync_absent",		       KSTAT_DATA_UINT64 },
+	{ "msync_cleaned_precious",	       KSTAT_DATA_UINT64 },
+	{ "msync_cleaned_dirty",	       KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_dmu_bytes",         KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
@@ -3633,6 +3643,11 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 		    vnode_isrecycled(vp), zp->z_id,
 		    fsname, fname);
 	}
+	VNOPS_OSX_STAT_INCR(msync_busy, inner_noted_busy + outer_noted_busy);
+	VNOPS_OSX_STAT_INCR(msync_pageout, inner_noted_pageout + outer_noted_pageout);
+	VNOPS_OSX_STAT_INCR(msync_absent, inner_noted_absent + outer_noted_absent);
+	VNOPS_OSX_STAT_INCR(msync_cleaned_precious, cleaned_precious);
+	VNOPS_OSX_STAT_INCR(msync_cleaned_dirty, cleaned_dirty);
 
 	return (0);
 }
