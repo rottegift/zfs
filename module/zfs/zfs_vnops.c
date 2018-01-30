@@ -2998,7 +2998,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		 */
 		ASSERT3U(rl->r_off, ==, 0);
 		const off_t new_filesize = zp->z_size + uio_resid(uio);
-		printf("ZFS: %s:%d: full file lock (%llu, %llu) obtained, bumping"
+		dprintf("ZFS: %s:%d: full file lock (%llu, %llu) obtained, bumping"
 		    " woff %llu and uio_offset %llu to zsize %llu"
 		    " usize %llu vs new_filesize which is %llu (includes resid %llu)"
 		    " and bouncing ubc to clear out tail of current EOF"
