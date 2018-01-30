@@ -126,8 +126,6 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_write_calls;
 	kstat_named_t zfs_write_low_mem_sleep;
 	kstat_named_t zfs_write_low_mem_wait;
-	kstat_named_t zfs_write_clean_on_write;
-	kstat_named_t zfs_write_clean_on_write_sync;
 	kstat_named_t zfs_write_cluster_copy_ok;
 	kstat_named_t zfs_write_cluster_copy_complete;
 	kstat_named_t zfs_write_cluster_copy_bytes;
@@ -144,7 +142,6 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_read_mappedread_mapped_file_bytes;
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
 	kstat_named_t zfs_fsync_zil_commit_reg_vn;
-	kstat_named_t zfs_fsync_ubc_msync;
 	kstat_named_t zfs_fsync_ubc_msync_new;
 	kstat_named_t zfs_fsync_ubc_msync_averted;
 	kstat_named_t zfs_fsync_want_lock;
@@ -163,8 +160,6 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_write_calls",                             KSTAT_DATA_UINT64 },
 	{ "zfs_write_low_mem_sleep",                     KSTAT_DATA_UINT64 },
 	{ "zfs_write_low_mem_wait",                      KSTAT_DATA_UINT64 },
-	{ "zfs_write_clean_on_write",                    KSTAT_DATA_UINT64 },
-	{ "zfs_write_clean_on_write_sync",               KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_copy_ok",              KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_copy_complete",        KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_copy_bytes",           KSTAT_DATA_UINT64 },
@@ -181,7 +176,6 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_read_mappedread_mapped_file_bytes",       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit_reg_vn",                 KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_ubc_msync",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync_new",                     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync_averted",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
