@@ -1801,10 +1801,11 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 
 		if (uio_offset(uio) + nbytes > zp->z_size) {
 			printf("ZFS: %s:%d: nbytes %lu [%llu..%llu] would read past end of file %lld"
-			    " usize %lld (reducing nbytes to %llu) file %s\n", __func__, __LINE__,
+			    " usize %lld (reducing nbytes to %llu) zid %llu fs %s file %s\n", __func__, __LINE__,
 			    nbytes, uio_offset(uio), uio_offset(uio) + nbytes,
 			    zp->z_size, ubc_getsize(vp),
-			    zp->z_size - uio_offset(uio), zp->z_name_cache);
+			    zp->z_size - uio_offset(uio),
+			    zp->z_id, fsname, fname);
 			nbytes = zp->z_size - uio_offset(uio);
 		}
 
