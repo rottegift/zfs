@@ -134,11 +134,6 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_write_cluster_copy_error;
 	kstat_named_t zfs_write_cluster_copy_short_write;
 	kstat_named_t zfs_write_helper_iters;
-	kstat_named_t zfs_write_arcbuf_assign;
-	kstat_named_t zfs_write_arcbuf_assign_bytes;
-	kstat_named_t zfs_write_uio_dbufs;
-	kstat_named_t zfs_write_uio_dbuf_bytes;
-	kstat_named_t zfs_zero_length_write;
 	kstat_named_t zfs_write_isreg_want_lock;
 	kstat_named_t zfs_read_calls;
 	kstat_named_t zfs_read_clean_on_read;
@@ -176,11 +171,6 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_write_sync_cluster_copy_error",           KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_short_write",          KSTAT_DATA_UINT64 },
 	{ "zfs_write_helper_iters",                      KSTAT_DATA_UINT64 },
-	{ "zfs_write_arcbuf_assign",                     KSTAT_DATA_UINT64 },
-	{ "zfs_write_arcbuf_assign_bytes",               KSTAT_DATA_UINT64 },
-	{ "zfs_write_uio_dbufs",                         KSTAT_DATA_UINT64 },
-	{ "zfs_write_uio_dbuf_bytes",                    KSTAT_DATA_UINT64 },
-	{ "zfs_zero_length_write",                       KSTAT_DATA_UINT64 },
 	{ "zfs_write_isreg_want_lock",                   KSTAT_DATA_UINT64 },
 	{ "zfs_read_calls",                              KSTAT_DATA_UINT64 },
 	{ "zfs_read_clean_on_read",                      KSTAT_DATA_UINT64 },
@@ -2859,7 +2849,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 	 */
 	n = start_resid;
 	if (n == 0) {
-		VNOPS_STAT_BUMP(zfs_zero_length_write);
+		ASSERT3U(start_resid, >, 0);
 		return (0);
 	}
 
