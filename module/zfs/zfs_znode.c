@@ -83,9 +83,6 @@ typedef struct znode_stats {
 	kstat_named_t trunc_pageunalign;
 	kstat_named_t trunc_pagealign;
 	kstat_named_t trunc_to_zero;
-	kstat_named_t rezget_setsize;
-	kstat_named_t rezget_setsize_shrink;
-	kstat_named_t rezget_setsize_shrink_nonaligned;
 	kstat_named_t extend_setsize;
 } znode_stats_t;
 
@@ -93,9 +90,6 @@ static znode_stats_t znode_stats = {
 	{"trunc_pageunalign",				KSTAT_DATA_UINT64 },
 	{"trunc_pagealign",				KSTAT_DATA_UINT64 },
 	{"trunc_to_zero",				KSTAT_DATA_UINT64 },
-	{"zfs_rezget_setsize",				KSTAT_DATA_UINT64 },
-	{"zfs_rezget_setsize_shrink",			KSTAT_DATA_UINT64 },
-	{"rezget_shrink_nonaligned",			KSTAT_DATA_UINT64 },
 	{"zfs_extend_setsize",				KSTAT_DATA_UINT64 },
 };
 
@@ -1653,69 +1647,6 @@ zfs_rezget(znode_t *zp)
 
 	zp->z_unlinked = (zp->z_links == 0);
 	zp->z_blksz = doi.doi_data_block_size;
-	if (vp != NULL && vnode_isreg(vp)) {
-		/* modify this under the lock, to avoid
-		 * interfering with other users of the
-		 * file size (notably update_pages, mappedread
-		 */
-		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl_t *rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-		int setsize_retval = 0;
-		boolean_t did_setsize = B_FALSE;
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-		off_t ubcsize = ubc_getsize(vp);
-		off_t zsize = zp->z_size;
-		vn_pages_remove(vp, 0, 0); // does nothing in O3X
-		if (zp->z_size != size || zp->z_size != ubcsize) {
-			if (ubc_getsize(vp) > zp->z_size
-			    && !spl_ubc_is_mapped(vp, NULL)
-			    && !vnode_isswap(vp)
-			    && vnode_isinuse(vp, 1) == 0
-			    && 0 == is_file_clean(vp, ubc_getsize(vp)) // is_file_clean returns nonzero if file is dirty
-			    && zp->z_in_pager_op == 0) {
-				ZNODE_STAT_BUMP(rezget_setsize);
-				if (ubc_getsize(vp) > zp->z_size) {
-					ZNODE_STAT_BUMP(rezget_setsize_shrink);
-					if ((zp->z_size & PAGE_MASK_64) != 0)
-						ZNODE_STAT_BUMP(rezget_setsize_shrink_nonaligned);
-				}
-				setsize_retval = ubc_setsize(vp, zp->z_size);
-				did_setsize = B_TRUE;
-			} else if (ubc_getsize(vp) < zp->z_size) {
-				setsize_retval = ubc_setsize(vp, zp->z_size);
-				ZNODE_STAT_BUMP(rezget_setsize);
-			} else {
-				printf("ZFS: %s:%d: unclean or busy file %s usize %lld zsize %lld\n",
-				    __func__, __LINE__,
-				    zp->z_name_cache, ubc_getsize(vp), zp->z_size);
-			}
-		}
-
-		z_map_drop_lock(zp, &need_release, &need_upgrade);
-		ASSERT3S(tries, <=, 2);
-
-		if (did_setsize == B_TRUE) {
-			ASSERT3S(setsize_retval, !=, 0); // ubc_setsize returns true on success
-			printf("ZFS: %s: setsize: size was %lld, zp->z_size was %lld, ubcsize was %lld\n",
-			    __func__, size, zsize, ubcsize);
-			if (zsize > size) {
-				ASSERT3S(zsize, ==, zp->z_size);
-				boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-				uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-				int refresh_retval = ubc_refresh_range(vp, size, zsize);
-				z_map_drop_lock(zp, &need_release, &need_upgrade);
-				ASSERT3S(tries, <=, 2);
-				if (refresh_retval != 0) {
-					printf("ZFS: %s:%d: refresh range [%lld, %lld] failed for file %s\n",
-					    __func__, __LINE__, size, zsize, zp->z_name_cache);
-				}
-			}
-		} else {
-			ASSERT3S(zsize, ==, ubcsize);
-		}
-		zfs_range_unlock(rl);
-	}
 
 	ZFS_OBJ_HOLD_EXIT(zfsvfs, obj_num);
 
