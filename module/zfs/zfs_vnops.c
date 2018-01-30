@@ -7438,6 +7438,14 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 			    vnode_isinuse(vp, 0),
 			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
 			    zp->z_name_cache);
+			off_t resid = 0;
+			int msync_out = ubc_msync(vp, 0, ubc_getsize(vp), &resid, UBC_PUSHALL);
+			if (msync_out != 0) {
+				printf("ZFS: %s:%d: msync_out err %d resid %llu usize %llu"
+				    " zid %llu file %s\n",
+				    __func__, __LINE__, msync_out, resid, ubc_getsize(vp),
+				    zp->z_id, zp->z_name_cache);
+			}
 		}
 	} else if (vnode_isinuse(vp, 0)) {
 		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
