@@ -413,6 +413,8 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	if (may_clean_pages == B_TRUE) {
 		rl_t *rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 		if (rl != NULL) {
+			ASSERT3P(tsd_get(rl_key), ==, NULL);
+			tsd_set(rl_key, rl);
 			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
 			ASSERT3U(tries, <, 2);
@@ -437,7 +439,9 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 				}
 			}
 			z_map_drop_lock(zp, &need_release, &need_upgrade);
+			ASSERT3P(tsd_get(rl_key), ==, rl);
 			zfs_range_unlock(rl);
+			tsd_set(rl_key, NULL);
 		} else {
 			VNOPS_STAT_BUMP(zfs_close_low_memory_rl_miss);
 		}
