@@ -104,8 +104,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
-	kstat_named_t mnomap_shrink_ubc;
-	kstat_named_t pageoutv2_dismiss_shrink_ubc;
 	kstat_named_t zfs_msync_calls;
 	kstat_named_t zfs_msync_pages;
 	kstat_named_t zfs_msync_ranged_pages;
@@ -144,8 +142,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
-	{ "mnomap_shrink_ubc",                 KSTAT_DATA_UINT64 },
-	{ "pageoutv2_dismiss_shrink_ubc",      KSTAT_DATA_UINT64 },
 	{ "zfs_msync_calls",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msynced_pages",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msync_ranged_pages",	       KSTAT_DATA_UINT64 },
