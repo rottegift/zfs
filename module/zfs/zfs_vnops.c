@@ -125,6 +125,7 @@ typedef struct vnops_stats {
 	kstat_named_t fill_holes_upl_absent_pages_filled;
 	kstat_named_t zfs_write_calls;
 	kstat_named_t zfs_write_low_mem_sleep;
+	kstat_named_t zfs_write_low_mem_wait;
 	kstat_named_t zfs_write_clean_on_write;
 	kstat_named_t zfs_write_clean_on_write_sync;
 	kstat_named_t zfs_write_cluster_copy_ok;
@@ -166,6 +167,7 @@ static vnops_stats_t vnops_stats = {
 	{ "fill_holes_upl_absent_pages_filled",          KSTAT_DATA_UINT64 },
 	{ "zfs_write_calls",                             KSTAT_DATA_UINT64 },
 	{ "zfs_write_low_mem_sleep",                     KSTAT_DATA_UINT64 },
+	{ "zfs_write_low_mem_wait",                      KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write",                    KSTAT_DATA_UINT64 },
 	{ "zfs_write_clean_on_write_sync",               KSTAT_DATA_UINT64 },
 	{ "zfs_write_sync_cluster_copy_ok",              KSTAT_DATA_UINT64 },
@@ -2873,6 +2875,13 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 		VNOPS_STAT_BUMP(zfs_write_low_mem_sleep);
 		extern void IOSleep(unsigned milliseconds);
 		IOSleep(1);
+		for (int iter = 0;
+		     iter < 30
+			 && spl_free_wrapper() < 2ULL * MAX_UPL_TRANSFER_BYTES;
+		     iter++) {
+			VNOPS_STAT_BUMP(zfs_write_low_mem_wait);
+			IOSleep(1);
+		}
 	}
 
 	if (limit == RLIM64_INFINITY || limit > MAXOFFSET_T)
