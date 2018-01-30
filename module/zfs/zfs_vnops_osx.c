@@ -131,7 +131,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_dirty_pages_blustered;
 	kstat_named_t pageoutv2_error;
 	kstat_named_t pageoutv1_pages;
-	kstat_named_t pageoutv1_want_lock;
 	kstat_named_t pagein_calls;
 	kstat_named_t pagein_pages;
 	kstat_named_t pagein_want_lock;
@@ -169,7 +168,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_error",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
-	{ "pageoutv1_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pagein_calls",                      KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 	{ "pagein_want_lock",                  KSTAT_DATA_UINT64 },
@@ -3002,7 +3000,7 @@ zfs_vnop_pageout(struct vnop_pageout_args *ap)
 	if (!rw_write_held(&zp->z_map_lock)) {
 		ASSERT(spl_ubc_is_mapped(vp, NULL));
 		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-		VNOPS_OSX_STAT_INCR(pageoutv1_want_lock, tries);
+		ASSERT3U(tries, <, 10);
 	} else {
 		printf("ZFS: %s:%d: z_map_lock already held for file %s\n", __func__, __LINE__,
 			zp->z_name_cache);

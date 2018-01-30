@@ -137,14 +137,12 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_read_clean_on_read;
 	kstat_named_t zfs_read_low_mem_sleep;
 	kstat_named_t zfs_read_low_mem_yield;
-	kstat_named_t mappedread_lock_tries;
 	kstat_named_t mappedread_unusual_pages;
 	kstat_named_t zfs_read_mappedread_mapped_file_bytes;
 	kstat_named_t zfs_read_mappedread_unmapped_file_bytes;
 	kstat_named_t zfs_fsync_zil_commit_reg_vn;
 	kstat_named_t zfs_fsync_ubc_msync_new;
 	kstat_named_t zfs_fsync_ubc_msync_averted;
-	kstat_named_t zfs_fsync_want_lock;
 	kstat_named_t zfs_fsync_disabled;
 	kstat_named_t zfs_fsync_skipped;
 	kstat_named_t zfs_close;
@@ -171,14 +169,12 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_read_clean_on_read",                      KSTAT_DATA_UINT64 },
 	{ "zfs_read_low_mem_sleep",                      KSTAT_DATA_UINT64 },
 	{ "zfs_read_low_mem_yield",                      KSTAT_DATA_UINT64 },
-	{ "mappedread_lock_tries",                       KSTAT_DATA_UINT64 },
 	{ "mappedread_unusual_pages",  	                 KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_mapped_file_bytes",       KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_unmapped_file_bytes",     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_zil_commit_reg_vn",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync_new",                     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync_averted",                 KSTAT_DATA_UINT64 },
-	{ "zfs_fsync_want_lock",                         KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_skipped",                           KSTAT_DATA_UINT64 },
 	{ "zfs_close", 			                 KSTAT_DATA_UINT64 },
@@ -5047,7 +5043,7 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	boolean_t need_release = B_FALSE;
 	boolean_t need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-	VNOPS_STAT_INCR(zfs_fsync_want_lock, tries);
+	ASSERT3U(tries, <, 10);
 
 	off_t resid_off = 0;
 
