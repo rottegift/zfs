@@ -428,12 +428,13 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 				int msync_ret = ubc_msync(vp,
 				    (off_t)0, ubc_getsize(vp), &resid,
 				    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
-				if (msync_ret == 0) { // 0 on failure
+				if (msync_ret != 0) { // 0 on success
 					const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
-					printf("ZFS: %s:%d: last close low memory cleanout failed resid %llu"
+					printf("ZFS: %s:%d: last close low memory cleanout failed"
+					    " error %d resid %llu"
 					    " zsize %llu usize %llu memory_free %llu\n"
 					    " zid %llu fs %s file %s",
-					    __func__, __LINE__, resid,
+					    __func__, __LINE__, msync_ret, resid,
 					    zp->z_size, ubc_getsize(vp), spl_free_wrapper(),
 					    zp->z_id, fsname, zp->z_name_cache);
 				}
