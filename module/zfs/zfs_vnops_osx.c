@@ -3560,14 +3560,14 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					    && vnode_isreg(vp)) {
 						printf ("ZFS: %s:%d: unexpected POP value busy %d absent %d pageout %d for"
 						    " subrange %llu - %llu (s_pages %d) of range [%llu - %llu] (pages %lld)"
-						    " fsname %s filename %s\n",
+						    " zid %llu fsname %s filename %s\n",
 						    __func__, __LINE__,
 						    (s_flags & UPL_POP_BUSY) != 0,
 						    (s_flags & UPL_POP_ABSENT) != 0,
 						    (s_flags & UPL_POP_PAGEOUT) != 0,
 						    subrange_offset, subrange_end, s_pages,
 						    start, end, howmany(end - start, PAGE_SIZE_64),
-						    fsname, fname);
+						    zp->z_id, fsname, fname);
 					}
 					if (s_flags & UPL_POP_DIRTY) s_dirty++;
 					if (s_flags & UPL_POP_PRECIOUS) s_precious++;
