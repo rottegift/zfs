@@ -4221,7 +4221,23 @@ acquire_locks:
 				    ? zp->z_map_lock_holder
 				    : "(null holder!)");
 			}
-			IOSleep(1);
+			/*
+			 * the other thread may either complete very
+			 * quickly (for example we are part of a
+			 * *pageout* that is in lock-step with tail -F
+			 * or with mdworker), or may take its sweet time
+			 * (e.g. it may have to reach down to the
+			 * physical storage media to complete); adapt to
+			 * either case.
+			 */
+			if (tries > 32) {
+				IOSleep(1);
+			} else if (tries > 4) {
+				IODelay(1);
+				kpreempt(KPREEMPT_SYNC);
+			} else {
+				kpreempt(KPREEMPT_SYNC);
+			}
 			if (tries > 10000) {
 				printf("ZFS: %s:%d: after ~ %lld msec,"
 				    " proceeding WITHOUT holding z_map_lock, file %s"
