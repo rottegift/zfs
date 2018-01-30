@@ -5517,55 +5517,6 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
-	if (zp->z_size != ubc_getsize(vp)) {
-		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-		printf("ZFS: %s:%d usize %llu <- zsize %llu for file %s\n",
-		    __func__, __LINE__, ubc_getsize(vp), zp->z_size, zp->z_name_cache);
-		ASSERT3P(tsd_get(rl_key), ==, NULL);
-		rl_t *rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-		tsd_set(rl_key, rl);
-		if (spl_ubc_is_mapped(vp, NULL)
-		    || vnode_isinuse(vp, 1)
-		    || zp->z_size == ubc_getsize(vp)) {
-			tsd_set(rl_key, NULL);
-			zfs_range_unlock(rl);
-			rl = NULL;
-		} else {
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-			ASSERT3U(tries, <, 10);
-			if (!spl_ubc_is_mapped(vp, NULL)
-			    && vnode_isreg(vp)
-			    && !vnode_isswap(vp)
-			    && vnode_isinuse(vp, 1) == 0
-			    && zp->z_open_cnt == 0
-			    && zp->z_in_pager_op == 0
-			    && ubc_getsize(vp) > zp->z_size) {
-				/* we can shrink now */
-				int setsize_shrink_retval = ubc_setsize(vp, zp->z_size);
-				ASSERT3S(setsize_shrink_retval, !=, 0); // ubc_setsize returns true on success
-				VNOPS_OSX_STAT_BUMP(mnomap_shrink_ubc);
-			} else if (zp->z_size > ubc_getsize(vp)) {
-				/* we can always grow */
-				int setsize_grow_retval = ubc_setsize(vp, zp->z_size);
-				ASSERT3S(setsize_grow_retval, !=, 0); // ubc_setsize returns true on success
-			} else {
-				if (ubc_getsize(vp) != zp->z_size && vnode_isreg(vp))
-					printf("ZFS: %s:%d: (zs %llu us %llu) lost to setsize"
-					    " (inuse? %d mapper? %d write? %d) %s\n", __func__, __LINE__,
-					    zp->z_size, ubc_getsize(vp),
-					    spl_ubc_is_mapped(vp, NULL),
-					    spl_ubc_is_mapped_writable(vp),
-					    vnode_isinuse(vp, 1),
-					    zp->z_name_cache);
-			}
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
-			tsd_set(rl_key, NULL);
-			zfs_range_unlock(rl);
-			rl = NULL;
-		}
-		ASSERT3P(rl, ==, NULL);
-	}
-
 	ZFS_EXIT(zfsvfs);
 
 	ASSERT3S(ubc_getsize(vp), ==, zp->z_size);
