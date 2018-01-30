@@ -141,6 +141,8 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_write_isreg_want_lock;
 	kstat_named_t zfs_read_calls;
 	kstat_named_t zfs_read_clean_on_read;
+	kstat_named_t zfs_read_low_mem_sleep;
+	kstat_named_t zfs_read_low_mem_yield;
 	kstat_named_t mappedread_lock_tries;
 	kstat_named_t mappedread_unusual_pages;
 	kstat_named_t zfs_read_mappedread_mapped_file_bytes;
@@ -180,6 +182,8 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_write_isreg_want_lock",                   KSTAT_DATA_UINT64 },
 	{ "zfs_read_calls",                              KSTAT_DATA_UINT64 },
 	{ "zfs_read_clean_on_read",                      KSTAT_DATA_UINT64 },
+	{ "zfs_read_low_mem_sleep",                      KSTAT_DATA_UINT64 },
+	{ "zfs_read_low_mem_yield",                      KSTAT_DATA_UINT64 },
 	{ "mappedread_lock_tries",                       KSTAT_DATA_UINT64 },
 	{ "mappedread_unusual_pages",  	                 KSTAT_DATA_UINT64 },
 	{ "zfs_read_mappedread_mapped_file_bytes",       KSTAT_DATA_UINT64 },
@@ -896,6 +900,22 @@ fill_holes_in_range(vnode_t *vp, const off_t upl_file_offset, const size_t upl_s
 		}
 		cur_upl_file_offset += skip_bytes;
 		cur_upl_size -= skip_bytes;
+	}
+
+	/*
+	 * If we are here we are likely to bring pages in to memory;
+	 * if we are low on memory, give the system some time to
+	 * clean things up a bit.
+	 */
+
+	if (spl_free_manual_pressure_wrapper() > 0
+	    || spl_free_wrapper() < 2ULL * MAX_UPL_TRANSFER_BYTES) {
+		VNOPS_STAT_BUMP(zfs_read_low_mem_sleep);
+		extern void IOSleep(unsigned milliseconds);
+		IOSleep(1);
+	} else if (spl_free_wrapper() < 4ULL * MAX_UPL_TRANSFER_BYTES) {
+		VNOPS_STAT_BUMP(zfs_read_low_mem_yield);
+		kpreempt(KPREEMPT_SYNC);
 	}
 
 	/*
