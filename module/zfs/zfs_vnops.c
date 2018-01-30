@@ -421,7 +421,7 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 			if (!spl_ubc_is_mapped(vp, NULL)
 			    && ubc_pages_resident(vp) != 0
 			    && (spl_free_manual_pressure_wrapper() > 0
-				|| spl_free_wrapper() < MAX_UPL_SIZE_BYTES)) {
+				|| spl_free_wrapper() < 4ULL * MAX_UPL_TRANSFER_BYTES)) {
 				/* try to clean out the ubc pages for this file */
 				VNOPS_STAT_BUMP(zfs_close_low_memory_clean);
 				off_t resid = 0;
