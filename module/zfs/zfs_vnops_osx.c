@@ -4205,7 +4205,7 @@ acquire_locks:
 			rw_exit(&zp->z_map_lock);
 		}
 		VERIFY(!rw_write_held(&zp->z_map_lock));
-	} else if (!rw_write_held(&zp->z_map_lock)){
+	} else if (!rw_write_held(&zp->z_map_lock)) {
 		/* as we have the range lock, it is safe for us to wait on the z_map_lock */
 		for (uint64_t tries = 0; ; tries++) {
 			if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
@@ -4327,32 +4327,7 @@ acquire_locks:
 			}
 			break;
 		}
-		if (secs > 1
-		    && (rl = zfs_try_range_lock(zp, rloff, rllen, RL_READER)) != NULL) {
-			/* zfs_read may possess locks, leaving us stuck here */
-			ASSERT3P(tsd_get(rl_key), ==, NULL);
-			tsd_set(rl_key, rl);
-			drop_rl = B_TRUE;
-			printf("ZFS: %s:%d: acquired RL_READER for off %lld len %lld file %s, continuing\n",
-			    __func__, __LINE__, rloff, rllen, zp->z_name_cache);
-			if (!rw_write_held(&zp->z_map_lock)) {
-				if (rw_tryenter(&zp->z_map_lock, RW_WRITER)) {
-					VNOPS_OSX_STAT_BUMP(pageoutv2_want_lock);
-					drop_rl = B_TRUE;
-					need_release = B_TRUE;
-					zp->z_map_lock_holder = __func__;
-					break;
-				} else if (secs > 2) {
-					printf("ZFS: %s:%d: proceeding on file %s WITHOUT z_map_lock"
-					    " held by %s\n", __func__, __LINE__,
-					    zp->z_name_cache, zp->z_map_lock_holder);
-					drop_rl = B_TRUE;
-					need_release = B_FALSE;
-					goto skip_lock_acquisition;
-				}
-			}
-		}
-		if (secs > 5) {
+		if (secs > 10) {
 			/* scream and break out */
 			if (!rw_tryenter (&zp->z_map_lock, RW_WRITER)) {
 				printf("ZFS: %s:%d: proceeding to pageout WITHOUT LOCKS"
