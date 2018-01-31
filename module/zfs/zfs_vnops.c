@@ -7429,15 +7429,22 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0 ||
 		    spl_ubc_is_mapped(vp, NULL) ||
 		    vnode_isinuse(vp, 0) != 0) {
+			mutex_enter(&zp->z_lock);
 			printf("ZFS: %s:%d: ubc_pages_resident true,"
-			    " %d dirty %d pageout %d precious %d absent %d busy %d t_errs %lld totlpgs"
-			    " inuse? %d mapped? %d write? %d file %s -- continuing\n",
+			    " dirty %d pageout %d precious %d absent %d busy %d t_errs %d totlpgs %lld"
+			    " inuse? %d recycled? %d !clean? %d mapped? %d write? %d"
+			    " z_sa_hdl valid? %d z_sa_hdl == NULL? %d z_unlinked? %d"
+			    " zid %llu file %s -- continuing\n",
 			    __func__, __LINE__,
 			    t_dirty, t_pageout, t_precious, t_absent, t_busy, t_errs,
 			    howmany(ubc_getsize(vp), PAGE_SIZE_64),
-			    vnode_isinuse(vp, 0),
+			    vnode_isinuse(vp, 0), vnode_isrecycled(vp),
+			    is_file_clean(vp, ubc_getsize(vp)),
 			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp),
-			    zp->z_name_cache);
+			    POINTER_IS_VALID(zp->z_sa_hdl), zp->z_sa_hdl == NULL,
+			    zp->z_unlinked,
+			    zp->z_id, zp->z_name_cache);
+			mutex_exit(&zp->z_lock);
 			off_t resid = 0;
 			int flags = UBC_PUSHALL;
 			if (t_dirty > 0)
@@ -7448,6 +7455,13 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 				    " t_dirty %u flags 0x%x zid %llu file %s\n",
 				    __func__, __LINE__, msync_out, resid, ubc_getsize(vp),
 				    t_dirty, flags,
+				    zp->z_id, zp->z_name_cache);
+			} else {
+				printf("ZFS: %s:%d: msync OK, !clean? %d pages resident? %d"
+				    " zid %llu file %s\n",
+				    __func__, __LINE__,
+				    is_file_clean(vp, ubc_getsize(vp)),
+				    ubc_pages_resident(vp),
 				    zp->z_id, zp->z_name_cache);
 			}
 		}
