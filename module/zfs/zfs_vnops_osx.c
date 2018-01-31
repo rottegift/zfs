@@ -104,6 +104,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t mmap_calls;
 	kstat_named_t mmap_file_first_mmapped;
 	kstat_named_t mnomap_calls;
+	kstat_named_t mnomap_cleaned;
+	kstat_named_t mnomap_still_unclean;
 	kstat_named_t zfs_msync_calls;
 	kstat_named_t zfs_msync_pages;
 	kstat_named_t zfs_msync_ranged_pages;
@@ -141,6 +143,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "mmap_calls",                        KSTAT_DATA_UINT64 },
 	{ "mmap_file_first_mmapped",           KSTAT_DATA_UINT64 },
 	{ "mnomap_calls",                      KSTAT_DATA_UINT64 },
+	{ "mnomap_cleaned",                    KSTAT_DATA_UINT64 },
+	{ "mnomap_still_unclean",              KSTAT_DATA_UINT64 },
 	{ "zfs_msync_calls",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msynced_pages",	               KSTAT_DATA_UINT64 },
 	{ "zfs_msync_ranged_pages",	       KSTAT_DATA_UINT64 },
@@ -5526,6 +5530,43 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	}
 
 	ASSERT(spl_ubc_is_mapped(vp, NULL));
+
+	if (ubc_pages_resident(vp)
+	    && is_file_clean(vp, ubc_getsize(vp))) {
+		/* there are dirty pages, let's clean them out */
+		ASSERT3P(tsd_get(rl_key), ==, NULL);
+		rl_t *rl = zfs_range_lock(zp, 0,
+		    ubc_getsize(vp) + MAX_UPL_SIZE_BYTES, RL_WRITER);
+		tsd_set(rl_key, rl);
+		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+		uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
+		ASSERT3U(tries, <, 10);
+		off_t resid = 0;
+		int retval = zfs_msync(zp, rl, 0, ubc_getsize(vp), &resid, UBC_PUSHALL);
+		z_map_drop_lock(zp, &need_release, &need_upgrade);
+		ASSERT3P(tsd_get(rl_key), ==, rl);
+		tsd_set(rl_key, NULL);
+		zfs_range_unlock(rl);
+		rl = NULL;
+		if (retval != 0) {
+			const char *fname = zp->z_name_cache;
+			const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+			printf("ZFS: %s:%d: error %d from zfs_msync usize %llu"
+			    " zid %llu fs %s file %s\n",
+			    __func__, __LINE__, retval, ubc_getsize(vp),
+			    zp->z_id, fsname, fname);
+		}
+		VNOPS_OSX_STAT_BUMP(mnomap_cleaned);
+		if (is_file_clean(vp, ubc_getsize(vp))) {
+			VNOPS_OSX_STAT_BUMP(mnomap_still_unclean);
+			const char *fname = zp->z_name_cache;
+			const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+			printf("ZFS: %s:%d: file still unclean after zfs_msync"
+			    " usize %llu zid %llu fs %s fname %s\n",
+			    __func__, __LINE__, ubc_getsize(vp),
+			    zp->z_id, fsname, fname);
+		}
+	}
 
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
