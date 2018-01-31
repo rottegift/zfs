@@ -3542,17 +3542,17 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 
 	for (f_offset = range_start; f_offset < MIN(range_end, MAX(zp->z_size, ubc_getsize(vp))); f_offset += PAGE_SIZE_64) {
 		totproc++;
-		int flags;
-		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &flags);
+		int p_flags;
+		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &p_flags);
 		if (pop_retval == KERN_SUCCESS) {
-			if (((a_flags & UBC_PUSHALL) && (flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
-			    || ((a_flags & UBC_PUSHDIRTY) && (flags & UPL_POP_DIRTY))) {
-				ASSERT0(flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT));
+			if (((a_flags & UBC_PUSHALL) && (p_flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
+			    || ((a_flags & UBC_PUSHDIRTY) && (p_flags & UPL_POP_DIRTY))) {
+				ASSERT0(p_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT));
 				off_t subrange_offset = f_offset;
 				off_t subrange_end = f_offset + PAGE_SIZE_64;
 				int s_pages = 1;
 				int s_flags;
-				int s_retval = ubc_page_op(vp, subrange_end, 0, NULL, &flags);
+				int s_retval = ubc_page_op(vp, subrange_end, 0, NULL, &s_flags);
 				int s_dirty = 0;
 				int s_precious = 0;
 				for ( ; s_retval == KERN_SUCCESS
@@ -3560,24 +3560,41 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 					  && s_pages * PAGE_SIZE_64 < MAX_UPL_TRANSFER_BYTES
 					  && (((a_flags & UBC_PUSHALL) && (s_flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
 					      || ((a_flags & UBC_PUSHDIRTY) && (s_flags & UPL_POP_DIRTY))); ) {
+					boolean_t skip_unusual = B_FALSE;
 					if (s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT)
 					    && vnode_isreg(vp)) {
-						dprintf ("ZFS: %s:%d: unexpected POP value busy %d absent %d pageout %d for"
-						    " subrange %llu - %llu (s_pages %d) of range [%llu - %llu] (pages %lld)"
-						    " zid %llu fsname %s filename %s\n",
-						    __func__, __LINE__,
-						    (s_flags & UPL_POP_BUSY) != 0,
-						    (s_flags & UPL_POP_ABSENT) != 0,
-						    (s_flags & UPL_POP_PAGEOUT) != 0,
-						    subrange_offset, subrange_end, s_pages,
-						    start, end, howmany(end - start, PAGE_SIZE_64),
-						    zp->z_id, fsname, fname);
+						if (s_flags & UPL_POP_DIRTY) {
+							printf ("ZFS: %s:%d: unexpected POP value dirty %d precious %d"
+							    " busy %d absent %d pageout %d for"
+							    " subrange %llu - %llu (s_pages %d) of range [%llu - %llu] (pages %lld)"
+							    " zid %llu fsname %s filename %s\n",
+							    __func__, __LINE__,
+							    (s_flags & UPL_POP_DIRTY) != 0,
+							    (s_flags & UPL_POP_PRECIOUS) != 0,
+							    (s_flags & UPL_POP_BUSY) != 0,
+							    (s_flags & UPL_POP_ABSENT) != 0,
+							    (s_flags & UPL_POP_PAGEOUT) != 0,
+							    subrange_offset, subrange_end, s_pages,
+							    start, end, howmany(end - start, PAGE_SIZE_64),
+							    zp->z_id, fsname, fname);
+						} else {
+							skip_unusual = B_TRUE;
+						}
 					}
 					if (s_flags & UPL_POP_DIRTY) s_dirty++;
 					if (s_flags & UPL_POP_PRECIOUS) s_precious++;
 					if (s_flags & UPL_POP_BUSY) inner_noted_busy++;
 					if (s_flags & UPL_POP_ABSENT) inner_noted_absent++;
 					if (s_flags & UPL_POP_PAGEOUT) inner_noted_pageout++;
+					/*
+					 * don't let an unusual page be part of the range
+					 */
+					if (skip_unusual)
+						break;
+					/*
+					 * advance the end of the subrange by a page,
+					 * and prepare to examine the following page
+					 */
 					subrange_end += PAGE_SIZE_64;
 					s_pages += 1;
 					s_retval = ubc_page_op(vp, subrange_end, 0, NULL, &s_flags);
@@ -3614,12 +3631,12 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 				cleaned_precious += s_precious;
 				VNOPS_OSX_STAT_INCR(zfs_msync_pages, s_pages);
 			} else {
-				ASSERT0(flags & UPL_POP_DIRTY);
-				IMPLY(a_flags & UBC_PUSHALL, (flags & UPL_POP_PRECIOUS) == 0);
-				if (flags & UPL_POP_PRECIOUS) outer_noted_precious++;
-				if (flags & UPL_POP_BUSY) outer_noted_busy++;
-				if (flags & UPL_POP_ABSENT) outer_noted_absent++;
-				if (flags & UPL_POP_PAGEOUT) outer_noted_pageout++;
+				ASSERT0(p_flags & UPL_POP_DIRTY);
+				IMPLY(a_flags & UBC_PUSHALL, (p_flags & UPL_POP_PRECIOUS) == 0);
+				if (p_flags & UPL_POP_PRECIOUS) outer_noted_precious++;
+				if (p_flags & UPL_POP_BUSY) outer_noted_busy++;
+				if (p_flags & UPL_POP_ABSENT) outer_noted_absent++;
+				if (p_flags & UPL_POP_PAGEOUT) outer_noted_pageout++;
 			}
 		} else {
 			kerrs += 1;
