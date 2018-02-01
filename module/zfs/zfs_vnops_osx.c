@@ -105,6 +105,8 @@ typedef struct pageout_op_struct {
 	off_t a_f_offset;
 	size_t a_size;
 	int a_flags;
+	int bluster_bcopy_start;
+	int bluster_bcopy_end;
 } pageout_op_t;
 
 extern const size_t MAX_UPL_SIZE_BYTES;
@@ -2299,6 +2301,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				.a_f_offset = 0,
 				.a_size = 0,
 				.a_flags = 0,
+				.bluster_bcopy_start = 0,
+				.bluster_bcopy_end = 0,
 			};
 			ASSERT3P(tsd_pageout_op, !=, NULL);
 			if (tsd_pageout_op != NULL) {
@@ -2310,12 +2314,15 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				pageout_op.a_f_offset = tsd_pageout_op->a_f_offset;
 				pageout_op.a_size = tsd_pageout_op->a_size;
 				pageout_op.a_flags = tsd_pageout_op->a_flags;
+				pageout_op.bluster_bcopy_start = tsd_pageout_op->bluster_bcopy_start;
+				pageout_op.bluster_bcopy_start = tsd_pageout_op->bluster_bcopy_start;
 			}
 			printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
 			    " SKIPPING LOCKING (note, range not wholly covered) for"
 			    " [%llu..%llu] (size %lu uploff %u) fs %s file %s (nocommit? %d)"
 			    " tsd_rl? %d (r_type %d r_off %llu r_len %llu r_caller %s r_line %d"
-			    " pageout_op: state %s func %s line %d foff %llu sz %lu flags 0x%x\n",
+			    " pageout_op: state %s func %s line %d foff %llu sz %lu flags 0x%x"
+			    " bluster_bcopy_start %d bluster_bcopy_end %d\n",
 			    __func__, __LINE__, zp->z_in_pager_op, rw_write_held(&zp->z_map_lock),
 			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 			    ap->a_size, ap->a_pl_offset,
@@ -2327,7 +2334,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 			    (tsdrl != NULL && tsdrl->r_caller != NULL) ? tsdrl->r_caller : "(null)",
 			    (tsdrl != NULL) ? tsdrl->r_line : 0,
 			    pageout_op.state, pageout_op.func, pageout_op.line,
-			    pageout_op.a_f_offset, pageout_op.a_size, pageout_op.a_flags);
+			    pageout_op.a_f_offset, pageout_op.a_size, pageout_op.a_flags,
+			    pageout_op.bluster_bcopy_start, pageout_op.bluster_bcopy_end);
 		} else {
 			pageout_op_t *tsd_pageout_op = tsd_get(pageout_op_key);
 			pageout_op_t pageout_op = {
@@ -2337,6 +2345,8 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				.a_f_offset = 0,
 				.a_size = 0,
 				.a_flags = 0,
+				.bluster_bcopy_start = 0,
+				.bluster_bcopy_end = 0,
 			};
 			if (tsd_pageout_op != NULL) {
 				if (tsd_pageout_op->state)
@@ -2347,10 +2357,13 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				pageout_op.a_f_offset = tsd_pageout_op->a_f_offset;
 				pageout_op.a_size = tsd_pageout_op->a_size;
 				pageout_op.a_flags = tsd_pageout_op->a_flags;
+				pageout_op.bluster_bcopy_start = tsd_pageout_op->bluster_bcopy_start;
+				pageout_op.bluster_bcopy_start = tsd_pageout_op->bluster_bcopy_start;
 				printf("ZFS: %s:%d: (covered range) already in pageout (number %d)"
 				    " our pagein [%llu..%llu] (size %lu) TSD rangelock [%llu..%llu] (size %llu)"
 				    " caller %s line %d"
 				    " pageout_op: state %s func %s line %d foff %llu sz %lu flags 0x%x"
+				    " bluster_bcopy_start %d bluster_bcopy_end %d"
 				    " fs %s file %s\n",
 				    __func__, __LINE__, zp->z_in_pager_op,
 				    ap->a_f_offset, ap->a_f_offset + ap->a_size, ap->a_size,
@@ -2359,6 +2372,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				    tsdrl->r_line,
 				    pageout_op.state, pageout_op.func, pageout_op.line,
 				    pageout_op.a_f_offset, pageout_op.a_size, pageout_op.a_flags,
+				    pageout_op.bluster_bcopy_start, pageout_op.bluster_bcopy_end,
 				    fsname, fname);
 				need_z_lock = B_FALSE;
 				goto norwlock;
@@ -3359,6 +3373,8 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	pageout_op->line = __LINE__;
 	pageout_op->state = "bcopy";
+	pageout_op->bluster_bcopy_start = upl_offset;
+	pageout_op->bluster_bcopy_end = upl_offset + write_size;
 
 	bcopy(pvaddr[upl_offset], safebuf, write_size);
 
@@ -3880,6 +3896,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	pageout_op->a_f_offset = ap->a_f_offset;
 	pageout_op->a_size = ap->a_size;
 	pageout_op->a_flags = ap->a_flags;
+	pageout_op->bluster_bcopy_start = 0;
+	pageout_op->bluster_bcopy_end = 0;
 
 	ASSERT3P(tsd_get(pageout_op_key), ==, NULL);
 	int tsd_set_pageout_op_retval = tsd_set(pageout_op_key, pageout_op);
