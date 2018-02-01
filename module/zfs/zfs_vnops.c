@@ -463,6 +463,8 @@ zfs_holey_common(struct vnode *vp, int cmd, loff_t *off)
 	int error;
 	boolean_t hole;
 
+	/* bogus */
+	ASSERT3P(tsd_get(pageout_op_key), ==, NULL);
 	file_sz = zp->z_size;
 	if (noff >= file_sz)  {
 		return (SET_ERROR(ENXIO));
