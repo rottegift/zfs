@@ -93,10 +93,10 @@
 
 #include <sys/znode_z_map_lock.h>
 
-uint_t rl_key;
-uint_t rl_key_zp_key_mismatch_key;
-uint_t rl_key_vp_from_getvnode;
-uint_t pageout_op_key;
+uint_t rl_key = 0;
+uint_t rl_key_zp_key_mismatch_key = 0;
+uint_t rl_key_vp_from_getvnode = 0;
+uint_t pageout_op_key = 0;
 
 typedef struct pageout_op_struct {
 	char const *state;
