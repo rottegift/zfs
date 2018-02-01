@@ -3160,6 +3160,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	pageout_op->func = __func__;
 	pageout_op->line = __LINE__;
 	pageout_op->state = "in bluster";
+	tsd_set(pageout_op_key, pageout_op);
 
 	ASSERT3P(caller_unmapped, !=, NULL);
 
@@ -3299,6 +3300,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	pageout_op->state = "beginning DMU transaction";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	upl_page_info_t *pl = ubc_upl_pageinfo(upl);
 	const int64_t stpage = (int64_t)(trunc_page_64(upl_offset) / PAGE_SIZE_64);
@@ -3341,6 +3343,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 
 	pageout_op->line = __LINE__;
 	pageout_op->state = "bcopy";
+	tsd_set(pageout_op_key, pageout_op);
 
 	bcopy(pvaddr[upl_offset], safebuf, write_size);
 
@@ -3348,6 +3351,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 start_tx:
 	pageout_op->line = __LINE__;
 	pageout_op->state = "start_tx";
+	tsd_set(pageout_op_key, pageout_op);
 	tx = dmu_tx_create(zfsvfs->z_os);
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 	if (tx_pass == 0 || dmu_write_is_safe(zp, f_offset, write_size)) {
@@ -3445,11 +3449,13 @@ start_tx:
 
 	pageout_op->state = "dmu_write";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	dmu_write(zfsvfs->z_os, zp->z_id, f_offset, write_size, safebuf, tx);
 
 	pageout_op->state = "post dmu_write";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	zio_data_buf_free(safebuf, write_size);
 
@@ -3493,6 +3499,7 @@ start_tx:
 	if (unmap) {
 		pageout_op->state = "bluster unmap";
 		pageout_op->line = __LINE__;
+		tsd_set(pageout_op_key, pageout_op);
 		ASSERT3S(*caller_unmapped, ==, B_FALSE);
 		int unmapret = ubc_upl_unmap(upl);
 		if (unmapret != KERN_SUCCESS)
@@ -3527,6 +3534,7 @@ start_tx:
 		} else {
 			pageout_op->line = __LINE__;
 			pageout_op->state = "bluster committing";
+			tsd_set(pageout_op_key, pageout_op);
 			int commitflags = UPL_COMMIT_CLEAR_PRECIOUS
 			    | UPL_COMMIT_INACTIVATE
 			    | UPL_COMMIT_CLEAR_DIRTY;
@@ -3544,6 +3552,7 @@ start_tx:
 				    upl_offset, size, f_offset, zp->z_name_cache);
 				pageout_op->line = __LINE__;
 				pageout_op->state = "bluster committed OK";
+				tsd_set(pageout_op_key, pageout_op);
 			}
 		}
 	}
@@ -3973,6 +3982,7 @@ start_3614_case:
 	if (ap->a_f_offset < 0 || ap->a_f_offset >= zp->z_size) {
 		pageout_op->line = __LINE__;
 		pageout_op->state = "dumping pages";
+		tsd_set(pageout_op_key, pageout_op);
 		printf("ZFS: %s:%d: invalid offset %lld vs filesize %llu (usize %llu)"
 		    " flags %d fs %s file %s\n",
 		    __func__, __LINE__, ap->a_f_offset, zp->z_size, ubc_getsize(vp),
@@ -4576,6 +4586,7 @@ already_acquired_locks:
 
 	pageout_op->state = "acquired locks";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	/* extend file if necessary, but not if we have re-entered */
 	if (had_map_lock_at_entry != B_TRUE) {
@@ -4655,6 +4666,7 @@ already_acquired_locks:
 	}
 
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	if (zp->z_size < preserved_zsize) {
 		printf("ZFS: %s:%d: zp->z_size %llu being reset to preserved_zsize %llu"
@@ -4679,6 +4691,7 @@ already_acquired_locks:
 skip_lock_acquisition:
 
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	EQUIV(drop_rl == B_TRUE, (rl != NULL && subrange == B_FALSE));
 
@@ -4728,6 +4741,7 @@ skip_lock_acquisition:
 
 	pageout_op->state = "created upl";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	/* map in UPL address space */
 
@@ -4749,6 +4763,7 @@ skip_lock_acquisition:
 
 	pageout_op->state = "mapped upl";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	/*
 	 * The caller may hand us a memory range that results in a run
@@ -4803,6 +4818,7 @@ skip_lock_acquisition:
 
 	pageout_op->state = "walked dismiss";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	if (upl_pages_after_boundary > 0) {
 		printf("ZFS: %s:%d: %d pages past eof dismissed (total dismissed %d), %d dirty"
@@ -4816,6 +4832,7 @@ skip_lock_acquisition:
 	if (upl_pages_dismissed == pages_in_upl) {
 		pageout_op->line = __LINE__;
 		pageout_op->state = "dismissing whole UPL";
+		tsd_set(pageout_op_key, pageout_op);
 		dprintf("ZFS: %s:%d: entire UPL absent (%d pages)"
 		    " [%lld..%lld] filesize %lld fs %s file %s\n",
 		    __func__, __LINE__, upl_pages_dismissed,
@@ -4823,6 +4840,7 @@ skip_lock_acquisition:
 		    fsname, fname);
 		ASSERT3S(mapped, ==, B_TRUE);
 		pageout_op->line = __LINE__;
+		tsd_set(pageout_op_key, pageout_op);
 		int commit_all_unmap_ret = ubc_upl_unmap(upl);
 		ASSERT3S(commit_all_unmap_ret, ==, KERN_SUCCESS);
 		if (commit_all_unmap_ret == KERN_SUCCESS)
@@ -4850,6 +4868,7 @@ skip_lock_acquisition:
 	} else if (upl_pages_dismissed > 0 && dismissed_valid == B_TRUE) {
 		pageout_op->line = __LINE__;
 		pageout_op->state = "dismissing UPL tail";
+		tsd_set(pageout_op_key, pageout_op);
 		ASSERT3S(pages_in_upl, >, 1);
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 		ASSERT3S(lowest_page_dismissed, >, 0);
@@ -4925,6 +4944,7 @@ skip_lock_acquisition:
 
 	pageout_op->state = "post trim";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	const off_t trimmed_upl_size = (off_t)ap->a_size - ((off_t)upl_pages_dismissed * PAGE_SIZE_64);
 	ASSERT3S(trimmed_upl_size, >=, PAGE_SIZE_64);
@@ -4939,6 +4959,7 @@ skip_lock_acquisition:
 		if (mapped) {
 			mapped = B_FALSE;
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 			int umapret_err = ubc_upl_unmap(upl);
 			ASSERT3S(umapret_err, ==, KERN_SUCCESS);
 		}
@@ -4957,6 +4978,7 @@ skip_lock_acquisition:
 		if (mapped) {
 			mapped = B_FALSE;
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 			int umapret_err = ubc_upl_unmap(upl);
 			ASSERT3S(umapret_err, ==, KERN_SUCCESS);
 		}
@@ -4998,10 +5020,12 @@ skip_lock_acquisition:
 		VERIFY3S(mapped, ==, B_TRUE);
 		pageout_op->line = __LINE__;
 		pageout_op->state = "pageoutv2 primary for loop";
+		tsd_set(pageout_op_key, pageout_op);
 		/* we found an absent page */
 		if (!upl_valid_page(pl, pg_index)) {
 			pageout_op->state = "found absent";
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 			ASSERT0(upl_dirty_page(pl, pg_index));
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of absent pages */
@@ -5011,6 +5035,7 @@ skip_lock_acquisition:
 					break;
 			}
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 			ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
 			const off_t start_of_range = pg_index * PAGE_SIZE_64;
 			const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
@@ -5029,6 +5054,7 @@ skip_lock_acquisition:
 				ASSERT3S(mapped, !=, B_FALSE);
 				if (mapped) {
 					pageout_op->line = __LINE__;
+					tsd_set(pageout_op_key, pageout_op);
 					const int unmapret = ubc_upl_unmap(upl);
 					if (unmapret != KERN_SUCCESS) {
 						printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
@@ -5048,6 +5074,7 @@ skip_lock_acquisition:
 		else if (upl_valid_page(pl, pg_index) && !upl_dirty_page(pl, pg_index)) {
 			pageout_op->state = "found valid, not dirty";
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of valid-but-not-dirty pages */
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
@@ -5060,6 +5087,7 @@ skip_lock_acquisition:
 				ASSERT(upl_valid_page(pl, page_past_end_of_range));
 			}
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
                         ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
                         const off_t start_of_range = pg_index * PAGE_SIZE_64;
                         const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
@@ -5078,6 +5106,7 @@ skip_lock_acquisition:
 				ASSERT3S(mapped, !=, B_FALSE);
 				if (mapped) {
 					pageout_op->line = __LINE__;
+					tsd_set(pageout_op_key, pageout_op);
 					const int unmapret = ubc_upl_unmap(upl);
 					if (unmapret != KERN_SUCCESS) {
 						printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
@@ -5090,6 +5119,7 @@ skip_lock_acquisition:
 				}
                         }
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 			int commit_precious_flags = 0;
 			/*
 			 * set the COMMIT_CLEAR_PRECIOUS flag if we probably aren't
@@ -5108,9 +5138,11 @@ skip_lock_acquisition:
 			    end_of_range, commit_precious_flags);
 			pageout_op->line = __LINE__;
 			pageout_op->state = "committed precious range";
+			tsd_set(pageout_op_key, pageout_op);
 			if (commit_precious_ret != KERN_SUCCESS) {
 				pageout_op->line = __LINE__;
 				pageout_op->state = "precious range commmit error";
+				tsd_set(pageout_op_key, pageout_op);
 				/*
 				 * This is an error there is still a valid page
 				 * at a higher page index in this UPL, but is OK
@@ -5208,6 +5240,7 @@ skip_lock_acquisition:
 		else if (upl_dirty_page(pl, pg_index)) {
 			pageout_op->state = "found dirty page";
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 			ASSERT(upl_valid_page(pl, pg_index));
 			int page_past_end_of_range = pg_index + 1;
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
@@ -5218,6 +5251,7 @@ skip_lock_acquisition:
 			}
 			pageout_op->state = "gathered dirty range";
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 			ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
 			const off_t start_of_range = pg_index * PAGE_SIZE_64;
                         const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
@@ -5247,6 +5281,7 @@ skip_lock_acquisition:
 
 			pageout_op->state = "calling bluster";
 			pageout_op->line = __LINE__;
+			tsd_set(pageout_op_key, pageout_op);
 
 			boolean_t bl_unmapped = B_FALSE;
 			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
@@ -5257,6 +5292,7 @@ skip_lock_acquisition:
 			pageout_op->func = __func__;
 			pageout_op->line = __LINE__;
 			pageout_op->state = "returned from bluster";
+			tsd_set(pageout_op_key, pageout_op);
 
 			/*
 			 * bluster_pageout only unamps if it has the last page in the UPL;
@@ -5276,6 +5312,7 @@ skip_lock_acquisition:
 			if (error != 0) {
 				pageout_op->state = "bluster returned error";
 				pageout_op->line = __LINE__;
+				tsd_set(pageout_op_key, pageout_op);
 				printf("ZFS: %s:%d: bluster_pageout error %d for"
 				    " UPL range [%lld..%lld], for file range [%lld..%lld], "
 				    " pages_remaining %lld, fsz %lld, fs %s file %s"
@@ -5288,6 +5325,7 @@ skip_lock_acquisition:
 				/* bluster may not have unmapped */
 				if (mapped) {
 					pageout_op->line = __LINE__;
+					tsd_set(pageout_op_key, pageout_op);
 					extern void IOSleep(unsigned milliseconds);
 					IOSleep(10);
 					mapped = B_FALSE;
@@ -5343,6 +5381,7 @@ skip_lock_acquisition:
 
 	pageout_op->state = "pageoutv2 done primary for loop";
 	pageout_op->line = __LINE__;
+	tsd_set(pageout_op_key, pageout_op);
 
 	if (upl) {
 		int upl_done = ubc_upl_abort(upl, 0);
