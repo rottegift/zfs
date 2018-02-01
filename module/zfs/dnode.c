@@ -22,6 +22,8 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
+ * Copyright (c) 2014 Integros [integros.com]
+ * Copyright 2017 RackTop Systems.
  */
 
 #include <sys/zfs_context.h>
@@ -37,7 +39,6 @@
 #include <sys/zio.h>
 #include <sys/dmu_zfetch.h>
 #include <sys/range_tree.h>
-#include <sys/trace_dnode.h>
 
 kmem_cache_t *dnode_cache;
 /*
@@ -54,14 +55,14 @@ kmem_cache_t *dnode_cache;
 #define	DNODE_STAT_ADD(stat)			/* nothing */
 #endif	/* DNODE_STATS */
 
-ASSERTV(static dnode_phys_t dnode_phys_zero);
+static dnode_phys_t dnode_phys_zero;
 
 int zfs_default_bs = SPA_MINBLOCKSHIFT;
 int zfs_default_ibs = DN_MAX_INDBLKSHIFT;
 
 #ifdef	_KERNEL
-//static kmem_cbrc_t dnode_move(void *, void *, size_t, void *);
-#endif /* _KERNEL */
+kmem_cbrc_t dnode_move(void *, void *, size_t, void *);
+#endif	/* _KERNEL */
 
 static int
 dbuf_compare(const void *x1, const void *x2)
@@ -157,8 +158,6 @@ dnode_cons(void *arg, void *unused, int kmflag)
 	    offsetof(dmu_buf_impl_t, db_link));
 
 	dn->dn_moved = 0;
-
-
 	return (0);
 }
 
@@ -169,11 +168,8 @@ dnode_dest(void *arg, void *unused)
 	int i;
 	dnode_t *dn = arg;
 
-	ASSERT(!rw_lock_held(&dn->dn_struct_rwlock));
 	rw_destroy(&dn->dn_struct_rwlock);
-	ASSERT(!MUTEX_HELD(&dn->dn_mtx));
 	mutex_destroy(&dn->dn_mtx);
-	ASSERT(!MUTEX_HELD(&dn->dn_dbufs_mtx));
 	mutex_destroy(&dn->dn_dbufs_mtx);
 	cv_destroy(&dn->dn_notxholds);
 	refcount_destroy(&dn->dn_holds);
@@ -217,9 +213,12 @@ void
 dnode_init(void)
 {
 	ASSERT(dnode_cache == NULL);
-	dnode_cache = kmem_cache_create("dnode_t", sizeof (dnode_t),
+	dnode_cache = kmem_cache_create("dnode_t",
+	    sizeof (dnode_t),
 	    0, dnode_cons, dnode_dest, NULL, NULL, NULL, 0);
+#ifdef	_KERNEL
 	kmem_cache_set_move(dnode_cache, dnode_move);
+#endif	/* _KERNEL */
 }
 
 void
@@ -251,6 +250,7 @@ dnode_verify(dnode_t *dn)
 	}
 	if (dn->dn_phys->dn_type != DMU_OT_NONE || dn->dn_allocated_txg != 0) {
 		int i;
+		ASSERT3U(dn->dn_indblkshift, >=, 0);
 		ASSERT3U(dn->dn_indblkshift, <=, SPA_MAXBLOCKSHIFT);
 		if (dn->dn_datablkshift) {
 			ASSERT3U(dn->dn_datablkshift, >=, SPA_MINBLOCKSHIFT);
@@ -324,9 +324,9 @@ dnode_byteswap(dnode_phys_t *dnp)
 		 */
 		int off = (dnp->dn_nblkptr-1) * sizeof (blkptr_t);
 		size_t len = DN_MAX_BONUSLEN - off;
-		dmu_object_byteswap_t byteswap;
 		ASSERT(DMU_OT_IS_VALID(dnp->dn_bonustype));
-		byteswap = DMU_OT_BYTESWAP(dnp->dn_bonustype);
+		dmu_object_byteswap_t byteswap =
+		    DMU_OT_BYTESWAP(dnp->dn_bonustype);
 		dmu_ot_byteswap[byteswap].ob_func(dnp->dn_bonus + off, len);
 	}
 
@@ -410,10 +410,9 @@ dnode_create(objset_t *os, dnode_phys_t *dnp, dmu_buf_impl_t *db,
 	dnode_t *dn;
 
 	dn = kmem_cache_alloc(dnode_cache, KM_SLEEP);
-
-#ifndef __APPLE__  // Our kmem_cache does not use KMEM_UNINITIALIZED_PATTERN
+#ifdef _KERNEL
 	ASSERT(!POINTER_IS_VALID(dn->dn_objset));
-#endif
+#endif /* _KERNEL */
 	dn->dn_moved = 0;
 
 	/*
@@ -477,7 +476,6 @@ dnode_create(objset_t *os, dnode_phys_t *dnp, dmu_buf_impl_t *db,
 	mutex_exit(&os->os_lock);
 
 	arc_space_consume(sizeof (dnode_t), ARC_SPACE_OTHER);
-
 	return (dn);
 }
 
@@ -694,7 +692,6 @@ dnode_reallocate(dnode_t *dn, dmu_object_type_t ot, int blocksize,
 	mutex_exit(&dn->dn_mtx);
 }
 
-#ifdef	_KERNEL
 #ifdef	DNODE_STATS
 static struct {
 	uint64_t dms_dnode_invalid;
@@ -707,7 +704,8 @@ static struct {
 } dnode_move_stats;
 #endif	/* DNODE_STATS */
 
-static void
+#ifdef	_KERNEL
+void
 dnode_move_impl(dnode_t *odn, dnode_t *ndn)
 {
 	int i;
@@ -989,24 +987,15 @@ void
 dnode_special_close(dnode_handle_t *dnh)
 {
 	dnode_t *dn = dnh->dnh_dnode;
-    int count = 0;
+
 	/*
 	 * Wait for final references to the dnode to clear.  This can
 	 * only happen if the arc is asyncronously evicting state that
 	 * has a hold on this dnode while we are trying to evict this
 	 * dnode.
 	 */
-	while (refcount_count(&dn->dn_holds) > 0) {
-		delay(hz);
-        if (count++ > 9) {
-            printf("dnode: ARC release bug triggered: %p (%lld)-- sorry\n", dn,
-                   refcount_count(&dn->dn_holds));
-            //            panic("BOOOOOOOM");
-            count = 0;
-            //refcount_remove(&dn->dn_holds, NULL);
-        }
-    }
-
+	while (refcount_count(&dn->dn_holds) > 0)
+		delay(1);
 	ASSERT(dn->dn_dbuf == NULL ||
 	    dmu_buf_get_user(&dn->dn_dbuf->db) == NULL);
 	zrl_add(&dnh->dnh_zrlock);
@@ -1106,7 +1095,6 @@ dnode_hold_impl(objset_t *os, uint64_t object, int flag,
 			return (SET_ERROR(EEXIST));
 		DNODE_VERIFY(dn);
 		(void) refcount_add(&dn->dn_holds, tag);
-
 		*dnp = dn;
 		return (0);
 	}
@@ -1197,7 +1185,6 @@ dnode_hold_impl(objset_t *os, uint64_t object, int flag,
 	}
 	if (refcount_add(&dn->dn_holds, tag) == 1)
 		dbuf_add_ref(db, dnh);
-
 	mutex_exit(&dn->dn_mtx);
 
 	/* Now we can rely on the hold to prevent the dnode from moving. */
@@ -1235,7 +1222,6 @@ dnode_add_ref(dnode_t *dn, void *tag)
 		return (FALSE);
 	}
 	VERIFY(1 < refcount_add(&dn->dn_holds, tag));
-
 	mutex_exit(&dn->dn_mtx);
 	return (TRUE);
 }
@@ -1256,7 +1242,6 @@ dnode_rele_and_unlock(dnode_t *dn, void *tag)
 	dnode_handle_t *dnh = dn->dn_handle;
 
 	refs = refcount_remove(&dn->dn_holds, tag);
-    dprintf("dnode: -dn_hold %d\n", refcount_count(&dn->dn_holds));
 	mutex_exit(&dn->dn_mtx);
 
 	/*
@@ -1268,7 +1253,7 @@ dnode_rele_and_unlock(dnode_t *dn, void *tag)
 	 * other direct or indirect hold on the dnode must first drop the dnode
 	 * handle.
 	 */
-	//ASSERT(refs > 0 || dnh->dnh_zrlock.zr_owner != curthread);
+	ASSERT(refs > 0 || dnh->dnh_zrlock.zr_owner != curthread);
 
 	/* NOTE: the DNODE_DNODE does not have a dn_dbuf */
 	if (refs == 0 && db != NULL) {
@@ -1504,9 +1489,15 @@ dnode_new_blkid(dnode_t *dn, uint64_t blkid, dmu_tx_t *tx, boolean_t have_read)
 
 	ASSERT(blkid != DMU_BONUS_BLKID);
 
-	//ASSERT(have_read ?
-    //   RW_READ_HELD(&dn->dn_struct_rwlock) :
-    //   RW_WRITE_HELD(&dn->dn_struct_rwlock));
+#ifndef _KERNEL
+	ASSERT(have_read ?
+	    RW_READ_HELD(&dn->dn_struct_rwlock) :
+	    RW_WRITE_HELD(&dn->dn_struct_rwlock));
+#else
+	ASSERT(have_read ?
+	    rw_lock_held(&dn->dn_struct_rwlock) :
+	    rw_write_held(&dn->dn_struct_rwlock));
+#endif
 
 	/*
 	 * if we have a read-lock, check to see if we need to do any work
@@ -1609,8 +1600,8 @@ dnode_free_range(dnode_t *dn, uint64_t off, uint64_t len, dmu_tx_t *tx)
 		ASSERT3U(blkoff + head, ==, blksz);
 		if (len < head)
 			head = len;
-		if (dbuf_hold_impl(dn, 0, dbuf_whichblock(dn, 0, off), TRUE,
-			FALSE, FTAG, &db) == 0) {
+		if (dbuf_hold_impl(dn, 0, dbuf_whichblock(dn, 0, off),
+		    TRUE, FALSE, FTAG, &db) == 0) {
 			caddr_t data;
 
 			/* don't dirty if it isn't on disk and isn't dirty */
@@ -1648,7 +1639,7 @@ dnode_free_range(dnode_t *dn, uint64_t off, uint64_t len, dmu_tx_t *tx)
 		if (len < tail)
 			tail = len;
 		if (dbuf_hold_impl(dn, 0, dbuf_whichblock(dn, 0, off+len),
-			TRUE, FALSE, FTAG, &db) == 0) {
+		    TRUE, FALSE, FTAG, &db) == 0) {
 			/* don't dirty if not on disk and not dirty */
 			if (db->db_last_dirty ||
 			    (db->db_blkptr && !BP_IS_HOLE(db->db_blkptr))) {
@@ -1694,8 +1685,7 @@ dnode_free_range(dnode_t *dn, uint64_t off, uint64_t len, dmu_tx_t *tx)
 	 *    amount of space if we copy the freed BPs into deadlists.
 	 */
 	if (dn->dn_nlevels > 1) {
-		uint64_t first, last, i, ibyte;
-		int shift, err;
+		uint64_t first, last;
 
 		first = blkid >> epbs;
 		dnode_dirty_l1(dn, first, tx);
@@ -1706,17 +1696,17 @@ dnode_free_range(dnode_t *dn, uint64_t off, uint64_t len, dmu_tx_t *tx)
 		if (last != first)
 			dnode_dirty_l1(dn, last, tx);
 
-		shift = dn->dn_datablkshift + dn->dn_indblkshift -
+		int shift = dn->dn_datablkshift + dn->dn_indblkshift -
 		    SPA_BLKPTRSHIFT;
-		for (i = first + 1; i < last; i++) {
+		for (uint64_t i = first + 1; i < last; i++) {
 			/*
 			 * Set i to the blockid of the next non-hole
 			 * level-1 indirect block at or after i.  Note
 			 * that dnode_next_offset() operates in terms of
 			 * level-0-equivalent bytes.
 			 */
-			ibyte = i << shift;
-			err = dnode_next_offset(dn, DNODE_FIND_HAVELOCK,
+			uint64_t ibyte = i << shift;
+			int err = dnode_next_offset(dn, DNODE_FIND_HAVELOCK,
 			    &ibyte, 2, 1, 0);
 			i = ibyte >> shift;
 			if (i >= last)
@@ -1745,15 +1735,12 @@ done:
 	 * We will finish up this free operation in the syncing phase.
 	 */
 	mutex_enter(&dn->dn_mtx);
-	{
 	int txgoff = tx->tx_txg & TXG_MASK;
 	if (dn->dn_free_ranges[txgoff] == NULL) {
-		dn->dn_free_ranges[txgoff] =
-		    range_tree_create(NULL, NULL, &dn->dn_mtx);
+		dn->dn_free_ranges[txgoff] = range_tree_create(NULL, NULL, &dn->dn_mtx);
 	}
 	range_tree_clear(dn->dn_free_ranges[txgoff], blkid, nblks);
 	range_tree_add(dn->dn_free_ranges[txgoff], blkid, nblks);
-	}
 	dprintf_dnode(dn, "blkid=%llu nblks=%llu txg=%llu\n",
 	    blkid, nblks, tx->tx_txg);
 	mutex_exit(&dn->dn_mtx);
