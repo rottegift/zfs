@@ -222,25 +222,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    __func__, __LINE__,
 			    zp->z_name_cache, zfsvfs->z_is_unmounting);
 		}
-		if (vnode_isrecycled(vp)) {
-			printf("ZFS: %s:%d: vnode_isrecyled for file %s\n", __func__, __LINE__,
-			    zp->z_name_cache);
-			return (VNODE_RETURNED);
-		}
-		if (spl_ubc_is_mapped_writable(vp)) {
-			/* this is fairly frequent */
-			dprintf("ZFS: %s:%d: spl_ubc_is_mapped true (writeable? %d) for file %s\n",
-			    __func__, __LINE__, spl_ubc_is_mapped_writable(vp), zp->z_name_cache);
-			return (VNODE_RETURNED);
-		}
-		if (vnode_isinuse(vp, 0)) {
-			if (waitfor)
-				printf("ZFS: %s:%d WAITFOR when vnode_isinuse(vp, 0) for file %s"
-				    " waitfor_arg %d\n",
-				    __func__, __LINE__, zp->z_name_cache, *waitfor_arg);
-
-			return (VNODE_RETURNED);
-		}
 		if (zp->z_in_pager_op > 0) {
 			printf("ZFS: %s:%d: z_in_pager_op %d > 0 for file %s\n", __func__, __LINE__,
 			    zp->z_in_pager_op, zp->z_name_cache);
@@ -333,13 +314,14 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d but ubcsize %lld !="
 			    "resid_off %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
 			    msync_retval, ubcsize, resid_off, flags, zp->z_name_cache);
+		} else if (waitfor && zfsvfs->z_log) {
+			zil_commit(zfsvfs->z_log, zp->z_id);
 		}
 		ZFS_EXIT(zfsvfs);
 		return (VNODE_RETURNED);
 	} else {
-		if (!vnode_isreg(vp) || vnode_isrecycled(vp))
+		if (!vnode_isreg(vp))
 			return (VNODE_RETURNED);
-
 		znode_t *zp = VTOZ(vp);
 		ASSERT3P(zp, !=, NULL);
 		if (!zp)
@@ -374,13 +356,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		ZFS_EXIT(zfsvfs);
-		if (!vnode_isreg(vp) || !ubc_pages_resident(vp)) {
-			return (VNODE_RETURNED);
-		} else if (0 != is_file_clean(vp, ubc_getsize(vp)) && waitfor == B_TRUE) {
-			return (VNODE_RETURNED);
-		} else {
-			return (VNODE_RETURNED);
-		}
+		return (VNODE_RETURNED);
 	}
 }
 
