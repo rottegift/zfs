@@ -3270,11 +3270,11 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 
 	ASSERT3U(filesize, ==, zp->z_size);
-	off_t write_size = size;
+	int64_t write_size = size;
 	if (f_offset + size > filesize) {
-		ASSERT3S(filesize - f_offset, <, INT_MAX);
+		ASSERT3S(filesize - f_offset, <, INT64_MAX);
 		ASSERT3S(filesize - f_offset, >, 0);
-		off_t write_space = filesize - f_offset;
+		const int64_t write_space = filesize - f_offset;
 		if (write_space <= 0)  {
 			printf("ZFS: %s:%d: write_space %lld, filesize (%lld) - foffset (%lld) < 1 (%lld)"
 			    " ! for upl_offset %u a_f_off %lld a_size %ld @ file %s\n",
@@ -3291,21 +3291,21 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			}
 			return (SET_ERROR(EINVAL));
 		}
-		write_size = MIN((off_t)size, write_space);
-		if (write_size < (off_t)size) {
+		write_size = MIN((int64_t)size, write_space);
+		if (write_size < (int64_t)size) {
 			dprintf("ZFS: %s:%d reducing write_size from size %u to %lld,"
 			    " off %lld filesize %lld file %s\n",
 			    __func__, __LINE__,
 			    size, write_size,
 			    f_offset, filesize, zp->z_name_cache);
 		}
-		if (write_size < 1) {
-			printf("ZFS: %s:%d: write_size is %lld off %lld"
-			    " size %u filesize %llu zsize %llu write_space %llu file %s\n",
-			    __func__, __LINE__, write_size, f_offset,
-			    size, filesize, zp->z_size, write_space,  zp->z_name_cache);
+	}
+	if (write_size < 1) {
+		printf("ZFS: %s:%d: write_size is %lld off %lld"
+		    " size %u filesize %llu zsize %llu write_space %lld file %s\n",
+		    __func__, __LINE__, write_size, f_offset,
+		    size, filesize, zp->z_size, filesize - f_offset,  zp->z_name_cache);
 
-		}
 	}
 
 	dprintf("ZFS: %s:%d: beginning DMU transaction on %s\n", __func__, __LINE__,
