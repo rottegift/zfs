@@ -3263,8 +3263,8 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT3S(endpage - stpage, >=, 0);
 	ASSERT3S((endpage - stpage) + 1LL, <=, pages_remaining);
 	for (int64_t i = endpage; i >= stpage; i--) {
-		if (upl_valid_page(pl, i) ||
-		    upl_dirty_page(pl, i)) {
+		if (upl_dirty_page(pl, i)) {
+			;
 		} else {
 			printf("ZFS: %s:%d: bad page %lld (pgs %lld-%lld)"
 			    " [file bytes to write %lld-%lld] (size %lld)"
@@ -5173,10 +5173,8 @@ skip_lock_acquisition:
 			int page_past_end_of_range = pg_index + 1;
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
-				if (!upl_dirty_page(pl, page_past_end_of_range) ||
-				    !upl_valid_page(pl, page_past_end_of_range))
+				if (!upl_dirty_page(pl, page_past_end_of_range))
 					break;
-				ASSERT(upl_valid_page(pl, page_past_end_of_range));
 				ASSERT(upl_dirty_page(pl, page_past_end_of_range));
 			}
 			pageout_op.state = "gathered dirty range";
