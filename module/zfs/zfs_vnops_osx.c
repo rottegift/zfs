@@ -2305,7 +2305,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				if (tsd_pageout_op->state)
 					pageout_op.state = tsd_pageout_op->state;
 				if (tsd_pageout_op->func)
-					pageout_op.state = tsd_pageout_op->func;
+					pageout_op.func = tsd_pageout_op->func;
 				pageout_op.line = tsd_pageout_op->line;
 				pageout_op.a_f_offset = tsd_pageout_op->a_f_offset;
 				pageout_op.a_size = tsd_pageout_op->a_size;
@@ -2342,7 +2342,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				if (tsd_pageout_op->state)
 					pageout_op.state = tsd_pageout_op->state;
 				if (tsd_pageout_op->func)
-					pageout_op.state = tsd_pageout_op->func;
+					pageout_op.func = tsd_pageout_op->func;
 				pageout_op.line = tsd_pageout_op->line;
 				pageout_op.a_f_offset = tsd_pageout_op->a_f_offset;
 				pageout_op.a_size = tsd_pageout_op->a_size;
