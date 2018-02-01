@@ -3892,6 +3892,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 
 	ASSERT3P(tsd_get(pageout_op_key), ==, NULL);
 	tsd_set(pageout_op_key, pageout_op);
+	ASSERT3P(tsd_get(pageout_op_key), ==, pageout_op);
 
 	/*
 	 * Spin lock against other pageout users; we do not want to take
