@@ -3520,7 +3520,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 	}
 
 	const off_t range_start = trunc_page_64(start);
-	const off_t range_end = MIN(round_page_64(end), ubc_getsize(vp));
+	const off_t range_end = MIN(round_page_64(end), round_page_64(ubc_getsize(vp)));
 
 	ASSERT3U(rl->r_off, <=, range_start);
 	ASSERT3U(rl->r_len + rl->r_off, >=, range_end);
@@ -3540,7 +3540,7 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 
 	ASSERT(vnode_isreg(vp));
 
-	for (f_offset = range_start; f_offset < MIN(range_end, MAX(zp->z_size, ubc_getsize(vp))); f_offset += PAGE_SIZE_64) {
+	for (f_offset = range_start; f_offset < range_end; f_offset += PAGE_SIZE_64) {
 		totproc++;
 		int p_flags;
 		kern_return_t pop_retval = ubc_page_op(vp, f_offset, 0, NULL, &p_flags);
@@ -3556,14 +3556,15 @@ zfs_msync(znode_t *zp, rl_t *rl, const off_t start, const off_t end, off_t *resi
 				int s_dirty = 0;
 				int s_precious = 0;
 				for ( ; s_retval == KERN_SUCCESS
-					  && subrange_end < MIN(range_end, zp->z_size)
+					  && subrange_end < range_end
 					  && s_pages * PAGE_SIZE_64 < MAX_UPL_TRANSFER_BYTES
 					  && (((a_flags & UBC_PUSHALL) && (s_flags & (UPL_POP_DIRTY | UPL_POP_PRECIOUS)))
 					      || ((a_flags & UBC_PUSHDIRTY) && (s_flags & UPL_POP_DIRTY))); ) {
 					boolean_t skip_unusual = B_FALSE;
 					if (s_flags & (UPL_POP_BUSY | UPL_POP_ABSENT | UPL_POP_PAGEOUT)
 					    && vnode_isreg(vp)) {
-						if (s_flags & UPL_POP_DIRTY) {
+						if ((s_flags & UPL_POP_DIRTY) ||
+						    ((s_flags & UPL_POP_DIRTY) && (a_flags & UBC_PUSHALL))) {
 							printf ("ZFS: %s:%d: unexpected POP value dirty %d precious %d"
 							    " busy %d absent %d pageout %d for"
 							    " subrange %llu - %llu (s_pages %d) of range [%llu - %llu] (pages %lld)"
