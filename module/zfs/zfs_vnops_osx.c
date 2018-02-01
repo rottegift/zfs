@@ -2315,7 +2315,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				pageout_op.a_size = tsd_pageout_op->a_size;
 				pageout_op.a_flags = tsd_pageout_op->a_flags;
 				pageout_op.bluster_bcopy_start = tsd_pageout_op->bluster_bcopy_start;
-				pageout_op.bluster_bcopy_start = tsd_pageout_op->bluster_bcopy_start;
+				pageout_op.bluster_bcopy_end = tsd_pageout_op->bluster_bcopy_end;
 			}
 			printf("ZFS: %s:%d: already in pageout (number %d) (rwlock held %d)"
 			    " SKIPPING LOCKING (note, range not wholly covered) for"
@@ -2358,7 +2358,7 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				pageout_op.a_size = tsd_pageout_op->a_size;
 				pageout_op.a_flags = tsd_pageout_op->a_flags;
 				pageout_op.bluster_bcopy_start = tsd_pageout_op->bluster_bcopy_start;
-				pageout_op.bluster_bcopy_start = tsd_pageout_op->bluster_bcopy_start;
+				pageout_op.bluster_bcopy_end = tsd_pageout_op->bluster_bcopy_end;
 				printf("ZFS: %s:%d: (covered range) already in pageout (number %d)"
 				    " our pagein [%llu..%llu] (size %lu) TSD rangelock [%llu..%llu] (size %llu)"
 				    " caller %s line %d"
