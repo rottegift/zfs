@@ -5077,7 +5077,17 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
 			}
-			/* do the actual abort below */
+			int abort_non_valid_ret = ubc_upl_abort_range(upl,
+			    start_of_range, end_of_range, 0);
+			if (abort_non_valid_ret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: ERROR %d aborting non-upl_valid pages in UPL range"
+				    " (%llu, %llu) (%llu pages) of file bytes [%llu..%llu] (%d pages)"
+				    " zid %llu fs %s fsname %s\n", __func__, __LINE__,
+				    abort_non_valid_ret,
+				    start_of_range, end_of_range, pages_in_range,
+				    f_start_of_upl, f_end_of_upl, pages_in_upl,
+				    zp->z_id, fsname, fname);
+			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_valid_pages_aborted, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
