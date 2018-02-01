@@ -8172,6 +8172,11 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 		tsd_set(rl_key_zp_key_mismatch_key, NULL);
 	}
 
+	if (tsd_get(rl_key_vp_from_getvnode) != NULL)
+		tsd_set(rl_key_vp_from_getvnode, NULL);
+	if (tsd_get(rl_key_zp_key_mismatch_key) != NULL)
+		tsd_set(rl_key_zp_key_mismatch_key, NULL);
+
 	return (0);
 }
 
