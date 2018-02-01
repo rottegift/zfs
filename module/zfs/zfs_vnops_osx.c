@@ -3835,7 +3835,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	zp->z_in_pager_op++;
 
 	if (tsd_get(rl_key_vp_from_getvnode) != NULL) {
-		printf("ZFS: %s:%d: got key from getvnode, equals ap->a_vp? %d ubc size %llu"
+		dprintf("ZFS: %s:%d: got key from getvnode, equals ap->a_vp? %d ubc size %llu"
 		    " ubc_pages_resident %d clean? %d zp != NULL? %d zsize %lld zid %lld znamecache %s\n",
 		    __func__, __LINE__, vp == tsd_get(rl_key_vp_from_getvnode),
 		    ubc_getsize(vp), zp != NULL,
