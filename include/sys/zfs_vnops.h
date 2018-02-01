@@ -212,6 +212,7 @@ extern int    zfs_vfsops_fini(void);
 extern uint_t rl_key;
 extern uint_t rl_key_zp_key_mismatch_key;
 extern uint_t rl_key_vp_from_getvnode;
+extern uint_t pageout_op_key;
 
 /* zfs_vnops_osx_lib calls */
 extern int    zfs_ioflags( int ap_ioflag );
