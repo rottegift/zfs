@@ -2338,7 +2338,6 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				.a_size = 0,
 				.a_flags = 0,
 			};
-			ASSERT3P(tsd_pageout_op, !=, NULL);
 			if (tsd_pageout_op != NULL) {
 				if (tsd_pageout_op->state)
 					pageout_op.state = tsd_pageout_op->state;
@@ -2348,23 +2347,43 @@ zfs_vnop_pagein(struct vnop_pagein_args *ap)
 				pageout_op.a_f_offset = tsd_pageout_op->a_f_offset;
 				pageout_op.a_size = tsd_pageout_op->a_size;
 				pageout_op.a_flags = tsd_pageout_op->a_flags;
+				printf("ZFS: %s:%d: (covered range) already in pageout (number %d)"
+				    " our pagein [%llu..%llu] (size %lu) TSD rangelock [%llu..%llu] (size %llu)"
+				    " caller %s line %d"
+				    " pageout_op: state %s func %s line %d foff %llu sz %lu flags 0x%x"
+				    " fs %s file %s\n",
+				    __func__, __LINE__, zp->z_in_pager_op,
+				    ap->a_f_offset, ap->a_f_offset + ap->a_size, ap->a_size,
+				    tsdrl->r_off, tsdrl->r_off + tsdrl->r_len, tsdrl->r_len,
+				    (tsdrl->r_caller != NULL) ? tsdrl->r_caller : "(null)",
+				    tsdrl->r_line,
+				    pageout_op.state, pageout_op.func, pageout_op.line,
+				    pageout_op.a_f_offset, pageout_op.a_size, pageout_op.a_flags,
+				    fsname, fname);
+				need_z_lock = B_FALSE;
+				goto norwlock;
+			} else {
+				ASSERT3P(tsd_pageout_op, !=, NULL);
+				printf("ZFS: %s:%d: NO pageout_op (despite covered range) already in pageout (number %d)"
+				    " our pagein [%llu..%llu] (size %lu) TSD rangelock [%llu..%llu] (size %llu)"
+				    " caller %s line %d"
+				    " z_map_lock holder %s held? %d"
+				    " pageout_op: state %s func %s line %d foff %llu sz %lu flags 0x%x"
+				    " fs %s file %s\n",
+				    __func__, __LINE__, zp->z_in_pager_op,
+				    ap->a_f_offset, ap->a_f_offset + ap->a_size, ap->a_size,
+				    tsdrl->r_off, tsdrl->r_off + tsdrl->r_len, tsdrl->r_len,
+				    (tsdrl->r_caller != NULL) ? tsdrl->r_caller : "(null)",
+				    tsdrl->r_line,
+				    (zp->z_map_lock_holder) ? zp->z_map_lock_holder : "(null)",
+				    rw_write_held(&zp->z_map_lock),
+				    pageout_op.state, pageout_op.func, pageout_op.line,
+				    pageout_op.a_f_offset, pageout_op.a_size, pageout_op.a_flags,
+				    fsname, fname);
+				need_z_lock = B_FALSE;
+				goto norwlock;
 			}
-			printf("ZFS: %s:%d: (covered range) already in pageout (number %d)"
-			    " our pagein [%llu..%llu] (size %lu) TSD rangelock [%llu..%llu] (size %llu)"
-			    " caller %s line %d"
-			    " pageout_op: state %s func %s line %d foff %llu sz %lu flags 0x%x"
-			    " fs %s file %s\n",
-			    __func__, __LINE__, zp->z_in_pager_op,
-			    ap->a_f_offset, ap->a_f_offset + ap->a_size, ap->a_size,
-			    tsdrl->r_off, tsdrl->r_off + tsdrl->r_len, tsdrl->r_len,
-			    (tsdrl->r_caller != NULL) ? tsdrl->r_caller : "(null)",
-			    tsdrl->r_line,
-			    pageout_op.state, pageout_op.func, pageout_op.line,
-			    pageout_op.a_f_offset, pageout_op.a_size, pageout_op.a_flags,
-			    fsname, fname);
 		}
-		need_z_lock = B_FALSE;
-		goto norwlock;
 	} else if (rl != NULL && rw_write_held(&zp->z_map_lock)) {
 		need_z_lock = B_FALSE;
 		printf("ZFS: %s:%d: rwlock held on entry for [%lld..%lld] (size %ld uploff %u)"
