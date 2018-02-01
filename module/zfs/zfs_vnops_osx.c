@@ -5045,7 +5045,8 @@ skip_lock_acquisition:
 			/* gather up a range of absent pages */
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
-				if (upl_valid_page(pl, page_past_end_of_range))
+				if (upl_valid_page(pl, page_past_end_of_range)
+				    || upl_dirty_page(pl, page_past_end_of_range))
 					break;
 			}
 			pageout_op->line = __LINE__;
