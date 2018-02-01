@@ -3301,14 +3301,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	pageout_op->line = __LINE__;
 
 	upl_page_info_t *pl = ubc_upl_pageinfo(upl);
-	const int64_t stpage = (int64_t)upl_offset / PAGE_SIZE_64;
-	const int64_t endpage = ((int64_t)(upl_offset + size) / PAGE_SIZE_64) - 1LL;
+	const int64_t stpage = (int64_t)(trunc_page_64(upl_offset) / PAGE_SIZE_64);
+	const int64_t endpage = (int64_t)(round_page_64(upl_offset + write_size) / PAGE_SIZE_64) - 1LL;
 	ASSERT3S(endpage - stpage, >=, 0);
 	ASSERT3S((endpage - stpage) + 1LL, <=, pages_remaining);
 	for (int64_t i = endpage; i >= stpage; i--) {
-		if (upl_dirty_page(pl, i)) {
-			;
-		} else {
+		if (!upl_dirty_page(pl, i)) {
 			printf("ZFS: %s:%d: bad page %lld (pgs %lld-%lld)"
 			    " [file bytes to write %lld-%lld] (size %lld)"
 			    " fs %s file %s (mapped %d) (caller_unmapped %d)"
