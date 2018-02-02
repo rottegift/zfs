@@ -5236,6 +5236,8 @@ skip_lock_acquisition:
 					int abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR);
 					upl = NULL;
 					ASSERT3S(abortret, ==, KERN_SUCCESS);
+					ASSERT3U(v_addr, ==, 0);
+					v_addr = 0;
 					goto pageout_done;
 				}
 				ASSERT3U(v_addr, !=, 0);
@@ -5311,7 +5313,10 @@ skip_lock_acquisition:
 	pageout_op->line = __LINE__;
 
 	if (upl) {
+		VERIFY3U(v_addr, ==, 0);
 		int upl_done = ubc_upl_abort(upl, 0);
+		pageout_op->state = "upl finished";
+		pageout_op->line = __LINE__;
 		upl = NULL;
 		if (upl_done != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: SUPER ERROR: upl_done abort ERROR %d"
@@ -5428,6 +5433,7 @@ pageout_done:
 	}
 
 	if (upl) {
+		VERIFY3U(v_addr, ==, 0);
 		int upl_pageout_done = ubc_upl_abort(upl, 0);
 		upl = NULL;
 		if (upl_pageout_done != KERN_SUCCESS) {
