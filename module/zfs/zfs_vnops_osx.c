@@ -139,7 +139,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
 	kstat_named_t pageoutv2_invalid_tail_err;
-	kstat_named_t pageoutv2_valid_pages_committed;
+	kstat_named_t pageoutv2_absent_pages_committed;
 	kstat_named_t pageoutv2_invalid_pages_committed;
 	kstat_named_t pageoutv2_precious_pages_cleaned;
 	kstat_named_t pageoutv2_precious_pages_failed;
@@ -179,7 +179,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_err",        KSTAT_DATA_UINT64 },
-	{ "pageoutv2_valid_pages_committed",     KSTAT_DATA_UINT64 },
+	{ "pageoutv2_absent_pages_committed",     KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_pages_committed",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_cleaned",  KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_failed",   KSTAT_DATA_UINT64 },
@@ -5165,7 +5165,7 @@ skip_lock_acquisition:
 				    f_start_of_upl, f_end_of_upl, pages_in_upl,
 				    zp->z_id, fsname, fname);
 			}
-			VNOPS_OSX_STAT_INCR(pageoutv2_valid_pages_committed, pages_in_range);
+			VNOPS_OSX_STAT_INCR(pageoutv2_absent_pages_committed, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
 		}
