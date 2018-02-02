@@ -5218,7 +5218,7 @@ skip_lock_acquisition:
 			pageout_op->state = "calling bluster";
 			pageout_op->line = __LINE__;
 
-			if (v_addr != 0) {
+			if (v_addr == 0) {
 				pageout_op->state = "map for bluster";
 				pageout_op->line = __LINE__;
 				int mapret = 0;
