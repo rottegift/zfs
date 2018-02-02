@@ -4806,8 +4806,10 @@ arc_kmem_reap_now(void)
 	kmem_cache_ws_reap_now(hdr_l2only_cache);
 	kmem_cache_ws_reap_now(range_seg_cache);
 
+#if 0
 	extern kmem_cache_t *dnode_cache;
 	if (dnode_cache) kmem_cache_ws_reap_now(dnode_cache);
+#endif
 	extern kmem_cache_t *znode_cache;
 	if (znode_cache) kmem_cache_ws_reap_now(znode_cache);
 
