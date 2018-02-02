@@ -21,7 +21,7 @@
 /*
  * Copyright (c) 2013 Will Andrews <will@firepipe.net>
  * Copyright (c) 2013, 2016 Jorgen Lundman <lundman@lundman.net>
- * Copyright (c) 2017 Sean Doran <smd@use.net>.  All rights reserved.
+ * Copyright (c) 2017, 2018 Sean Doran <smd@use.net>.  All rights reserved.
  */
 
 /*
@@ -61,6 +61,16 @@
  * (Already is, see vnode.h)
  */
 
+
+#ifdef __APPLE__
+/*
+ * cluster_copy_ubc_data takes XNU's uio_t which is (struct uio *)
+ * whereas ZFS's uio_t is (struct uio)
+ */
+#define cluster_copy_ubc_data kern_cluster_copy_ubc_data
+#define cluster_copy_upl_data kern_cluster_copy_upl_data
+#endif
+
 #include <sys/cred.h>
 #include <sys/vnode.h>
 #include <sys/zfs_dir.h>
@@ -92,6 +102,17 @@
 #include <sys/ioccom.h>
 
 #include <sys/znode_z_map_lock.h>
+
+#ifdef __APPLE__
+/*
+ * cluster_copy_ubc_data takes XNU's uio_t which is (struct uio *)
+ * whereas ZFS's uio_t is (struct uio)
+ */
+#undef cluster_copy_ubc_data
+#undef cluster_copy_upl_data
+extern int cluster_copy_ubc_data(vnode_t *, uio_t *, int *, int);
+extern int cluster_copy_upl_data(uio_t *, upl_t, int, int *);
+#endif
 
 uint_t rl_key = 0;
 uint_t rl_key_zp_key_mismatch_key = 0;
@@ -3163,8 +3184,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const upl_offset_t upl_offset, const off_t f_offset, const int size,
     const uint64_t filesize, const int flags,
     struct vnop_pageout_args *ap,
-    int pages_remaining, pageout_op_t *pageout_op,
-    caddr_t *pv_addr)
+    int pages_remaining, pageout_op_t *pageout_op)
 {
 	int           is_clcommit = 0;
 	dmu_tx_t *tx;
@@ -3350,11 +3370,31 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	void *safebuf = zio_data_buf_alloc(write_size);
 
 	pageout_op->line = __LINE__;
-	pageout_op->state = "bcopy";
+	pageout_op->state = "cluster copy upl data";
 	pageout_op->bluster_bcopy_start = upl_offset;
 	pageout_op->bluster_bcopy_end = upl_offset + write_size;
 
-	bcopy(pv_addr[upl_offset], safebuf, write_size);
+	uio_t *uio = uio_create(1,0, UIO_SYSSPACE, UIO_READ);
+	uio_addiov(uio, CAST_USER_ADDR_T(safebuf), write_size);
+	int nbytes = write_size;
+        int ccupl_err = cluster_copy_upl_data(uio, upl, upl_offset, &nbytes);
+	if (ccupl_err != 0) {
+		printf("ZFS: %s:%d: ERROR %d (nbytes %d, uio_resid %llu)"
+		    " cluster_copy_upl_data of %llu bytes"
+		    " at upl_offset %u to f_offset %llu zid %llu file %s\n",
+		    __func__, __LINE__, ccupl_err, nbytes, uio_resid(uio),
+		    write_size, upl_offset, f_offset, zp->z_id, zp->z_name_cache);
+		uio_free(uio);
+		zio_data_buf_free(safebuf, write_size);
+		kern_return_t ccupl_fail_abort_ret = ubc_upl_abort_range(upl,
+		    upl_offset, size, UPL_ABORT_ERROR);
+		ASSERT3S(ccupl_fail_abort_ret, ==, KERN_SUCCESS);
+		return (ccupl_err);
+	}
+	uio_free(uio);
+
+	pageout_op->line = __LINE__;
+	pageout_op->state = "data now in safebuf";
 
 	int tx_pass = 0;
 start_tx:
@@ -3807,7 +3847,6 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	rl_t *rl;
 	boolean_t must_lock = B_FALSE;
 	const off_t end_of_pageout = ap->a_f_offset + ap->a_size;
-	caddr_t v_addr = 0;
 
 	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
@@ -5218,59 +5257,14 @@ skip_lock_acquisition:
 			pageout_op->state = "calling bluster";
 			pageout_op->line = __LINE__;
 
-			if (v_addr == 0) {
-				pageout_op->state = "map for bluster";
-				pageout_op->line = __LINE__;
-				int mapret = 0;
-				if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
-					error = EINVAL;
-					printf("ZFS: %s:%d unable to map UPL, error %d, aborting"
-					    " current range: %llu..%llu (%llu pages)"
-					    " whole UPL at f_offset [%llu..%llu] size %lu"
-					    " zid %llu fs %s file %s\n", __func__, __LINE__, mapret,
-					    start_of_range, end_of_range, pages_in_range,
-					    f_start_of_upl, f_end_of_upl, ap->a_size,
-					    zp->z_id, fsname, fname);
-					int abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR);
-					upl = NULL;
-					ASSERT3S(abortret, ==, KERN_SUCCESS);
-					ASSERT3U(v_addr, ==, 0);
-					v_addr = 0;
-					goto pageout_done;
-				}
-				ASSERT3U(v_addr, !=, 0);
-			}
-
 			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
 			    f_start_of_upl,
 			    (end_of_range - start_of_range), filesize, a_flags, ap,
-			    pages_remaining, pageout_op, &v_addr);
+			    pages_remaining, pageout_op);
 
 			pageout_op->func = __func__;
 			pageout_op->line = __LINE__;
 			pageout_op->state = "returned from bluster";
-
-			if (error == 0 && v_addr != 0) {
-				pageout_op->line = __LINE__;
-				pageout_op->state = "unmap after bluster";
-				int unmapret = ubc_upl_unmap(upl);
-				if (unmapret != KERN_SUCCESS) {
-					printf("ZFS: %s:%d: error %d unmapping UPL after bluster!"
-					    " range start %llu end %llu size %llu pages remaining %llu"
-					    " ap->a_f_offset %llu ap->a_size %lu"
-					    " zid %llu fs %s file %s\n",
-					    __func__, __LINE__, unmapret,
-					    start_of_range, end_of_range, (end_of_range - start_of_range),
-					    pages_remaining,
-					    ap->a_f_offset, ap->a_size,
-					    zp->z_id, fsname, fname);
-					if (!error)
-						error = unmapret;
-				}
-				pageout_op->line = __LINE__;
-				pageout_op->state = "unmapped after bluster";
-				v_addr = 0;
-			}
 
 			if (error != 0) {
 				pageout_op->state = "bluster returned error";
@@ -5316,24 +5310,7 @@ skip_lock_acquisition:
 	pageout_op->state = "pageoutv2 done primary for loop";
 	pageout_op->line = __LINE__;
 
-	if (v_addr != 0) {
-		int unmapret = ubc_upl_unmap(upl);
-		if (unmapret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: error %d unmapping UPL!"
-			    " ap->a_f_offset %llu ap->a_size %lu"
-			    " zid %llu fs %s file %s\n",
-			    __func__, __LINE__, unmapret,
-			    ap->a_f_offset, ap->a_size,
-			    zp->z_id, fsname, fname);
-		}
-		v_addr = 0;
-	}
-
-	pageout_op->state = "upl unmapped";
-	pageout_op->line = __LINE__;
-
 	if (upl) {
-		VERIFY3U(v_addr, ==, 0);
 		int upl_done = ubc_upl_abort(upl, 0);
 		pageout_op->state = "upl finished";
 		pageout_op->line = __LINE__;
@@ -5434,26 +5411,7 @@ skip_lock_acquisition:
 
 pageout_done:
 
-	if (v_addr != 0) {
-		VERIFY3P(upl, !=, NULL);
-		if (v_addr != 0) {
-			int unmapret = ubc_upl_unmap(upl);
-			if (unmapret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: error %d unmapping UPL!"
-				    " ap->a_f_offset %llu ap->a_size %lu"
-				    " zid %llu fs %s file %s\n",
-				    __func__, __LINE__, unmapret,
-				    ap->a_f_offset, ap->a_size,
-				    zp->z_id, fsname, fname);
-				if (!error)
-					error = unmapret;
-			}
-			v_addr = 0;
-		}
-	}
-
 	if (upl) {
-		VERIFY3U(v_addr, ==, 0);
 		int upl_pageout_done = ubc_upl_abort(upl, 0);
 		upl = NULL;
 		if (upl_pageout_done != KERN_SUCCESS) {
@@ -5499,7 +5457,6 @@ pageout_done:
 exit_abort:
 
 	VERIFY3P(upl, ==, NULL);
-	VERIFY3U(v_addr, ==, 0);
 
 	dec_z_in_pager_op(zp, fsname, fname);
 
