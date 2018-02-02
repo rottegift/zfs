@@ -139,8 +139,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
 	kstat_named_t pageoutv2_invalid_tail_err;
-	kstat_named_t pageoutv2_valid_pages_aborted;
-	kstat_named_t pageoutv2_invalid_pages_aborted;
+	kstat_named_t pageoutv2_valid_pages_committed;
+	kstat_named_t pageoutv2_invalid_pages_committed;
 	kstat_named_t pageoutv2_precious_pages_cleaned;
 	kstat_named_t pageoutv2_precious_pages_failed;
 	kstat_named_t pageoutv2_dirty_pages_blustered;
@@ -179,8 +179,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_err",        KSTAT_DATA_UINT64 },
-	{ "pageoutv2_valid_pages_aborted",     KSTAT_DATA_UINT64 },
-	{ "pageoutv2_invalid_pages_aborted",   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_valid_pages_committed",     KSTAT_DATA_UINT64 },
+	{ "pageoutv2_invalid_pages_committed",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_cleaned",  KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_failed",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
@@ -5057,7 +5057,7 @@ skip_lock_acquisition:
 			const off_t pages_in_range = page_past_end_of_range - pg_index;
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			if (xxxbleat) printf("ZFS: %s:%d: aborting invalid page upl bytes [%lld..%lld] (%lld pages)"
+			if (xxxbleat) printf("ZFS: %s:%d: committing invalid page upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
@@ -5079,18 +5079,18 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
 			}
-			int abort_non_valid_ret = ubc_upl_abort_range(upl,
-			    start_of_range, end_of_range, 0);
-			if (abort_non_valid_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: ERROR %d aborting non-present pages in UPL range"
+			int commit_non_present_ret = ubc_upl_commit_range(upl,
+			    start_of_range, end_of_range, UPL_COMMIT_INACTIVATE);
+			if (commit_non_present_ret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: ERROR %d committing non-present pages in UPL range"
 				    " (%llu, %llu) (%llu pages) of file bytes [%llu..%llu] (%d pages)"
 				    " zid %llu fs %s fsname %s\n", __func__, __LINE__,
-				    abort_non_valid_ret,
+				    commit_non_present_ret,
 				    start_of_range, end_of_range, pages_in_range,
 				    f_start_of_upl, f_end_of_upl, pages_in_upl,
 				    zp->z_id, fsname, fname);
 			}
-			VNOPS_OSX_STAT_INCR(pageoutv2_invalid_pages_aborted, pages_in_range);
+			VNOPS_OSX_STAT_INCR(pageoutv2_invalid_pages_committed, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
 		}
@@ -5131,7 +5131,7 @@ skip_lock_acquisition:
 			const off_t pages_in_range = page_past_end_of_range - pg_index;
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			if (xxxbleat) printf("ZFS: %s:%d: aborting absent (but addressed)"
+			if (xxxbleat) printf("ZFS: %s:%d: committing absent (but addressed)"
 			    " upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
@@ -5154,18 +5154,18 @@ skip_lock_acquisition:
 					mapped = B_FALSE;
 				}
 			}
-			int abort_non_valid_ret = ubc_upl_abort_range(upl,
-			    start_of_range, end_of_range, 0);
-			if (abort_non_valid_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: ERROR %d aborting non-upl_valid pages in UPL range"
+			int commit_non_valid_ret = ubc_upl_commit_range(upl,
+			    start_of_range, end_of_range, UPL_COMMIT_INACTIVATE);
+			if (commit_non_valid_ret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: ERROR %d committing non-upl_valid pages in UPL range"
 				    " (%llu, %llu) (%llu pages) of file bytes [%llu..%llu] (%d pages)"
 				    " zid %llu fs %s fsname %s\n", __func__, __LINE__,
-				    abort_non_valid_ret,
+				    commit_non_valid_ret,
 				    start_of_range, end_of_range, pages_in_range,
 				    f_start_of_upl, f_end_of_upl, pages_in_upl,
 				    zp->z_id, fsname, fname);
 			}
-			VNOPS_OSX_STAT_INCR(pageoutv2_valid_pages_aborted, pages_in_range);
+			VNOPS_OSX_STAT_INCR(pageoutv2_valid_pages_committed, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
 		}
