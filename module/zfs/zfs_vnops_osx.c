@@ -4729,30 +4729,6 @@ skip_lock_acquisition:
 	pageout_op->state = "created upl";
 	pageout_op->line = __LINE__;
 
-	if (v_addr != 0) {
-		pageout_op->state = "map for bluster";
-		pageout_op->line = __LINE__;
-		int mapret = 0;
-		if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
-			error = EINVAL;
-			printf("ZFS: %s:%d unable to map UPL, error %d, aborting"
-			    " current range: %llu..%llu (%llu pages)"
-			    " whole UPL at f_offset [%llu..%llu] size %lu"
-			    " zid %llu fs %s file %s\n", __func__, __LINE__, mapret,
-			    /* start_of_range, end_of_range, pages_in_range, */
-			    0ULL, 0ULL, 0ULL,
-			    f_start_of_upl, f_end_of_upl, ap->a_size,
-			    zp->z_id, fsname, fname);
-			int abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR);
-			upl = NULL;
-			ASSERT3S(abortret, ==, KERN_SUCCESS);
-			ASSERT3U(v_addr, ==, 0);
-			v_addr = 0;
-			goto pageout_done;
-		}
-		ASSERT3U(v_addr, !=, 0);
-	}
-
 	/*
 	 * The caller may hand us a memory range that results in a run
 	 * of pages at the end of the UPL that aren't valid now.
@@ -4953,7 +4929,6 @@ skip_lock_acquisition:
 	 *
 	 * If we have run out of pages, we are done.
 	 */
-
 	const off_t just_past_last_valid_pg = howmany(trimmed_upl_size, PAGE_SIZE_64);
 	const off_t upl_end_pg = just_past_last_valid_pg - 1;
 	ASSERT3S(upl_end_pg, >=, 0);
@@ -5242,6 +5217,29 @@ skip_lock_acquisition:
 
 			pageout_op->state = "calling bluster";
 			pageout_op->line = __LINE__;
+
+			if (v_addr != 0) {
+				pageout_op->state = "map for bluster";
+				pageout_op->line = __LINE__;
+				int mapret = 0;
+				if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
+					error = EINVAL;
+					printf("ZFS: %s:%d unable to map UPL, error %d, aborting"
+					    " current range: %llu..%llu (%llu pages)"
+					    " whole UPL at f_offset [%llu..%llu] size %lu"
+					    " zid %llu fs %s file %s\n", __func__, __LINE__, mapret,
+					    start_of_range, end_of_range, pages_in_range,
+					    f_start_of_upl, f_end_of_upl, ap->a_size,
+					    zp->z_id, fsname, fname);
+					int abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR);
+					upl = NULL;
+					ASSERT3S(abortret, ==, KERN_SUCCESS);
+					ASSERT3U(v_addr, ==, 0);
+					v_addr = 0;
+					goto pageout_done;
+				}
+				ASSERT3U(v_addr, !=, 0);
+			}
 
 			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
 			    f_start_of_upl,
