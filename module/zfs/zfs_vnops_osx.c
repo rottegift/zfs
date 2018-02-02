@@ -4996,6 +4996,7 @@ skip_lock_acquisition:
 	const off_t just_past_last_valid_pg = howmany(trimmed_upl_size, PAGE_SIZE_64);
 	const off_t upl_end_pg = just_past_last_valid_pg - 1;
 	ASSERT3S(upl_end_pg, >=, 0);
+	boolean_t commit_abort_error = B_FALSE;
 
 	for (pg_index = 0; pg_index < just_past_last_valid_pg; ) {
 		pageout_op->line = __LINE__;
@@ -5034,6 +5035,7 @@ skip_lock_acquisition:
 				    start_of_range, end_of_range, pages_in_range,
 				    f_start_of_upl, f_end_of_upl, pages_in_upl,
 				    zp->z_id, fsname, fname);
+				commit_abort_error = B_TRUE;
 			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_invalid_pages_committed, pages_in_range);
 			pg_index = page_past_end_of_range;
@@ -5092,6 +5094,7 @@ skip_lock_acquisition:
 				    start_of_range, end_of_range, pages_in_range,
 				    f_start_of_upl, f_end_of_upl, pages_in_upl,
 				    zp->z_id, fsname, fname);
+				commit_abort_error = B_TRUE;
 			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_absent_pages_committed, pages_in_range);
 			pg_index = page_past_end_of_range;
@@ -5146,6 +5149,7 @@ skip_lock_acquisition:
 			if (commit_precious_ret != KERN_SUCCESS) {
 				pageout_op->line = __LINE__;
 				pageout_op->state = "precious range commmit error";
+				commit_abort_error = B_TRUE;
 				/*
 				 * This is an error there is still a valid page
 				 * at a higher page index in this UPL, but is OK
@@ -5191,6 +5195,7 @@ skip_lock_acquisition:
 					continue;
 				} else {
 					xxxbleat = B_TRUE;
+					commit_abort_error = B_TRUE;
 					printf("ZFS: %s:%d: ERROR %d (precious) range at end of trimmed UPL"
 					    " could not be committed"
 					    " range [%lld..%lld] (%lld pages) of UPL range"
@@ -5303,6 +5308,7 @@ skip_lock_acquisition:
 				    f_start_of_upl, f_end_of_upl, pages_remaining,
 				    filesize, fsname, fname,
 				    last_page_in_range, upl_end_pg);
+				commit_abort_error = B_TRUE;
 				goto pageout_done;
 			} else if (xxxbleat) {
 				printf("ZFS: %s:%d: bluster_pageout OK for"
@@ -5335,7 +5341,8 @@ skip_lock_acquisition:
 	pageout_op->state = "pageoutv2 done primary for loop";
 	pageout_op->line = __LINE__;
 
-	if (upl) {
+	if (upl &&
+	    (pg_index < just_past_last_valid_pg || commit_abort_error == B_TRUE)) {
 		int upl_done = ubc_upl_abort_upl_done(upl, 0);
 		pageout_op->state = "upl finished";
 		pageout_op->line = __LINE__;
