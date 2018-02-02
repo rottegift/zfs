@@ -5250,6 +5250,28 @@ skip_lock_acquisition:
 			pageout_op->line = __LINE__;
 			pageout_op->state = "returned from bluster";
 
+			if (error == 0 && v_addr != 0) {
+				pageout_op->line = __LINE__;
+				pageout_op->state = "unmap after bluster";
+				int unmapret = ubc_upl_unmap(upl);
+				if (unmapret != KERN_SUCCESS) {
+					printf("ZFS: %s:%d: error %d unmapping UPL after bluster!"
+					    " range start %llu end %llu size %llu pages remaining %llu"
+					    " ap->a_f_offset %llu ap->a_size %lu"
+					    " zid %llu fs %s file %s\n",
+					    __func__, __LINE__, unmapret,
+					    start_of_range, end_of_range, (end_of_range - start_of_range),
+					    pages_remaining,
+					    ap->a_f_offset, ap->a_size,
+					    zp->z_id, fsname, fname);
+					if (!error)
+						error = unmapret;
+				}
+				pageout_op->line = __LINE__;
+				pageout_op->state = "unmapped after bluster";
+				v_addr = 0;
+			}
+
 			if (error != 0) {
 				pageout_op->state = "bluster returned error";
 				pageout_op->line = __LINE__;
