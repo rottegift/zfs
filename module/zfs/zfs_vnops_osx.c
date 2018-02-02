@@ -3363,6 +3363,15 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 			    zp->z_name_cache,
 			    size, f_offset + size,
 			    pages_remaining, upl_offset);
+			extern void IOSleep(unsigned milliseconds);
+			if (is_clcommit) {
+				kern_return_t abort_ret = ubc_upl_abort_range(upl,
+				    upl_offset, size,
+				    UPL_ABORT_ERROR);
+				ASSERT3S(abort_ret, ==, KERN_SUCCESS);
+			}
+			error = EFAULT;
+			return (error);
 		}
 	}
 	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
