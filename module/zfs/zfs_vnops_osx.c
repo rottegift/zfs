@@ -3819,6 +3819,31 @@ pageoutv2_exception(const char *caller, const int line)
 	return;
 }
 
+noinline kern_return_t
+ubc_upl_abort_commit_inactivate_failure(upl_t upl, int flags)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	return(ubc_upl_abort(upl, flags));
+}
+
+noinline kern_return_t
+ubc_upl_abort_upl_done(upl_t upl, int flags)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	return(ubc_upl_abort(upl, flags));
+}
+
+
+noinline kern_return_t
+ubc_upl_abort_pageout_done(upl_t upl, int flags)
+	__attribute__((noinline))
+	__attribute__((optnone))
+{
+	return(ubc_upl_abort(upl, flags));
+}
+
 
 static int
 pageoutv2_helper(struct vnop_pageout_args *ap)
@@ -4843,7 +4868,7 @@ skip_lock_acquisition:
 			    ap->a_size, ap->a_f_offset,
 			    zp->z_id, fsname, fname);
 			error = commit_inactivate;
-			int commit_inactivate_failure_abort = ubc_upl_abort(upl, UPL_ABORT_ERROR);
+			int commit_inactivate_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
 			ASSERT3S(commit_inactivate_failure_abort, ==, KERN_SUCCESS);
 		}
 		upl = NULL;
@@ -5311,7 +5336,7 @@ skip_lock_acquisition:
 	pageout_op->line = __LINE__;
 
 	if (upl) {
-		int upl_done = ubc_upl_abort(upl, 0);
+		int upl_done = ubc_upl_abort_upl_done(upl, 0);
 		pageout_op->state = "upl finished";
 		pageout_op->line = __LINE__;
 		upl = NULL;
@@ -5412,7 +5437,7 @@ skip_lock_acquisition:
 pageout_done:
 
 	if (upl) {
-		int upl_pageout_done = ubc_upl_abort(upl, 0);
+		int upl_pageout_done = ubc_upl_abort_pageout_done(upl, 0);
 		upl = NULL;
 		if (upl_pageout_done != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: upl_pageout_done abort ERROR %d"
