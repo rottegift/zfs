@@ -5215,25 +5215,32 @@ skip_lock_acquisition:
 			ASSERT3S(pages_remaining, >=, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, trimmed_upl_size);
 
-			pageout_op->state = "calling bluster";
+
+			pageout_op->state= "creating bluster upl";
 			pageout_op->line = __LINE__;
+
+			upl_t bluster_upl = NULL;
+			ubc_create_upl(vp, start_of_range,
+			    (end_of_range - start_of_range), &bluster_upl, NULL, UPL_SET_LITE);
 
 			if (v_addr == 0) {
 				pageout_op->state = "map for bluster";
 				pageout_op->line = __LINE__;
 				int mapret = 0;
-				if ((mapret = ubc_upl_map(upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
+				if ((mapret = ubc_upl_map(bluster_upl, (vm_offset_t *)&v_addr)) != KERN_SUCCESS) {
 					error = EINVAL;
-					printf("ZFS: %s:%d unable to map UPL, error %d, aborting"
-					    " current range: %llu..%llu (%llu pages)"
+					printf("ZFS: %s:%d unable to map bluster UPL, error %d, aborting"
+					    " bluster UPL range: %llu..%llu (%llu pages)"
 					    " whole UPL at f_offset [%llu..%llu] size %lu"
 					    " zid %llu fs %s file %s\n", __func__, __LINE__, mapret,
 					    start_of_range, end_of_range, pages_in_range,
 					    f_start_of_upl, f_end_of_upl, ap->a_size,
 					    zp->z_id, fsname, fname);
+					int bluster_abortret = ubc_upl_abort(bluster_upl, UPL_ABORT_ERROR);
+					ASSERT3S(bluster_abortret, ==, KERN_SUCCESS);
 					int abortret = ubc_upl_abort(upl, UPL_ABORT_ERROR);
-					upl = NULL;
 					ASSERT3S(abortret, ==, KERN_SUCCESS);
+					upl = NULL;
 					ASSERT3U(v_addr, ==, 0);
 					v_addr = 0;
 					goto pageout_done;
@@ -5241,7 +5248,10 @@ skip_lock_acquisition:
 				ASSERT3U(v_addr, !=, 0);
 			}
 
-			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
+			pageout_op->state = "calling bluster";
+			pageout_op->line = __LINE__;
+
+			error = bluster_pageout(zfsvfs, zp, bluster_upl, 0,
 			    f_start_of_upl,
 			    (end_of_range - start_of_range), filesize, a_flags, ap,
 			    pages_remaining, pageout_op, &v_addr);
@@ -5253,7 +5263,7 @@ skip_lock_acquisition:
 			if (error == 0 && v_addr != 0) {
 				pageout_op->line = __LINE__;
 				pageout_op->state = "unmap after bluster";
-				int unmapret = ubc_upl_unmap(upl);
+				int unmapret = ubc_upl_unmap(bluster_upl);
 				if (unmapret != KERN_SUCCESS) {
 					printf("ZFS: %s:%d: error %d unmapping UPL after bluster!"
 					    " range start %llu end %llu size %llu pages remaining %llu"
@@ -5270,6 +5280,17 @@ skip_lock_acquisition:
 				pageout_op->line = __LINE__;
 				pageout_op->state = "unmapped after bluster";
 				v_addr = 0;
+			}
+
+			if (error == 0) {
+				pageout_op->line = __LINE__;
+				pageout_op->state = "commit bluster upl";
+				int bluster_commit_ret = ubc_upl_commit(bluster_upl);
+				ASSERT3S(bluster_commit_ret, ==, KERN_SUCCESS);
+				int post_bluster_upl_commit_range =
+				    ubc_upl_commit_range(upl, start_of_range, end_of_range,
+					UPL_COMMIT_INACTIVATE);
+				ASSERT3S(post_bluster_upl_commit_range, ==, KERN_SUCCESS);
 			}
 
 			if (error != 0) {
