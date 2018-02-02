@@ -4795,7 +4795,7 @@ skip_lock_acquisition:
 		pageout_op->line = __LINE__;
 		// WE CAN COMMIT EVERYTHING HERE, THE UPL IS DEALLOCATED
 		int commit_inactivate = ubc_upl_commit_range(upl, 0, ap->a_size,
-			UPL_COMMIT_INACTIVATE);
+		    UPL_COMMIT_INACTIVATE | UPL_COMMIT_FREE_ON_EMPTY);
 		if (commit_inactivate != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: ERROR %d committing whole UPL as a range"
 			    " 0..%lu at file offset %llu zid %llu fs %s file %s\n",
@@ -4804,12 +4804,10 @@ skip_lock_acquisition:
 			    ap->a_size, ap->a_f_offset,
 			    zp->z_id, fsname, fname);
 			error = commit_inactivate;
+			int commit_inactivate_failure_abort = ubc_upl_abort(upl, UPL_ABORT_ERROR);
+			ASSERT3S(commit_inactivate_failure_abort, ==, KERN_SUCCESS);
 		}
-		int finish_upl = ubc_upl_abort(upl, 0);
 		upl = NULL;
-		ASSERT3S(finish_upl, ==, KERN_SUCCESS);
-		if (error == 0 && finish_upl != KERN_SUCCESS)
-			error = finish_upl;
 		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		goto pageout_done;
