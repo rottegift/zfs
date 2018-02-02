@@ -140,6 +140,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_invalid_tail_pages;
 	kstat_named_t pageoutv2_invalid_tail_err;
 	kstat_named_t pageoutv2_valid_pages_aborted;
+	kstat_named_t pageoutv2_invalid_pages_aborted;
 	kstat_named_t pageoutv2_precious_pages_cleaned;
 	kstat_named_t pageoutv2_precious_pages_failed;
 	kstat_named_t pageoutv2_dirty_pages_blustered;
@@ -178,7 +179,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_err",        KSTAT_DATA_UINT64 },
-	{ "pageoutv2_valid_pages_aborted",   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_valid_pages_aborted",     KSTAT_DATA_UINT64 },
+	{ "pageoutv2_invalid_pages_aborted",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_cleaned",  KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_failed",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
@@ -5036,17 +5038,16 @@ skip_lock_acquisition:
 		VERIFY3S(mapped, ==, B_TRUE);
 		pageout_op->line = __LINE__;
 		pageout_op->state = "pageoutv2 primary for loop";
-		/* we found an absent page */
-		if (!upl_valid_page(pl, pg_index)) {
-			pageout_op->state = "found absent";
+		/* we found an invalid page: it has no memory address */
+		if (!upl_page_present(pl, pg_index)) {
+			pageout_op->state = "found invalid";
 			pageout_op->line = __LINE__;
 			ASSERT0(upl_dirty_page(pl, pg_index));
 			int64_t page_past_end_of_range = pg_index + 1;
 			/* gather up a range of absent pages */
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
-				if (upl_valid_page(pl, page_past_end_of_range)
-				    || upl_dirty_page(pl, page_past_end_of_range))
+				if (upl_page_present(pl, page_past_end_of_range))
 					break;
 			}
 			pageout_op->line = __LINE__;
@@ -5056,7 +5057,82 @@ skip_lock_acquisition:
 			const off_t pages_in_range = page_past_end_of_range - pg_index;
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			if (xxxbleat) printf("ZFS: %s:%d: aborting absent upl bytes [%lld..%lld] (%lld pages)"
+			if (xxxbleat) printf("ZFS: %s:%d: aborting invalid page upl bytes [%lld..%lld] (%lld pages)"
+			    " of file bytes [%lld..%lld] (%d pages)"
+			    " fs %s file %s\n", __func__, __LINE__,
+			    start_of_range, end_of_range, pages_in_range,
+			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
+			if (page_past_end_of_range > upl_end_pg) {
+				if (xxxbleat) printf("ZFS: %s:%d: as have reached last UPL page, unmapping"
+				    " fs %s file %s (unmapped %d)\n",
+				    __func__, __LINE__, fsname, fname, mapped);
+				ASSERT3S(mapped, !=, B_FALSE);
+				if (mapped) {
+					pageout_op->line = __LINE__;
+					const int unmapret = ubc_upl_unmap(upl);
+					if (unmapret != KERN_SUCCESS) {
+						printf("ZFS: %s:%d: error %d unmapping UPL [%lld..%lld]"
+						    " fs %s file %s\n", __func__, __LINE__, unmapret,
+						    f_start_of_upl, f_end_of_upl, fsname, fname);
+					}
+					error = unmapret;
+					mapped = B_FALSE;
+				}
+			}
+			int abort_non_valid_ret = ubc_upl_abort_range(upl,
+			    start_of_range, end_of_range, 0);
+			if (abort_non_valid_ret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: ERROR %d aborting non-present pages in UPL range"
+				    " (%llu, %llu) (%llu pages) of file bytes [%llu..%llu] (%d pages)"
+				    " zid %llu fs %s fsname %s\n", __func__, __LINE__,
+				    abort_non_valid_ret,
+				    start_of_range, end_of_range, pages_in_range,
+				    f_start_of_upl, f_end_of_upl, pages_in_upl,
+				    zp->z_id, fsname, fname);
+			}
+			VNOPS_OSX_STAT_INCR(pageoutv2_invalid_pages_aborted, pages_in_range);
+			pg_index = page_past_end_of_range;
+			continue;
+		}
+		/* present but not valid page (i.e., it's got an address but is marked absent) */
+		if (!upl_valid_page(pl, pg_index)) {
+			pageout_op->state = "found absent";
+			pageout_op->line = __LINE__;
+			ASSERT0(upl_dirty_page(pl, pg_index));
+			ASSERT(upl_page_present(pl, pg_index));
+			int64_t page_past_end_of_range = pg_index + 1;
+			/* gather up a range of valid (and present) pages */
+			for ( ; page_past_end_of_range < just_past_last_valid_pg;
+			      page_past_end_of_range++) {
+				if (upl_dirty_page(pl, pg_index)) {
+					break;
+				} else if (!upl_page_present(pl, pg_index)) {
+					break;
+				} else if (upl_valid_page(pl, pg_index)) {
+					continue;
+				} else {
+					printf("ZFS: %s:%d: anomalous page index %lld"
+					    " pres? %d val? %d dir? %d"
+					    " in upl of %d pages file pos [%llu..%llu]"
+					    " zid %llu fs %s file %s\n",
+					    __func__, __LINE__, pg_index,
+					    upl_page_present(pl, pg_index),
+					    upl_valid_page(pl, pg_index),
+					    upl_dirty_page(pl, pg_index),
+					    pages_in_upl, f_start_of_upl, f_end_of_upl,
+					    zp->z_id, fsname, fname);
+					break;
+				}
+			}
+			pageout_op->line = __LINE__;
+			ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
+			const off_t start_of_range = pg_index * PAGE_SIZE_64;
+			const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
+			const off_t pages_in_range = page_past_end_of_range - pg_index;
+			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
+			ASSERT3S(end_of_range, <=, ap->a_size);
+			if (xxxbleat) printf("ZFS: %s:%d: aborting absent (but addressed)"
+			    " upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
