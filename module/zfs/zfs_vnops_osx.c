@@ -3362,7 +3362,6 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 		return (abortret);
 	}
 
-
 	pageout_op->line = __LINE__;
 	pageout_op->state = "bcopy";
 	pageout_op->bluster_bcopy_start = upl_offset;
@@ -3396,6 +3395,10 @@ start_tx:
 		    zp->z_name_cache,
 		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
 		zio_data_buf_free(safebuf, write_size);
+		int unmapret = ubc_upl_unmap(upl);
+		if (unmapret != KERN_SUCCESS)
+			printf("ZFS: %s:%d: error unmapping UPL for [%lld..%lld] file %s\n",
+			    __func__, __LINE__, f_offset, f_offset + size, zp->z_name_cache);
 		if (is_clcommit) {
 			kern_return_t abort_ret = ubc_upl_abort_range(upl,
 			    upl_offset, size,
@@ -4746,7 +4749,8 @@ skip_lock_acquisition:
 	error = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl,
 						   request_flags );
 	if (error || (upl == NULL)) {
-		printf("ZFS: %s: Failed to create UPL! %d\n", __func__, error);
+		printf("ZFS: %s: Failed to create UPL! error %d (UPL == NULL? %d)\n",
+		    __func__, error, upl == NULL);
 		goto pageout_done;
 	}
 
