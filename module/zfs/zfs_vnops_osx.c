@@ -3164,7 +3164,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const uint64_t filesize, const int flags,
     struct vnop_pageout_args *ap,
     int pages_remaining, pageout_op_t *pageout_op,
-    caddr_t v_addr)
+    caddr_t *pv_addr)
 {
 	int           is_clcommit = 0;
 	dmu_tx_t *tx;
@@ -3354,7 +3354,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	pageout_op->bluster_bcopy_start = upl_offset;
 	pageout_op->bluster_bcopy_end = upl_offset + write_size;
 
-	bcopy(&v_addr[upl_offset], safebuf, write_size);
+	bcopy(pv_addr[upl_offset], safebuf, write_size);
 
 	int tx_pass = 0;
 start_tx:
@@ -5244,7 +5244,7 @@ skip_lock_acquisition:
 			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
 			    f_start_of_upl,
 			    (end_of_range - start_of_range), filesize, a_flags, ap,
-			    pages_remaining, pageout_op, v_addr);
+			    pages_remaining, pageout_op, &v_addr);
 
 			pageout_op->func = __func__;
 			pageout_op->line = __LINE__;
