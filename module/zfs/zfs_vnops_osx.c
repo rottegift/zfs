@@ -159,7 +159,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_upl_iosync_skipped;
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
-	kstat_named_t pageoutv2_invalid_tail_err;
 	kstat_named_t pageoutv2_absent_pages_seen;
 	kstat_named_t pageoutv2_invalid_pages_seen;
 	kstat_named_t pageoutv2_precious_pages_seen;
@@ -198,7 +197,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_upl_iosync_skipped",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
-	{ "pageoutv2_invalid_tail_err",        KSTAT_DATA_UINT64 },
 	{ "pageoutv2_absent_pages_seen",       KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_pages_seen",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_seen",     KSTAT_DATA_UINT64 },
@@ -4760,6 +4758,12 @@ skip_lock_acquisition:
 		    fsname, fname);
 		pageout_op->line = __LINE__;
 		// WE CAN COMMIT EVERYTHING HERE, THE UPL IS DEALLOCATED
+		if (v_addr != 0) {
+			int unmapret = ubc_upl_unmap(upl);
+			ASSERT3S(unmapret, ==, KERN_SUCCESS);
+			if (unmapret == KERN_SUCCESS)
+				v_addr = 0;
+		}
 		int commit_inactivate = ubc_upl_commit_range(upl, 0, ap->a_size,
 		    UPL_COMMIT_INACTIVATE | UPL_COMMIT_FREE_ON_EMPTY);
 		if (commit_inactivate != KERN_SUCCESS) {
@@ -4791,23 +4795,6 @@ skip_lock_acquisition:
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    upl_valid_pages_in_tail,
 		    f_start_of_upl, f_end_of_upl, fsname, fname);
-		// DO NOT UPL_COMMIT_FREE_ON_EMPTY HERE
-		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail,
-		    UPL_COMMIT_INACTIVATE
-		    | UPL_COMMIT_CLEAR_PRECIOUS);
-		if (commit_tail != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: ERROR %d range committing tail of upl (%d..%d),"
-			    " (%d of %d pages dismissed, lowest page dismissed %d),"
-			    " (pages after boundary %d, dirty after boundary %d"
-			    " valid pages in tail %d)"
-			    " of [%lld..%lld] fs %s file %s\n",
-			    __func__, __LINE__, commit_tail, start_of_tail, end_of_tail,
-			    upl_pages_dismissed, pages_in_upl, lowest_page_dismissed,
-			    upl_pages_after_boundary, upl_dirty_pages_after_boundary,
-			    upl_valid_pages_in_tail,
-			    f_start_of_upl, f_end_of_upl, fsname, fname);
-			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
-		}
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
 
@@ -4824,6 +4811,12 @@ skip_lock_acquisition:
 		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
 		    ap->a_f_offset,
 		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
+		if (v_addr != 0) {
+			int unmapret = ubc_upl_unmap(upl);
+			ASSERT3S(unmapret, ==, KERN_SUCCESS);
+			if (unmapret == KERN_SUCCESS)
+				v_addr = 0;
+		}
 		int erofs_abortret = ubc_upl_abort(upl,
 		    UPL_ABORT_ERROR
 		    | UPL_ABORT_DUMP_PAGES);
@@ -4836,6 +4829,12 @@ skip_lock_acquisition:
 	if (zp->z_pflags & ZFS_IMMUTABLE) {
 		printf("ZFS: %s:%d: immutable flags set for file %s\n",
 		    __func__, __LINE__, zp->z_name_cache);
+		if (v_addr != 0) {
+			int unmapret = ubc_upl_unmap(upl);
+			ASSERT3S(unmapret, ==, KERN_SUCCESS);
+			if (unmapret == KERN_SUCCESS)
+				v_addr = 0;
+		}
 		int immutable_abort_ret = ubc_upl_abort(upl,
 		    UPL_ABORT_ERROR
 		    | UPL_ABORT_DUMP_PAGES);
@@ -5116,7 +5115,7 @@ skip_lock_acquisition:
 			pageout_op->state = "final commit";
 			pageout_op->line = __LINE__;
 			int final_commit_ret = ubc_upl_commit_range(upl,
-			    0, start_of_tail,
+			    0, ap->a_size,
 			    UPL_COMMIT_INACTIVATE
 			    | UPL_COMMIT_CLEAR_PRECIOUS
 			    | UPL_COMMIT_FREE_ON_EMPTY);
@@ -5134,7 +5133,7 @@ skip_lock_acquisition:
 			pageout_op->state = "final abort";
 			pageout_op->line = __LINE__;
 			int final_abort_ret = ubc_upl_abort_range(upl,
-			    0, start_of_tail,
+			    0, ap->a_size,
 			    UPL_ABORT_ERROR
 			    | UPL_ABORT_FREE_ON_EMPTY);
 			if (final_abort_ret != KERN_SUCCESS) {
