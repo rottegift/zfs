@@ -146,8 +146,6 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_disabled;
 	kstat_named_t zfs_fsync_skipped;
 	kstat_named_t zfs_close;
-	kstat_named_t zfs_close_low_memory_clean;
-	kstat_named_t zfs_close_low_memory_rl_miss;
 } vnops_stats_t;
 
 static vnops_stats_t vnops_stats = {
@@ -178,8 +176,6 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_skipped",                           KSTAT_DATA_UINT64 },
 	{ "zfs_close", 			                 KSTAT_DATA_UINT64 },
-	{ "zfs_close_low_memory_clean",                  KSTAT_DATA_UINT64 },
-	{ "zfs_close_low_memory_rl_miss",                KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_STAT(statname)           (vnops_stats.statname.value.ui64)
@@ -384,8 +380,6 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 		atomic_dec_32((uint32_t *)&zp->z_sync_cnt);
 	}
 
-	boolean_t may_clean_pages = B_FALSE;
-
 	if (vnode_isreg(vp)) {
 		mutex_enter(&zp->z_lock);
 		if (zp->z_open_cnt <= 0) {
@@ -393,47 +387,7 @@ zfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 			    __func__, __LINE__, zp->z_open_cnt, zp->z_name_cache);
 		}
 		zp->z_open_cnt--;
-		if (zp->z_open_cnt <= 0)
-			may_clean_pages = B_TRUE;
 		mutex_exit(&zp->z_lock);
-	}
-
-	if (may_clean_pages == B_TRUE) {
-		rl_t *rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
-		if (rl != NULL) {
-			ASSERT3P(tsd_get(rl_key), ==, NULL);
-			tsd_set(rl_key, rl);
-			boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-			uint64_t tries = z_map_rw_lock(zp, &need_release, &need_upgrade, __func__, __LINE__);
-			ASSERT3U(tries, <, 2);
-			if (!spl_ubc_is_mapped(vp, NULL)
-			    && ubc_pages_resident(vp) != 0
-			    && (spl_free_manual_pressure_wrapper() > 0
-				|| spl_free_wrapper() < 4ULL * MAX_UPL_TRANSFER_BYTES)) {
-				/* try to clean out the ubc pages for this file */
-				VNOPS_STAT_BUMP(zfs_close_low_memory_clean);
-				off_t resid = 0;
-				int msync_ret = ubc_msync(vp,
-				    (off_t)0, ubc_getsize(vp), &resid,
-				    UBC_PUSHALL | UBC_INVALIDATE | UBC_SYNC);
-				if (msync_ret != 0) { // 0 on success
-					const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
-					printf("ZFS: %s:%d: last close low memory cleanout failed"
-					    " error %d resid %llu"
-					    " zsize %llu usize %llu memory_free %llu\n"
-					    " zid %llu fs %s file %s",
-					    __func__, __LINE__, msync_ret, resid,
-					    zp->z_size, ubc_getsize(vp), spl_free_wrapper(),
-					    zp->z_id, fsname, zp->z_name_cache);
-				}
-			}
-			z_map_drop_lock(zp, &need_release, &need_upgrade);
-			ASSERT3P(tsd_get(rl_key), ==, rl);
-			zfs_range_unlock(rl);
-			tsd_set(rl_key, NULL);
-		} else {
-			VNOPS_STAT_BUMP(zfs_close_low_memory_rl_miss);
-		}
 	}
 
 	VNOPS_STAT_BUMP(zfs_close);
