@@ -3761,6 +3761,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	rl_t *rl;
 	boolean_t must_lock = B_FALSE;
 	const off_t end_of_pageout = ap->a_f_offset + ap->a_size;
+	caddr_t v_addr = 0;
 
 	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
@@ -4679,6 +4680,18 @@ skip_lock_acquisition:
 		goto pageout_done;
 	}
 
+	int map_retval = ubc_upl_map(upl, (vm_offset_t *)&v_addr);
+	if (map_retval != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: error %d from ubc_upl_map,"
+		    " a_f_offset %llu a_size %lu a_flags 0x%x"
+		    " zid %llu fs %s fname %s\n",
+		    __func__, __LINE__, map_retval,
+		    ap->a_f_offset, ap->a_size, ap->a_flags,
+		    zp->z_id, fsname, fname);
+		// this will probably never happen, and
+		// we can continue anyway
+	}
+
 	pageout_op->state = "created upl";
 	pageout_op->line = __LINE__;
 
@@ -5058,7 +5071,24 @@ skip_lock_acquisition:
 	pageout_op->state = "pageoutv2 done primary for loop";
 	pageout_op->line = __LINE__;
 
+	if (v_addr != 0) {
+		pageout_op->state = "unmapping v_addr";
+		pageout_op->line = __LINE__;
+		int unmapret = ubc_upl_unmap(upl);
+		if (unmapret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: error %d from ubc_upl_unmap"
+			    " a_f_offset %llu a_size %lu a_flags 0x%x"
+			    " z_id %llu fs %s file %s\n",
+			    __func__, __LINE__, unmapret,
+			    ap->a_f_offset, ap->a_size, ap->a_flags,
+			    zp->z_id, fsname, fname);
+		}
+		v_addr = 0;
+	}
+
 	if (upl) {
+		pageout_op->state = "finishing upl";
+		pageout_op->line = __LINE__;
 		boolean_t commit = B_TRUE;
 		if (pg_index < just_past_last_valid_pg) {
 			printf("ZFS: %s:%d: ANOMALY SHORT ERROR: pg_index lower than expected (%llu v %llu)"
@@ -5206,6 +5236,21 @@ skip_lock_acquisition:
 	return (error);
 
 pageout_done:
+
+	if (v_addr != 0) {
+		pageout_op->state = "unmapping v_addr (pageout_done)";
+		pageout_op->line = __LINE__;
+		int unmapret = ubc_upl_unmap(upl);
+		if (unmapret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: (pageout_done) error %d from ubc_upl_unmap"
+			    " a_f_offset %llu a_size %lu a_flags 0x%x"
+			    " z_id %llu fs %s file %s\n",
+			    __func__, __LINE__, unmapret,
+			    ap->a_f_offset, ap->a_size, ap->a_flags,
+			    zp->z_id, fsname, fname);
+		}
+		v_addr = 0;
+	}
 
 	if (upl) {
 		int upl_pageout_done = ubc_upl_abort_pageout_done(upl, 0);
