@@ -4699,7 +4699,7 @@ skip_lock_acquisition:
 	int upl_pages_dismissed = 0;
 	int upl_pages_after_boundary = 0;
 	int upl_dirty_pages_after_boundary = 0;
-	boolean_t dismissed_valid = B_FALSE;
+	int upl_valid_pages_in_tail = 0;
 
 	for (int page_index = pages_in_upl; page_index > 0; ) {
 		if ((ap->a_f_offset + (--page_index * PAGE_SIZE_64)) >= dismissal_boundary) {
@@ -4719,7 +4719,7 @@ skip_lock_acquisition:
 				    __func__, __LINE__, page_index, pages_in_upl - 1,
 				    f_start_of_upl, f_end_of_upl, zp->z_size,
 				    fsname, fname);
-				dismissed_valid = B_TRUE;
+				upl_valid_pages_in_tail++;
 			}
 			upl_pages_dismissed++;
 		}
@@ -4729,7 +4729,7 @@ skip_lock_acquisition:
 	pageout_op->line = __LINE__;
 
 	if (upl_pages_after_boundary > 0) {
-		printf("ZFS: %s:%d: %d pages past eof dismissed (total dismissed %d), %d dirty"
+		printf("ZFS: %s:%d: %d pages past eof dismissed (total dismissed %d), %d DIRTY"
 		    " foff %llu sz %lu (pages %d) zsize %llu usize %llu fs %s file %s\n",
 		    __func__, __LINE__, upl_pages_after_boundary,
 		    upl_dirty_pages_after_boundary, upl_pages_dismissed,
@@ -4764,7 +4764,7 @@ skip_lock_acquisition:
 		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		goto pageout_done;
-	} else if (upl_pages_dismissed > 0 && dismissed_valid == B_TRUE) {
+	} else if (upl_pages_dismissed > 0 && upl_valid_pages_in_tail > 0) {
 		pageout_op->line = __LINE__;
 		pageout_op->state = "dismissing UPL tail";
 		ASSERT3S(pages_in_upl, >, 1);
@@ -4773,9 +4773,10 @@ skip_lock_acquisition:
 		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
 		const int end_of_tail = ap->a_size;
 		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
-		    " [%lld..%lld] fs %s file %s\n",
+		    " (valid pages in tail %d)[%lld..%lld] fs %s file %s\n",
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
+		    upl_valid_pages_in_tail,
 		    f_start_of_upl, f_end_of_upl, fsname, fname);
 		// DO NOT UPL_COMMIT_FREE_ON_EMPTY HERE
 		int commit_tail = ubc_upl_commit_range(upl, start_of_tail, end_of_tail,
@@ -4783,46 +4784,16 @@ skip_lock_acquisition:
 		    | UPL_COMMIT_CLEAR_PRECIOUS);
 		if (commit_tail != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: ERROR %d range committing tail of upl (%d..%d),"
-			    " (%d of %d pages dismissed, lowest page left %d),"
+			    " (%d of %d pages dismissed, lowest page dismissed %d),"
+			    " (pages after boundary %d, dirty after boundary %d"
+			    " valid pages in tail %d)"
 			    " of [%lld..%lld] fs %s file %s\n",
 			    __func__, __LINE__, commit_tail, start_of_tail, end_of_tail,
 			    upl_pages_dismissed, pages_in_upl, lowest_page_dismissed,
+			    upl_pages_after_boundary, upl_dirty_pages_after_boundary,
+			    upl_valid_pages_in_tail,
 			    f_start_of_upl, f_end_of_upl, fsname, fname);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_invalid_tail_err);
-			/* try to commit each page in tail, abort on failure */
-			int pgcommits = 0, pgaborts = 0;
-			for (off_t uoff = start_of_tail;
-			     uoff < end_of_tail;
-			     uoff += PAGE_SIZE_64) {
-				// DO NOT UPL_ABORT_FREE_ON_EMPTY HERE
-				int cpgret = ubc_upl_abort_range(upl, uoff, uoff + PAGE_SIZE_64,
-				    UPL_ABORT_ERROR);
-				if (cpgret != KERN_SUCCESS) {
-					pgaborts++;
-					int popflags = 0;
-					int poperr = ubc_page_op(vp, uoff + ap->a_f_offset,
-					    0, NULL, &popflags);
-					if (popflags != 0) {
-						printf("ZFS: %s:%d: DOUBLE WARNING"
-						    " (recovering from range committing tail fail)"
-						    " page commit error %d for upl page %lld @"
-						    " %lld in fs %s file %s"
-						    " (zsize %lld usize %lld poperr %d popflags 0x%x)\n",
-						    __func__, __LINE__,
-						    cpgret, uoff / PAGE_SIZE_64,
-						    uoff + ap->a_f_offset, fsname, fname,
-						    zp->z_size, ubc_getsize(vp), poperr, popflags);
-					}
-				} else {
-					pgcommits++;
-				}
-			}
-			printf("ZFS: %s:%d: recovery from committing tail fail %d commits %d aborts, "
-			    " tail upl range (%d..%d) file range [%lld..%lld] @ fs %s file %s\n",
-			    __func__, __LINE__, pgcommits, pgaborts,
-			    start_of_tail, end_of_tail,
-			    ap->a_f_offset + start_of_tail, ap->a_f_offset + end_of_tail,
-			    fsname, fname);
 		}
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
