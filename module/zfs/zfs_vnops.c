@@ -3847,27 +3847,33 @@ top:
 	may_delete_now = !vnode_isinuse(vp, 0) && !vn_has_cached_data(vp);
 
 	if (may_delete_now && ubc_pages_resident(vp) != 0) {
-#if 0
-		// zfs_unlinked_drain's zfs_zget may bring in pages
-		// we should report and invalidate any
-		dprintf("ZFS: %s:%d: may_delete_now but ubc_pages_resident is true (z_drain %d) file %s\n",
-		    __func__, __LINE__, zp->z_drain, zp->z_name_cache);
-
-		int inval_err = ubc_invalidate_range(zp, NULL, 0, ubc_getsize(vp));
-		ASSERT3S(inval_err, ==, 0);
-#endif
-		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
-		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
-		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-		ASSERT0(vnode_isinuse(vp, 0));
-		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0 || vnode_isinuse(vp, 0)) {
-			may_delete_now = 0;
-			printf("ZFS: %s:%d: may not delete now because of unusual page condition (t_errs %d)"
-			    " dirty %d pageout %d precious %d busy %d totlpgs %lld vnode_inuse %d file %s\n",
-			    __func__, __LINE__, t_errs,
-			    t_dirty, t_pageout, t_precious, t_busy,
-			    howmany(ubc_getsize(vp), PAGE_SIZE_64), vnode_isinuse(vp, 0),
-			    zp->z_name_cache);
+		off_t resid = 0;
+		int msync_inval_retval = ubc_msync(vp, 0, ubc_getsize(vp), &resid,
+		    UBC_INVALIDATE | UBC_PUSHALL);
+		if (msync_inval_retval != 0) {
+			printf("ZFS: %s:%d: error %d from ubc_msync resid %llu"
+			    " usize %llu zsize %llu resident? %d clean? %d"
+			    " zid %llu file %s\n",
+			    __func__, __LINE__, msync_inval_retval,
+			    resid, ubc_getsize(vp), zp->z_size,
+			    ubc_pages_resident(vp),
+			    is_file_clean(vp, ubc_getsize(vp)),
+			    zp->z_id, zp->z_name_cache);
+		}
+		if (ubc_pages_resident(vp)) {
+			int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
+			int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
+			    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+			ASSERT0(vnode_isinuse(vp, 0));
+			if (t_dirty > 0 || t_pageout > 0 || t_busy > 0 || vnode_isinuse(vp, 0)) {
+				may_delete_now = 0; // put on unlinked list instead
+				printf("ZFS: %s:%d: unusual page condition (t_errs %d)"
+				    " dirty %d pageout %d precious %d busy %d totlpgs %lld vnode_inuse %d file %s\n",
+				    __func__, __LINE__, t_errs,
+				    t_dirty, t_pageout, t_precious, t_busy,
+				    howmany(ubc_getsize(vp), PAGE_SIZE_64), vnode_isinuse(vp, 0),
+				    zp->z_name_cache);
+			}
 		}
 	}
 #else
