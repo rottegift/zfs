@@ -162,7 +162,6 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_precious_pages_seen;
 	kstat_named_t pageoutv2_dirty_pages_blustered;
 	kstat_named_t pageoutv2_error;
-	kstat_named_t pageoutv2_mapped_write_no_commit;
 	kstat_named_t pageoutv1_pages;
 	kstat_named_t pagein_calls;
 	kstat_named_t pagein_pages;
@@ -199,7 +198,6 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_precious_pages_seen",     KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_error",                   KSTAT_DATA_UINT64 },
-	{ "pageoutv2_mapped_write_no_commit",  KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
 	{ "pagein_calls",                      KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
@@ -5109,37 +5107,21 @@ skip_lock_acquisition:
 		}
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 		const off_t start_of_tail = lowest_page_dismissed * PAGE_SIZE;
-		if (spl_ubc_is_mapped_writable(vp)) {
-			pageout_op->state = "final (mapped write)";
-			pageout_op->line = __LINE__;
-			VNOPS_OSX_STAT_BUMP(pageoutv2_mapped_write_no_commit);
-			printf("ZFS: %s:%d: abort rather than commmit for mapped-write file"
-			    " off %llu size %lu zid %llu fs %s file %s\n",
-			    __func__, __LINE__, ap->a_f_offset, ap->a_size,
-			    zp->z_id, fsname, fname);
-			int mapped_write_abort_ret = ubc_upl_abort(upl, 0);
-			if (mapped_write_abort_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: ERROR %d from upl_abort for mapped-write file"
-				    " off %llu size %lu zid %llu fs %s file %s\n",
-				    __func__, __LINE__, mapped_write_abort_ret,
-				    ap->a_f_offset, ap->a_size,
-				    zp->z_id, fsname, fname);
-				error = mapped_write_abort_ret;
-			}
-		} else if (commit == B_TRUE) {
+		if (commit == B_TRUE) {
 			pageout_op->state = "final commit";
 			pageout_op->line = __LINE__;
 			int final_commit_ret = ubc_upl_commit_range(upl,
 			    0, ap->a_size,
 			    UPL_COMMIT_INACTIVATE
+			    | UPL_COMMIT_CLEAR_PRECIOUS
 			    | UPL_COMMIT_FREE_ON_EMPTY);
 			if (final_commit_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: ERROR %d committing 0...%lu"
-				    " in UPL file range %llu..%llu"
+				printf("ZFS: %s:%d: ERROR %d committing 0...%llu"
+				    " in UPL file range %llu..%llu (sz %lu)"
 				    " @ zid %llu fs %s fname %s\n",
 				    __func__, __LINE__, final_commit_ret,
-				    ap->a_size,
-				    f_start_of_upl, f_end_of_upl,
+				    start_of_tail,
+				    f_start_of_upl, f_end_of_upl, ap->a_size,
 				    zp->z_id, fsname, fname);
 				error = final_commit_ret;
 			}
