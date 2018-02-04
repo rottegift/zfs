@@ -404,11 +404,14 @@ zfs_vfs_sync(struct mount *vfsp, int waitfor, __unused vfs_context_t context)
 	 * we're in the filesystem, potentially holding resources that
 	 * could prevent other iocounts from being released.
 	 *
-	 * VNODE_ALWAYS does this even if VL_DRAIN is not set
+	 * VNODE_ALWAYS does this even if VL_DRAIN is not set, however
+	 * it and VNODE_DRAINO differ because in the case where VL_DRAIN
+	 * is not set we will send back an error to the caller (and we
+	 * can also hit one of two msleeps.
 	 */
 #define VNODE_ALWAYS		0x400
 #define VNODE_DRAINO		0x800
-	int vnode_iter_ret = vnode_iterate(vfsp, VNODE_ALWAYS | VNODE_DRAINO, zfs_vfs_umcallback, &waitfor);
+	int vnode_iter_ret = vnode_iterate(vfsp, VNODE_DRAINO, zfs_vfs_umcallback, &waitfor);
 	ASSERT0(vnode_iter_ret);
 
         if (zfsvfs->z_log != NULL
