@@ -5113,13 +5113,18 @@ skip_lock_acquisition:
 			pageout_op->state = "final (mapped write)";
 			pageout_op->line = __LINE__;
 			VNOPS_OSX_STAT_BUMP(pageoutv2_mapped_write_no_commit);
-			printf("ZFS: %s:%d: abort rather than commmit for mapped-write file"
+			printf("ZFS: %s:%d: COMMIT DIRTY for mapped-write file"
 			    " off %llu size %lu zid %llu fs %s file %s\n",
 			    __func__, __LINE__, ap->a_f_offset, ap->a_size,
 			    zp->z_id, fsname, fname);
-			int mapped_write_abort_ret = ubc_upl_abort(upl, 0);
+			int mapped_write_abort_ret = ubc_upl_commit_range(upl,
+			    0, ap->a_size,
+			    UPL_COMMIT_SET_DIRTY
+			    | UPL_COMMIT_INACTIVATE
+			    | UPL_COMMIT_FREE_ON_EMPTY);
 			if (mapped_write_abort_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: ERROR %d from upl_abort for mapped-write file"
+				printf("ZFS: %s:%d: ERROR %d from COMMIT DIRTY"
+				    " for mapped-write file"
 				    " off %llu size %lu zid %llu fs %s file %s\n",
 				    __func__, __LINE__, mapped_write_abort_ret,
 				    ap->a_f_offset, ap->a_size,
