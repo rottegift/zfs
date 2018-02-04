@@ -291,7 +291,8 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* do the msync */
 		int msync_retval = 0;
 
-		if (do_not_msync == B_FALSE && zp->z_in_pager_op == 0) {
+		if (do_not_msync == B_FALSE && zp->z_in_pager_op == 0
+		    && !spl_ubc_is_mapped_writable(vp)) {
 			ASSERT0(vnode_isrecycled(vp));
 			claim = B_FALSE;
 			flags = UBC_PUSHALL;
