@@ -203,6 +203,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 	boolean_t do_not_msync = B_FALSE;
 
 	if (vnode_isreg(vp) &&
+	    !spl_ubc_is_mapped_writable(vp) &&
 	    ubc_pages_resident(vp) &&
 	    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
 		// error = is_file_clean(vp, len) -> 0 if clean, nonzero if dirty
