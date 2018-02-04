@@ -7382,7 +7382,7 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
 		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0
-		    || t_precious > 0 || t_absent > 0
+		    || t_absent > 0
 		    || spl_ubc_is_mapped(vp, NULL)
 		    || vnode_isinuse(vp, 0) != 0) {
 			mutex_enter(&zp->z_lock);
