@@ -7381,11 +7381,12 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
 		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0 ||
-		    spl_ubc_is_mapped(vp, NULL) ||
-		    vnode_isinuse(vp, 0) != 0) {
+		if (t_dirty > 0 || t_pageout > 0 || t_busy > 0
+		    || t_precious > 0 || t_absent > 0
+		    || spl_ubc_is_mapped(vp, NULL)
+		    || vnode_isinuse(vp, 0) != 0) {
 			mutex_enter(&zp->z_lock);
-			printf("ZFS: %s:%d: ubc_pages_resident true,"
+			printf("ZFS: %s:%d: (note, noop) ubc_pages_resident true,"
 			    " dirty %d pageout %d precious %d absent %d busy %d t_errs %d totlpgs %lld"
 			    " inuse? %d recycled? %d !clean? %d mapped? %d write? %d"
 			    " z_sa_hdl valid? %d z_sa_hdl == NULL? %d z_unlinked? %d"
@@ -7400,40 +7401,7 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 			    zp->z_unlinked,
 			    zp->z_id, zp->z_name_cache);
 			mutex_exit(&zp->z_lock);
-			off_t resid = 0;
-			int flags = UBC_PUSHALL;
-			if (t_dirty > 0)
-				flags |= UBC_INVALIDATE | UBC_SYNC;
-			int msync_out = ubc_msync(vp, 0, ubc_getsize(vp), &resid, flags);
-			if (msync_out != 0) {
-				printf("ZFS: %s:%d: msync_out err %d resid %llu usize %llu"
-				    " t_dirty %u flags 0x%x zid %llu file %s\n",
-				    __func__, __LINE__, msync_out, resid, ubc_getsize(vp),
-				    t_dirty, flags,
-				    zp->z_id, zp->z_name_cache);
-			} else {
-				printf("ZFS: %s:%d: msync OK, !clean? %d pages resident? %d"
-				    " zid %llu file %s\n",
-				    __func__, __LINE__,
-				    is_file_clean(vp, ubc_getsize(vp)),
-				    ubc_pages_resident(vp),
-				    zp->z_id, zp->z_name_cache);
-			}
 		}
-	} else if (vnode_isinuse(vp, 0)) {
-		int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
-		int t_errs = zfs_ubc_range_all_flags(zp, vp, 0, ubc_getsize(vp),
-		    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-
-		printf("ZFS: %s:%d: (note) vnode_isinuse(vp, 0) true"
-		    " %d dirty %d pageout %d precious %d absent %d busy %d t_errs %lld totlpgs"
-		    " (ubcsize %lld)"
-		    " for file %s\n",
-		    __func__, __LINE__,
-		    t_dirty, t_pageout, t_precious, t_absent, t_busy, t_errs,
-		    howmany(ubc_getsize(vp), PAGE_SIZE_64),
-		    ubc_getsize(vp),
-		    zp->z_name_cache);
 	}
 
 	// see above - rw_enter(&zfsvfs->z_teardown_inactive_lock, RW_READER);
