@@ -4871,7 +4871,7 @@ skip_lock_acquisition:
 			    f_start_of_upl, f_end_of_upl, pages_in_upl,
 			    commit_from_page, pg_index, page_past_end_of_range,
 			    commit_from_page * PAGE_SIZE_64, start_of_range,
-			    commit_from_page, start_of_range,
+			    commit_from_page, pg_index,
 			    upl_end_pg, pages_in_upl - upl_pages_dismissed,
 			    zp->z_id, fsname, fname, ap->a_flags);
 			if (commit_from_page < pg_index) {
