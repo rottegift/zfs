@@ -4897,6 +4897,35 @@ skip_lock_acquisition:
 					    ap->a_f_offset, ap->a_size, ap->a_flags,
 					    zp->z_id, fsname, fname);
 					error = interim_commit_ret;
+					if (v_addr != 0) {
+						pageout_op->state = "unmapping v_addr (interim bad)";
+						pageout_op->line = __LINE__;
+						int unmapret = ubc_upl_unmap(upl);
+						if (unmapret != KERN_SUCCESS) {
+							printf("ZFS: %s:%d: (interim)"
+							    " error %d from ubc_upl_unmap"
+							    " a_f_offset %llu a_size %lu a_flags 0x%x"
+							    " z_id %llu fs %s file %s\n",
+							    __func__, __LINE__, unmapret,
+							    ap->a_f_offset, ap->a_size, ap->a_flags,
+							    zp->z_id, fsname, fname);
+						}
+						v_addr = 0;
+					}
+					int upl_abort_interim_bad = ubc_upl_abort_range(upl,
+					    commit_from_page * PAGE_SIZE_64, trimmed_upl_size,
+					    UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+					if (upl_abort_interim_bad != KERN_SUCCESS) {
+						printf("ZFS: %s:%d: upl_abort_interim_bad err %d"
+						    " trying to abort %lld..%lld"
+						    "z_id %llud fs %s file %s\n",
+						    __func__, __LINE__, upl_abort_interim_bad,
+						    commit_from_page * PAGE_SIZE_64,
+						    trimmed_upl_size,
+						    zp->z_id, fsname, fname);
+					} else {
+						upl = NULL;
+					}
 					goto pageout_done;
 				}
 			}
