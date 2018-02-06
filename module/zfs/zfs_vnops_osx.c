@@ -4863,14 +4863,16 @@ skip_lock_acquisition:
 			    " upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (UPL %d pages,"
 			    " commmit_from_page %lld to pg_index %lld, bumping cfp to %lld)"
-			    " and comitting [%lld..%lld] (index %lld..%lld)"
+			    " and comitting [%lld..%lld] (index %lld..%lld) (upl_end_pg %lld,"
+			    "  lowest dismissed %d)"
 			    " zid %llu fs %s file %s (flags 0x%x)\n",
 			    __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, pages_in_upl,
 			    commit_from_page, pg_index, page_past_end_of_range,
-			    commit_from_page * PAGE_SIZE_64, start_of_range * PAGE_SIZE_64,
-			    commit_from_page, page_past_end_of_range,
+			    commit_from_page * PAGE_SIZE_64, start_of_range,
+			    commit_from_page, start_of_range,
+			    upl_end_pg, pages_in_upl - upl_pages_dismissed,
 			    zp->z_id, fsname, fname, ap->a_flags);
 			if (commit_from_page < pg_index) {
 				pageout_op->state = "interim commit";
@@ -5127,31 +5129,44 @@ skip_lock_acquisition:
 				    UPL_COMMIT_INACTIVATE
 				    | UPL_COMMIT_CLEAR_PRECIOUS;
 			}
+			off_t commit_size = ap->a_size;
+			if (commit_from_page > 0)
+				commit_size -= commit_from_page * PAGE_SIZE_64;
 			int final_commit_ret = ubc_upl_commit_range(upl,
-			    commit_from_page * PAGE_SIZE_64, ap->a_size, final_commit_flags);
+			    commit_from_page * PAGE_SIZE_64, commit_size, final_commit_flags);
 			if (final_commit_ret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: ERROR %d committing %lld...%llu"
-				    " in UPL file range %llu..%llu (sz %lu)"
+				    " (commit sz %llu)"
+				    " in UPL file range %llu..%llu (sz %lu) (flags 0x%x)"
+				    " lowest page dismissed %d"
 				    " @ zid %llu fs %s fname %s\n",
 				    __func__, __LINE__, final_commit_ret,
 				    commit_from_page * PAGE_SIZE_64, start_of_tail,
+				    commit_size,
 				    f_start_of_upl, f_end_of_upl, ap->a_size,
+				    ap->a_flags,
+				    lowest_page_dismissed,
 				    zp->z_id, fsname, fname);
 				error = final_commit_ret;
 			}
 		} else {
 			pageout_op->state = "final abort";
 			pageout_op->line = __LINE__;
+			off_t abort_size = ap->a_size;
+			if (commit_from_page > 0)
+				abort_size -= commit_from_page * PAGE_SIZE_64;
 			int final_abort_ret = ubc_upl_abort_range(upl,
-			    commit_from_page * PAGE_SIZE_64, ap->a_size,
+			    commit_from_page * PAGE_SIZE_64, abort_size,
 			    UPL_ABORT_ERROR
 			    | UPL_ABORT_FREE_ON_EMPTY);
 			if (final_abort_ret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: ERROR %d ABORTING %llu...%llu"
+				    " (abort sz %llu)"
 				    " in UPL file range %llu..%llu (sz %lu)"
 				    " @ zid %llu fs %s fname %s\n",
 				    __func__, __LINE__, final_abort_ret,
 				    commit_from_page * PAGE_SIZE_64, start_of_tail,
+				    abort_size,
 				    f_start_of_upl, f_end_of_upl, ap->a_size,
 				    zp->z_id, fsname, fname);
 				if (!error)
