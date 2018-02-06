@@ -4760,8 +4760,11 @@ skip_lock_acquisition:
 			if (unmapret == KERN_SUCCESS)
 				v_addr = 0;
 		}
+		int commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
+		if (ISSET(a_flags, UPL_MSYNC))
+			commit_flags |= UPL_COMMIT_INACTIVATE;
 		int commit_inactivate = ubc_upl_commit_range(upl, 0, ap->a_size,
-		    UPL_COMMIT_INACTIVATE | UPL_COMMIT_FREE_ON_EMPTY);
+		    commit_flags);
 		if (commit_inactivate != KERN_SUCCESS) {
 			printf("ZFS: %s:%d: ERROR %d committing whole UPL as a range"
 			    " 0..%lu at file offset %llu zid %llu fs %s file %s\n",
@@ -5110,11 +5113,14 @@ skip_lock_acquisition:
 		if (commit == B_TRUE) {
 			pageout_op->state = "final commit";
 			pageout_op->line = __LINE__;
+			int final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
+			if (ISSET(a_flags, UPL_MSYNC)) {
+				final_commit_flags |=
+				    UPL_COMMIT_INACTIVATE
+				    | UPL_COMMIT_CLEAR_PRECIOUS;
+			}
 			int final_commit_ret = ubc_upl_commit_range(upl,
-			    0, ap->a_size,
-			    UPL_COMMIT_INACTIVATE
-			    | UPL_COMMIT_CLEAR_PRECIOUS
-			    | UPL_COMMIT_FREE_ON_EMPTY);
+			    0, ap->a_size, final_commit_flags);
 			if (final_commit_ret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: ERROR %d committing 0...%llu"
 				    " in UPL file range %llu..%llu (sz %lu)"
