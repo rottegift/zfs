@@ -4845,7 +4845,9 @@ skip_lock_acquisition:
 			const off_t pages_in_range = page_past_end_of_range - pg_index;
 			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
-			if (xxxbleat) printf("ZFS: %s:%d: counting invalid page upl bytes [%lld..%lld] (%lld pages)"
+			// this is a bit noisy
+			// want to know if it's sqlite/pma stuff though
+			printf("ZFS: %s:%d: counting invalid page upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
