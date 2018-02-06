@@ -2211,6 +2211,18 @@ zfs_trunc(znode_t *zp, uint64_t end)
 	const off_t ubcsize_at_entry = ubc_getsize(vp);
 	ASSERT3S(ubcsize_at_entry, ==, zp->z_size);
 
+	if (spl_ubc_is_mapped(vp, NULL)) {
+		printf("ZFS: %s:%d: truncating mmapped file (write? %d)"
+		    " from zsize %llu usize %llu to end %llu"
+		    " zid %llu fs %s file %s\n",
+		    __func__, __LINE__,
+		    spl_ubc_is_mapped_writable(vp),
+		    zp->z_size,
+		    ubc_getsize(vp),
+		    end,
+		    zp->z_id, fsname, fname);
+	}
+
 	/*
 	 * we want ubc_getsize to point to the end of the page containing the EOF
 	 * so as to save some work under memory_object_lock_request, and below as well
