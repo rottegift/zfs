@@ -3960,6 +3960,85 @@ start_3614_case:
 		goto exit_abort;
 	}
 
+	if (vnode_vfsisrdonly(ZTOV(zp))
+	    || !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+		printf("ZFS: %s:%d: WARNING: readonly filesystem %s for"
+		    " [%lld...%lld] (sz %lu) zid %llu file %s"
+		    " DUMPING PAGES\n",
+		    __func__, __LINE__,
+		    fsname,
+		    ap->a_f_offset,
+		    ap->a_f_offset + ap->a_size,
+		    ap->a_size,
+		    zp->z_id, fname);
+		/* dump these pages */
+		upl_t aupl;
+		upl_page_info_t *apl = NULL;
+		int upldumpret = ubc_create_upl(ap->a_vp,
+		    ap->a_f_offset, ap->a_size, &aupl, &apl,
+		    UPL_WILL_BE_DUMPED | UPL_SET_LITE | UPL_COPYOUT_FROM);
+		if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
+			printf("ZFS: %s:%d: failed to create upl to dump pages: err %d"
+			    " foff %llu sz %lu fs %s fname %s\n",
+			    __func__, __LINE__, upldumpret,
+			    ap->a_f_offset, ap->a_size, fsname, fname);
+			pageoutv2_exception(__func__, __LINE__);
+			error = upldumpret;
+			goto exit_abort;
+		}
+		int abortdumpret = ubc_upl_abort(aupl,
+		    UPL_ABORT_DUMP_PAGES);
+		aupl = NULL;
+		if (abortdumpret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
+			    " foff %llu sz %lu fs %s fname %s\n",
+			    __func__, __LINE__, abortdumpret,
+			    ap->a_f_offset, ap->a_size, fsname, fname);
+			error = abortdumpret;
+			goto exit_abort;
+		}
+		error = EROFS;
+		goto exit_abort;
+	}
+
+	if (zp->z_pflags & ZFS_IMMUTABLE) {
+		printf("ZFS: %s:%d: immutable flags set for file %s"
+		    " zid %llu fs %s DUMPING PAGES from"
+		    " file range [%llu..%llu] (sz %lu)\n",
+		    __func__, __LINE__,
+		    fname, zp->z_id, fsname,
+		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+		    ap->a_size);
+		/* dump these pages */
+		upl_t aupl;
+		upl_page_info_t *apl = NULL;
+		int upldumpret = ubc_create_upl(ap->a_vp,
+		    ap->a_f_offset, ap->a_size, &aupl, &apl,
+		    UPL_WILL_BE_DUMPED | UPL_SET_LITE | UPL_COPYOUT_FROM);
+		if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
+			printf("ZFS: %s:%d: failed to create upl to dump pages: err %d"
+			    " foff %llu sz %lu fs %s fname %s\n",
+			    __func__, __LINE__, upldumpret,
+			    ap->a_f_offset, ap->a_size, fsname, fname);
+			pageoutv2_exception(__func__, __LINE__);
+			error = upldumpret;
+			goto exit_abort;
+		}
+		int abortdumpret = ubc_upl_abort(aupl,
+		    UPL_ABORT_DUMP_PAGES);
+		aupl = NULL;
+		if (abortdumpret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
+			    " foff %llu sz %lu fs %s fname %s\n",
+			    __func__, __LINE__, abortdumpret,
+			    ap->a_f_offset, ap->a_size, fsname, fname);
+			error = abortdumpret;
+			goto exit_abort;
+		}
+		error = EPERM;
+		goto exit_abort;
+	}
+
 	/*
 	 * To avoid deadlocking, we must take the range lock, then
 	 * acquire the z_map_lock lock.  If we enter with the
@@ -4802,47 +4881,6 @@ skip_lock_acquisition:
 
 	const off_t trimmed_upl_size = (off_t)ap->a_size - ((off_t)upl_pages_dismissed * PAGE_SIZE_64);
 	ASSERT3S(trimmed_upl_size, >=, PAGE_SIZE_64);
-
-	if (vnode_vfsisrdonly(ZTOV(zp)) ||
-	    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-		printf("ZFS: %s:%d: WARNING: readonly filesystem %s for [%lld...%lld] file %s\n",
-		    __func__, __LINE__,
-		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
-		    ap->a_f_offset,
-		    ap->a_f_offset + ap->a_size, zp->z_name_cache);
-		if (v_addr != 0) {
-			int unmapret = ubc_upl_unmap(upl);
-			ASSERT3S(unmapret, ==, KERN_SUCCESS);
-			if (unmapret == KERN_SUCCESS)
-				v_addr = 0;
-		}
-		int erofs_abortret = ubc_upl_abort(upl,
-		    UPL_ABORT_ERROR
-		    | UPL_ABORT_DUMP_PAGES);
-		upl = NULL;
-		ASSERT3S(erofs_abortret, ==, KERN_SUCCESS);
-		error = EROFS;
-		goto pageout_done;
-	}
-
-	if (zp->z_pflags & ZFS_IMMUTABLE) {
-		printf("ZFS: %s:%d: immutable flags set for file %s\n",
-		    __func__, __LINE__, zp->z_name_cache);
-		if (v_addr != 0) {
-			int unmapret = ubc_upl_unmap(upl);
-			ASSERT3S(unmapret, ==, KERN_SUCCESS);
-			if (unmapret == KERN_SUCCESS)
-				v_addr = 0;
-		}
-		int immutable_abort_ret = ubc_upl_abort(upl,
-		    UPL_ABORT_ERROR
-		    | UPL_ABORT_DUMP_PAGES);
-		upl = NULL;
-		ASSERT3S(immutable_abort_ret, ==, KERN_SUCCESS);
-		error = EPERM;
-		goto pageout_done;
-	}
-
 
 	int64_t pg_index;
 
