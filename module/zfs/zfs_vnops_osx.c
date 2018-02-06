@@ -4859,9 +4859,9 @@ skip_lock_acquisition:
 			// want to know if it's sqlite/pma stuff though
 			printf("ZFS: %s:%d: counting invalid page upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (%d pages)"
-			    " fs %s file %s\n", __func__, __LINE__,
+			    " fs %s file %s (flags 0x%x)\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
-			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
+			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname, ap->a_flags);
 			VNOPS_OSX_STAT_INCR(pageoutv2_invalid_pages_seen, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
@@ -4906,9 +4906,9 @@ skip_lock_acquisition:
 			if (xxxbleat) printf("ZFS: %s:%d: counting absent (but addressed)"
 			    " upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (%d pages)"
-			    " fs %s file %s\n", __func__, __LINE__,
+			    " fs %s file %s (flags 0x%x)\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
-			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
+			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname, ap->a_flags);
 			VNOPS_OSX_STAT_INCR(pageoutv2_absent_pages_seen, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
