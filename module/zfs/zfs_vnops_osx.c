@@ -3930,39 +3930,13 @@ start_3614_case:
 			error = EINVAL;
 			goto exit_abort;
 		}
-		/* dump these pages */
-		upl_t aupl;
-		upl_page_info_t *apl = NULL;
-		int upldumpret = ubc_create_upl(ap->a_vp,
-		    ap->a_f_offset, ap->a_size, &aupl, &apl,
-		    UPL_WILL_BE_DUMPED | UPL_SET_LITE | UPL_COPYOUT_FROM);
-		if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
-			printf("ZFS: %s:%d: failed to create upl to dump pages: err %d"
-			    " foff %llu sz %lu fs %s fname %s\n",
-			    __func__, __LINE__, upldumpret,
-			    ap->a_f_offset, ap->a_size, fsname, fname);
-			pageoutv2_exception(__func__, __LINE__);
-			error = upldumpret;
-			goto exit_abort;
-		}
-		int abortdumpret = ubc_upl_abort(aupl,
-		    UPL_ABORT_DUMP_PAGES);
-		aupl = NULL;
-		if (abortdumpret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
-			    " foff %llu sz %lu fs %s fname %s\n",
-			    __func__, __LINE__, abortdumpret,
-			    ap->a_f_offset, ap->a_size, fsname, fname);
-			error = abortdumpret;
-			goto exit_abort;
-		}
 		error = 0;
-		goto exit_abort;
+		goto dump_pages_exit_abort;
 	}
 
 	if (vnode_vfsisrdonly(ZTOV(zp))
 	    || !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-		printf("ZFS: %s:%d: WARNING: readonly filesystem %s for"
+		dprintf("ZFS: %s:%d: WARNING: readonly filesystem %s for"
 		    " [%lld...%lld] (sz %lu) zid %llu file %s"
 		    " DUMPING PAGES\n",
 		    __func__, __LINE__,
@@ -3971,34 +3945,8 @@ start_3614_case:
 		    ap->a_f_offset + ap->a_size,
 		    ap->a_size,
 		    zp->z_id, fname);
-		/* dump these pages */
-		upl_t aupl;
-		upl_page_info_t *apl = NULL;
-		int upldumpret = ubc_create_upl(ap->a_vp,
-		    ap->a_f_offset, ap->a_size, &aupl, &apl,
-		    UPL_WILL_BE_DUMPED | UPL_SET_LITE | UPL_COPYOUT_FROM);
-		if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
-			printf("ZFS: %s:%d: failed to create upl to dump pages: err %d"
-			    " foff %llu sz %lu fs %s fname %s\n",
-			    __func__, __LINE__, upldumpret,
-			    ap->a_f_offset, ap->a_size, fsname, fname);
-			pageoutv2_exception(__func__, __LINE__);
-			error = upldumpret;
-			goto exit_abort;
-		}
-		int abortdumpret = ubc_upl_abort(aupl,
-		    UPL_ABORT_DUMP_PAGES);
-		aupl = NULL;
-		if (abortdumpret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
-			    " foff %llu sz %lu fs %s fname %s\n",
-			    __func__, __LINE__, abortdumpret,
-			    ap->a_f_offset, ap->a_size, fsname, fname);
-			error = abortdumpret;
-			goto exit_abort;
-		}
 		error = EROFS;
-		goto exit_abort;
+		goto dump_pages_exit_abort;
 	}
 
 	if (zp->z_pflags & ZFS_IMMUTABLE) {
@@ -4009,34 +3957,8 @@ start_3614_case:
 		    fname, zp->z_id, fsname,
 		    ap->a_f_offset, ap->a_f_offset + ap->a_size,
 		    ap->a_size);
-		/* dump these pages */
-		upl_t aupl;
-		upl_page_info_t *apl = NULL;
-		int upldumpret = ubc_create_upl(ap->a_vp,
-		    ap->a_f_offset, ap->a_size, &aupl, &apl,
-		    UPL_WILL_BE_DUMPED | UPL_SET_LITE | UPL_COPYOUT_FROM);
-		if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
-			printf("ZFS: %s:%d: failed to create upl to dump pages: err %d"
-			    " foff %llu sz %lu fs %s fname %s\n",
-			    __func__, __LINE__, upldumpret,
-			    ap->a_f_offset, ap->a_size, fsname, fname);
-			pageoutv2_exception(__func__, __LINE__);
-			error = upldumpret;
-			goto exit_abort;
-		}
-		int abortdumpret = ubc_upl_abort(aupl,
-		    UPL_ABORT_DUMP_PAGES);
-		aupl = NULL;
-		if (abortdumpret != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
-			    " foff %llu sz %lu fs %s fname %s\n",
-			    __func__, __LINE__, abortdumpret,
-			    ap->a_f_offset, ap->a_size, fsname, fname);
-			error = abortdumpret;
-			goto exit_abort;
-		}
 		error = EPERM;
-		goto exit_abort;
+		goto dump_pages_exit_abort;
 	}
 
 	/*
@@ -5345,9 +5267,14 @@ exit_abort:
 	// so we can ignore it.
 
 	if (error) {
-		printf("ZFS: %s:%d pageoutv2 returning ERROR %d, [%lld..%lld] file %s filesystem %s\n",
-		    __func__, __LINE__, error, ap->a_f_offset, ap->a_f_offset + ap->a_size,
-		    zp->z_name_cache, vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+		if (error != EROFS) {
+			printf("ZFS: %s:%d pageoutv2 returning ERROR %d,"
+			    " [%lld..%lld] file %s filesystem %s\n",
+			    __func__, __LINE__, error,
+			    ap->a_f_offset, ap->a_f_offset + ap->a_size,
+			    zp->z_name_cache,
+			    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname);
+		}
 		VNOPS_OSX_STAT_BUMP(pageoutv2_error);
 	} else if (xxxbleat) {
 		printf("ZFS: %s:%d pageoutv2 OK, [%lld..%lld] file %s filesystem %s\n",
@@ -5366,6 +5293,36 @@ exit_abort:
 	tsd_set(pageout_op_key, NULL);
 	kmem_free(pageout_op, sizeof(pageout_op_t));
 	return (error);
+
+dump_pages_exit_abort:
+
+	VERIFY3P(upl, ==, NULL);
+	/* dump these pages */
+	upl_t aupl;
+	upl_page_info_t *apl = NULL;
+	int upldumpret = ubc_create_upl(ap->a_vp,
+	    ap->a_f_offset, ap->a_size, &aupl, &apl,
+	    UPL_WILL_BE_DUMPED | UPL_SET_LITE | UPL_COPYOUT_FROM);
+	if (upldumpret != KERN_SUCCESS || aupl == NULL)  {
+		printf("ZFS: %s:%d: failed to create upl to dump pages: err %d"
+		    " foff %llu sz %lu fs %s fname %s\n",
+		    __func__, __LINE__, upldumpret,
+		    ap->a_f_offset, ap->a_size, fsname, fname);
+		pageoutv2_exception(__func__, __LINE__);
+		error = upldumpret;
+		goto exit_abort;
+	}
+	int abortdumpret = ubc_upl_abort(aupl,
+	    UPL_ABORT_DUMP_PAGES);
+	aupl = NULL;
+	if (abortdumpret != KERN_SUCCESS) {
+		printf("ZFS: %s:%d: failed to dump pages via upl_abort err %d"
+		    " foff %llu sz %lu fs %s fname %s\n",
+		    __func__, __LINE__, abortdumpret,
+		    ap->a_f_offset, ap->a_size, fsname, fname);
+		error = abortdumpret;
+	}
+	goto exit_abort;
 }
 
 int
