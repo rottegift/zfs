@@ -4913,7 +4913,8 @@ skip_lock_acquisition:
 						v_addr = 0;
 					}
 					int upl_abort_interim_bad = ubc_upl_abort_range(upl,
-					    commit_from_page * PAGE_SIZE_64, trimmed_upl_size,
+					    commit_from_page * PAGE_SIZE_64,
+					    ap->a_size - (commit_from_page * PAGE_SIZE_64),
 					    UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
 					if (upl_abort_interim_bad != KERN_SUCCESS) {
 						printf("ZFS: %s:%d: upl_abort_interim_bad err %d"
