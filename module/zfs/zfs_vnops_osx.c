@@ -152,6 +152,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_spin_sleeps;
 	kstat_named_t pageoutv2_msync;
 	kstat_named_t pageoutv2_pageout;
+	kstat_named_t pageoutv2_pageout_mapped;
+	kstat_named_t pageoutv2_pageout_mapped_write;
 	kstat_named_t pageoutv2_want_lock;
 	kstat_named_t pageoutv2_upl_iosync;
 	kstat_named_t pageoutv2_upl_iosync_skipped;
@@ -188,6 +190,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_spin_sleeps",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_msync",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_pageout",                 KSTAT_DATA_UINT64 },
+	{ "pageoutv2_pageout_mapped",          KSTAT_DATA_UINT64 },
+	{ "pageoutv2_pageout_mapped_write",    KSTAT_DATA_UINT64 },
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync_skipped",      KSTAT_DATA_UINT64 },
@@ -4653,6 +4657,12 @@ skip_lock_acquisition:
 	else {
 		request_flags = UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY;
 		VNOPS_OSX_STAT_BUMP(pageoutv2_pageout);
+		int writable = 0;
+		if (spl_ubc_is_mapped(vp, &writable)) {
+			VNOPS_OSX_STAT_BUMP(pageoutv2_pageout_mapped);
+			if (writable)
+				VNOPS_OSX_STAT_BUMP(pageoutv2_pageout_mapped_write);
+		}
 	}
 
 	ASSERT3S(ap->a_size, <=, MAX_UPL_TRANSFER_BYTES);
