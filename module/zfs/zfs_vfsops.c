@@ -279,6 +279,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 
 		/* do the msync */
 		int msync_retval = 0;
+		flags = UBC_PUSHDIRTY;
 
 		int writable = 0;
 		if (spl_ubc_is_mapped(vp, &writable) && is_file_clean(vp, ubc_getsize(vp))) {
@@ -287,11 +288,11 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    " usize %llu zid %llu fs %s fname %s\n",
 			    __func__, __LINE__, writable, ubc_getsize(vp),
 			    zp->z_id, fsname, fname);
+			flags = UBC_PUSHALL;
 		}
 
 		if (zp->z_in_pager_op == 0) {
 			ASSERT0(vnode_isrecycled(vp));
-			flags = UBC_PUSHDIRTY;
 			msync_retval = zfs_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
 		} else {
 			printf("ZFS: %s:%d: msync avoided because of z_in_pager_op (%d)"
