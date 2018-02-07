@@ -3865,6 +3865,20 @@ top:
 			}
 		}
 	}
+
+	int mapped_writable = 0;
+	if (may_delete_now && spl_ubc_is_mapped(vp, &mapped_writable)) {
+		const off_t usize = ubc_getsize(vp);
+		printf("ZFS: %s:%d: file is mapped (writable? %d)"
+		    " usize %llu pages resident? %d !dirty? %d"
+		    " zid %llu file %s\n",
+		    __func__, __LINE__, mapped_writable,
+		    usize,
+		    ubc_pages_resident(vp),
+		    is_file_clean(vp, usize),
+		    zp->z_id, zp->z_name_cache);
+		may_delete_now = B_FALSE;
+	}
 #else
 	VI_LOCK(vp);
 	may_delete_now = vp->v_count == 1 && !vn_has_cached_data(vp) && !spl_ubc_is_mapped(vp, NULL);
