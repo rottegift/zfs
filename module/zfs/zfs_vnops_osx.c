@@ -4676,8 +4676,6 @@ skip_lock_acquisition:
 			    ap->a_f_offset, ap->a_size, ap->a_flags,
 			    ubc_getsize(vp), zp->z_size,
 			    zp->z_id, fsname, fname);
-			if (writable)
-				request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
 		}
 	}
 
@@ -4851,6 +4849,8 @@ skip_lock_acquisition:
 
 	ASSERT3S(upl_end_pg, >=, 0);
 
+	boolean_t mapped_write = spl_ubc_is_mapped_writable(vp);
+
 	for (pg_index = 0; pg_index < just_past_last_valid_pg; ) {
 		pageout_op->line = __LINE__;
 		pageout_op->state = "pageoutv2 primary for loop";
@@ -4893,7 +4893,8 @@ skip_lock_acquisition:
 			    spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp),
 			    zp->z_id, fsname, fname, ap->a_flags);
-			if (commit_from_page < pg_index) {
+			if (commit_from_page < pg_index
+			    && !mapped_write) {
 				pageout_op->state = "interim commit";
 				pageout_op->line = __LINE__;
 				int interim_commit_flags = 0;
@@ -5173,7 +5174,7 @@ skip_lock_acquisition:
 		}
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 		const off_t start_of_tail = lowest_page_dismissed * PAGE_SIZE;
-		if (commit == B_TRUE) {
+		if (commit == B_TRUE && !mapped_write && !spl_ubc_is_mapped_writable(vp)) {
 			pageout_op->state = "final commit";
 			pageout_op->line = __LINE__;
 			int final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
@@ -5207,20 +5208,27 @@ skip_lock_acquisition:
 			pageout_op->state = "final abort";
 			pageout_op->line = __LINE__;
 			off_t abort_size = ap->a_size;
+			if (mapped_write || spl_ubc_is_mapped_writable(vp))
+				commit_from_page = 0;
 			if (commit_from_page > 0)
 				abort_size -= commit_from_page * PAGE_SIZE_64;
+			int abort_flags = UPL_ABORT_FREE_ON_EMPTY;
+			if (mapped_write)
+				abort_flags |= UPL_ABORT_REFERENCE;
+			if (error)
+				abort_flags |= UPL_ABORT_ERROR;
 			int final_abort_ret = ubc_upl_abort_range(upl,
-			    commit_from_page * PAGE_SIZE_64, abort_size,
-			    UPL_ABORT_ERROR
-			    | UPL_ABORT_FREE_ON_EMPTY);
+			    commit_from_page * PAGE_SIZE_64, abort_size, abort_flags);
 			if (final_abort_ret != KERN_SUCCESS) {
 				printf("ZFS: %s:%d: ERROR %d ABORTING %llu...%llu"
 				    " (abort sz %llu)"
+				    " (abort_flags 0x%x write? %d error %d)"
 				    " in UPL file range %llu..%llu (sz %lu)"
 				    " @ zid %llu fs %s fname %s\n",
 				    __func__, __LINE__, final_abort_ret,
 				    commit_from_page * PAGE_SIZE_64, start_of_tail,
 				    abort_size,
+				    abort_flags, mapped_write, error,
 				    f_start_of_upl, f_end_of_upl, ap->a_size,
 				    zp->z_id, fsname, fname);
 				if (!error)
