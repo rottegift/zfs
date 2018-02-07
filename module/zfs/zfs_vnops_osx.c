@@ -4885,24 +4885,25 @@ skip_lock_acquisition:
 					    UPL_COMMIT_INACTIVATE
 					    | UPL_COMMIT_CLEAR_PRECIOUS;
 				}
+				const off_t commit_from_byte = commit_from_page * PAGE_SIZE_64;
+				const off_t commit_size = start_of_range - commit_from_byte;
 				int interim_commit_ret = ubc_upl_commit_range(upl,
 				    commit_from_page * PAGE_SIZE_64,
-				    start_of_range, interim_commit_flags);
+				    commit_size, interim_commit_flags);
 				if (interim_commit_ret != KERN_SUCCESS) {
 					// this is almost certainly a_flags == 0x8
 					// (i.e., a vnode pageout)
 					// and a userland mmap has
 					// redirtied the page.
 					printf("ZFS: %s:%d: ERROR %d (but carrying on) interim commit"
-					    " page index %lld - %lld [args: %llu, %llu]"
+					    " page index %lld - %lld [args: %llu (st), %llu (sz)]"
 					    " for UPL a_f_offset %llu a_size %lu"
 					    " a_flags 0x%x (mapped? %d writable? %d)"
 					    " upl->size %u"
 					    " zid %llu fs %s file %s\n",
 					    __func__, __LINE__, interim_commit_ret,
 					    commit_from_page, pg_index,
-					    commit_from_page * PAGE_SIZE_64,
-					    start_of_range,
+					    commit_from_byte, commit_size,
 					    ap->a_f_offset, ap->a_size, ap->a_flags,
 					    spl_ubc_is_mapped(vp, NULL),
 					    spl_ubc_is_mapped_writable(vp),
