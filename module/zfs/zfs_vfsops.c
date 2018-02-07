@@ -284,7 +284,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		int writable = 0;
 		if (spl_ubc_is_mapped(vp, &writable) && is_file_clean(vp, ubc_getsize(vp))) {
 			// is_file_clean is 0 if file is clean
-			printf("ZFS: %s:%d: doing msync on dirty mapped (writable? %d) file"
+			dprintf("ZFS: %s:%d: doing msync on dirty mapped (writable? %d) file"
 			    " usize %llu zid %llu fs %s fname %s\n",
 			    __func__, __LINE__, writable, ubc_getsize(vp),
 			    zp->z_id, fsname, fname);
