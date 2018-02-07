@@ -4894,14 +4894,19 @@ skip_lock_acquisition:
 					// and a userland mmap has
 					// redirtied the page.
 					printf("ZFS: %s:%d: ERROR %d (but carrying on) interim commit"
-					    " page index %lld - %lld, for UPL a_f_offset %llu a_size %lu"
+					    " page index %lld - %lld [args: %llu, %llu]"
+					    " for UPL a_f_offset %llu a_size %lu"
 					    " a_flags 0x%x (mapped? %d writable? %d)"
+					    " upl->size %u"
 					    " zid %llu fs %s file %s\n",
 					    __func__, __LINE__, interim_commit_ret,
 					    commit_from_page, pg_index,
+					    commit_from_page * PAGE_SIZE_64,
+					    start_of_range,
 					    ap->a_f_offset, ap->a_size, ap->a_flags,
 					    spl_ubc_is_mapped(vp, NULL),
 					    spl_ubc_is_mapped_writable(vp),
+					    spl_upl_get_size(upl),
 					    zp->z_id, fsname, fname);
 				}
 			}
