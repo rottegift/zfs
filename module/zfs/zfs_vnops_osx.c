@@ -148,6 +148,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t bluster_pageout_calls;
 	kstat_named_t bluster_pageout_dmu_bytes;
 	kstat_named_t bluster_pageout_pages;
+	kstat_named_t bluster_pageout_mapped;
+	kstat_named_t bluster_pageout_mapped_write;
 	kstat_named_t pageoutv2_calls;
 	kstat_named_t pageoutv2_spin_sleeps;
 	kstat_named_t pageoutv2_msync;
@@ -187,6 +189,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "bluster_pageout_calls",             KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_dmu_bytes",         KSTAT_DATA_UINT64 },
 	{ "bluster_pageout_pages",             KSTAT_DATA_UINT64 },
+	{ "bluster_pageout_pages_mapped",      KSTAT_DATA_UINT64 },
+	{ "bluster_pageout_pages_mapped_write",KSTAT_DATA_UINT64 },
 	{ "pageoutv2_calls",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_spin_sleeps",             KSTAT_DATA_UINT64 },
 	{ "pageoutv2_msync",                   KSTAT_DATA_UINT64 },
@@ -3480,13 +3484,17 @@ start_tx:
 
 	dmu_tx_commit(tx);
 
-	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
-	ASSERT3S(ubc_getsize(ZTOV(zp)), >=, f_offset + write_size);
 	VNOPS_OSX_STAT_INCR(bluster_pageout_dmu_bytes, write_size);
 
-	if (error == 0 && size > 0) {
-		uint64_t pgs = atop_64(size) + 1ULL;
+	if (error == 0 && write_size > 0) {
+		uint64_t pgs = howmany(write_size, PAGE_SIZE_64);
 		VNOPS_OSX_STAT_INCR(bluster_pageout_pages, pgs);
+		int writable = 0;
+		if (spl_ubc_is_mapped(ZTOV(zp), &writable)) {
+			VNOPS_OSX_STAT_INCR(bluster_pageout_mapped, pgs);
+			if (writable)
+				VNOPS_OSX_STAT_INCR(bluster_pageout_mapped_write, pgs);
+		}
 	}
 
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, zp->z_size);
