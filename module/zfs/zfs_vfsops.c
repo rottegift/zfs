@@ -196,20 +196,13 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 {
 	int *waitfor_arg = arg;
 	int waitfor = (*waitfor_arg & (MNT_WAIT | MNT_DWAIT)) != 0;
-	boolean_t disclaim = B_FALSE;
-	int disclaim_err = 0;
-	boolean_t claim = B_FALSE;
 
-	boolean_t do_not_msync = B_FALSE;
-
-	if (vnode_isreg(vp) &&
-	    !spl_ubc_is_mapped_writable(vp) &&
-	    ubc_pages_resident(vp) &&
-	    (0 != is_file_clean(vp, ubc_getsize(vp)))) {
-		// error = is_file_clean(vp, len) -> 0 if clean, nonzero if dirty
+	if (vnode_isreg(vp)
+	    && ubc_pages_resident(vp)
+	    && (0 != is_file_clean(vp, ubc_getsize(vp)))) {
 		znode_t *zp = VTOZ(vp);
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
-		if (!zp) {
+		if (!zp || !POINTER_IS_VALID(zp)) {
 			printf("ZFS: %s:%d: ZTOV(vp) is NULL!\n", __func__, __LINE__);
 			return (VNODE_RETURNED);
 		}
@@ -240,8 +233,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
 		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
 		    !spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
-			disclaim = B_TRUE;
-			disclaim_err = EROFS;
 			printf("ZFS: %s:%d: read only filesystem, will return vnode for (dirty!) file %s\n",
 			    __func__, __LINE__, zp->z_name_cache);
 			ZFS_EXIT(zfsvfs);
@@ -249,8 +240,6 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		}
 		ASSERT0(zp->z_pflags & ZFS_IMMUTABLE);
 		if (zp->z_pflags & ZFS_IMMUTABLE) {
-			disclaim = B_TRUE;
-			disclaim_err = EPERM;
 			printf("ZFS: %s:%d: ZFS object is immutable, will return vnode for (dirty!)"
 			    "  file %s\n",
 			    __func__, __LINE__, zp->z_name_cache);
@@ -291,14 +280,24 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* do the msync */
 		int msync_retval = 0;
 
-		if (do_not_msync == B_FALSE && zp->z_in_pager_op == 0
-		    && !spl_ubc_is_mapped_writable(vp)) {
+		int writable = 0;
+		if (spl_ubc_is_mapped(vp, &writable) && is_file_clean(vp, ubc_getsize(vp))) {
+			// is_file_clean is 0 if file is clean
+			printf("ZFS: %s:%d: doing msync on dirty mapped (writable? %d) file"
+			    " usize %llu zid %llu fs %s fname %s\n",
+			    __func__, __LINE__, writable, ubc_getsize(vp),
+			    zp->z_id, fsname, fname);
+		}
+
+		if (zp->z_in_pager_op == 0) {
 			ASSERT0(vnode_isrecycled(vp));
-			claim = B_FALSE;
-			flags = UBC_PUSHALL;
+			flags = UBC_PUSHDIRTY;
 			msync_retval = zfs_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
-		} else if (do_not_msync == B_FALSE) {
-			claim = B_TRUE;
+		} else {
+			printf("ZFS: %s:%d: msync avoided because of z_in_pager_op (%d)"
+			    " (usize %llu) zid %llu fs %s file %s\n",
+			    __func__, __LINE__, zp->z_in_pager_op, ubc_getsize(vp),
+			    zp->z_id, fsname, fname);
 		}
 
 		z_map_drop_lock(zp, &need_release, &need_upgrade);
