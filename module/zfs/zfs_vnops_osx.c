@@ -4664,6 +4664,14 @@ skip_lock_acquisition:
 			VNOPS_OSX_STAT_BUMP(pageoutv2_pageout_mapped);
 			if (writable)
 				VNOPS_OSX_STAT_BUMP(pageoutv2_pageout_mapped_write);
+			printf("ZFS: %s:%d: PAGEOUT of mmapped file (write? %d)"
+			    " a_f_offset %llu a_size %lu a_flags 0x%x"
+			    " usize %llu zsize %llu"
+			    " zid %llu fs %s file %s\n",
+			    __func__, __LINE__, writable,
+			    ap->a_f_offset, ap->a_size, ap->a_flags,
+			    ubc_getsize(vp), zp->z_size,
+			    zp->z_id, fsname, fname);
 		}
 	}
 
