@@ -4883,6 +4883,7 @@ skip_lock_acquisition:
 			    " commmit_from_page %lld to pg_index %lld, bumping cfp to %lld)"
 			    " and comitting [%lld..%lld] (index %lld..%lld) (upl_end_pg %lld,"
 			    "  lowest dismissed %d)"
+			    " mapped? %d writable? %d"
 			    " zid %llu fs %s file %s (flags 0x%x)\n",
 			    __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
@@ -4891,6 +4892,8 @@ skip_lock_acquisition:
 			    commit_from_page * PAGE_SIZE_64, start_of_range,
 			    commit_from_page, pg_index,
 			    upl_end_pg, pages_in_upl - upl_pages_dismissed,
+			    spl_ubc_is_mapped(vp, NULL),
+			    spl_ubc_is_mapped_writable(vp),
 			    zp->z_id, fsname, fname, ap->a_flags);
 			if (commit_from_page < pg_index) {
 				pageout_op->state = "interim commit";
@@ -5081,20 +5084,36 @@ skip_lock_acquisition:
 				    last_page_in_range, upl_end_pg);
 				goto pageout_done;
 			} else if (xxxbleat) {
+				int mapped_writable = 0;
+				int mapped = spl_ubc_is_mapped(vp, &mapped_writable);
 				printf("ZFS: %s:%d: bluster_pageout OK for"
 				    " UPL range [%lld..%lld], for file range [%lld..%lld], "
 				    " pages_remaining %lld, fsz %lld, fs %s file %s"
 				    " last_page_in_range %lld upl_end_pg %lld"
-				    " pg_index %lld, page_past_end_of_range %d (done: %d)\n",
+				    " pg_index %lld, page_past_end_of_range %d (done: %d)"
+				    " (mapped? %d mapped_writable %d)\n",
 				    __func__, __LINE__,
 				    start_of_range, end_of_range,
 				    f_start_of_upl, f_end_of_upl, pages_remaining,
 				    filesize, fsname, fname,
 				    last_page_in_range, upl_end_pg,
 				    pg_index, page_past_end_of_range,
-				    page_past_end_of_range > upl_end_pg);
+				    page_past_end_of_range > upl_end_pg,
+				    mapped, mapped_writable);
+			} else if (spl_ubc_is_mapped(vp, NULL)) {
+				printf("ZFS: %s:%d: bluster_pageout OK for MAPPED"
+				    " (writable? %d) file, range in UPL [%llu..%llu],"
+				    " pages in UPL [%llu..%llu] UPL"
+				    " a_f_offset %llu a_size %lu (pgs %llu) a_flags 0x%x"
+				    " zid %llu fs %s file %s\n",
+				    __func__, __LINE__,
+				    spl_ubc_is_mapped_writable(vp),
+				    start_of_range, end_of_range,
+				    pg_index, last_page_in_range,
+				    ap->a_f_offset, ap->a_size, upl_end_pg,
+				    ap->a_flags,
+				    zp->z_id, fsname, fname);
 			}
-
 			VNOPS_OSX_STAT_INCR(pageoutv2_dirty_pages_blustered, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
