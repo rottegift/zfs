@@ -4680,6 +4680,8 @@ skip_lock_acquisition:
 			    ap->a_f_offset, ap->a_size, ap->a_flags,
 			    ubc_getsize(vp), zp->z_size,
 			    zp->z_id, fsname, fname);
+			if (writable)
+				request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
 		}
 	}
 
