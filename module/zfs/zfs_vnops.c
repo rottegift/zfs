@@ -4912,7 +4912,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		    vnode_isrecycled(vp),
 		    zp->z_size, zp->z_name_cache);
 		allow_new_msync = B_TRUE;
-		zil_commit_only = B_TRUE;
 	}
 
 	boolean_t do_zil_commit = B_FALSE;
