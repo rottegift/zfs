@@ -5100,17 +5100,19 @@ skip_lock_acquisition:
 				    pg_index, page_past_end_of_range,
 				    page_past_end_of_range > upl_end_pg,
 				    mapped, mapped_writable);
-			} else if (spl_ubc_is_mapped(vp, NULL)) {
+			} else if (spl_ubc_is_mapped(vp, NULL)
+			    && !ISSET(ap->a_flags, UPL_MSYNC)) {
 				printf("ZFS: %s:%d: bluster_pageout OK for MAPPED"
 				    " (writable? %d) file, range in UPL [%llu..%llu],"
-				    " pages in UPL [%llu..%llu] UPL"
+				    " pages in UPL [%llu..%u] UPL"
 				    " a_f_offset %llu a_size %lu (pgs %llu) a_flags 0x%x"
 				    " zid %llu fs %s file %s\n",
 				    __func__, __LINE__,
 				    spl_ubc_is_mapped_writable(vp),
 				    start_of_range, end_of_range,
-				    pg_index, last_page_in_range,
-				    ap->a_f_offset, ap->a_size, upl_end_pg,
+				    pg_index, page_past_end_of_range,
+				    ap->a_f_offset, ap->a_size,
+				    howmany(ap->a_size, PAGE_SIZE_64),
 				    ap->a_flags,
 				    zp->z_id, fsname, fname);
 			}
