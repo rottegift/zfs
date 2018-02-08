@@ -4788,7 +4788,7 @@ skip_lock_acquisition:
 		}
 		int commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
 		if (ISSET(a_flags, UPL_MSYNC) && !spl_ubc_is_mapped(vp, NULL))
-			commit_flags |= UPL_COMMIT_INACTIVATE;
+			commit_flags |= UPL_COMMIT_SPECULATE;
 		int commit_inactivate = ubc_upl_commit_range(upl, 0, ap->a_size,
 		    commit_flags);
 		if (commit_inactivate != KERN_SUCCESS) {
@@ -4900,11 +4900,11 @@ skip_lock_acquisition:
 				pageout_op->line = __LINE__;
 				int interim_commit_flags = 0;
 				if (ISSET(a_flags, UPL_MSYNC)) {
-					interim_commit_flags |=
-					    UPL_COMMIT_CLEAR_PRECIOUS;
-					if (!spl_ubc_is_mapped(vp, NULL))
+					if (!spl_ubc_is_mapped(vp, NULL)) {
 						interim_commit_flags |=
-						    UPL_COMMIT_INACTIVATE;
+						    UPL_COMMIT_SPECULATE
+						    | UPL_COMMIT_CLEAR_PRECIOUS;
+					}
 				}
 				if (mapped_write)
 					interim_commit_flags = 0;
@@ -5182,13 +5182,14 @@ skip_lock_acquisition:
 			pageout_op->line = __LINE__;
 			int final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
 			if (ISSET(a_flags, UPL_MSYNC)) {
-				final_commit_flags |=
-				    UPL_COMMIT_CLEAR_PRECIOUS;
-				if (!spl_ubc_is_mapped(vp, NULL))
-					final_commit_flags |= UPL_COMMIT_INACTIVATE;
+				if (!spl_ubc_is_mapped(vp, NULL)) {
+					final_commit_flags |=
+					    UPL_COMMIT_SPECULATE
+					    | UPL_COMMIT_CLEAR_PRECIOUS;
+				}
 			}
 			if (mapped_write)
-				final_commit_flags = COMMIT_FREE_ON_EMPTY;
+				final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
 			off_t commit_size = ap->a_size;
 			if (commit_from_page > 0)
 				commit_size -= commit_from_page * PAGE_SIZE_64;
