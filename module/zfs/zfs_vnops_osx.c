@@ -4907,7 +4907,7 @@ skip_lock_acquisition:
 					}
 				}
 				if (mapped_write)
-					interim_commit_flags = 0;
+					interim_commit_flags = UPL_COMMIT_SET_DIRTY;
 				const off_t commit_from_byte = commit_from_page * PAGE_SIZE_64;
 				const off_t commit_size = start_of_range - commit_from_byte;
 				int interim_commit_ret = ubc_upl_commit_range(upl,
@@ -5189,7 +5189,9 @@ skip_lock_acquisition:
 				}
 			}
 			if (mapped_write)
-				final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
+				final_commit_flags =
+				    UPL_COMMIT_SET_DIRTY
+				    | UPL_COMMIT_FREE_ON_EMPTY;
 			off_t commit_size = ap->a_size;
 			if (commit_from_page > 0)
 				commit_size -= commit_from_page * PAGE_SIZE_64;
