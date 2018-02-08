@@ -3484,7 +3484,8 @@ start_tx:
 		uint64_t pgs = howmany(write_size, PAGE_SIZE_64);
 		VNOPS_OSX_STAT_INCR(bluster_pageout_pages, pgs);
 		int writable = 0;
-		if (spl_ubc_is_mapped(ZTOV(zp), &writable)) {
+		if (!ISSET(flags, UPL_MSYNC)
+		    && spl_ubc_is_mapped(ZTOV(zp), &writable)) {
 			VNOPS_OSX_STAT_INCR(bluster_pageout_mapped, pgs);
 			if (writable)
 				VNOPS_OSX_STAT_INCR(bluster_pageout_mapped_write, pgs);
