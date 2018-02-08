@@ -758,9 +758,6 @@ fill_hole(vnode_t *vp, const off_t foffset,
 	ASSERT3U(upl_size, >, 0);
 
 	int commit_flags = UPL_COMMIT_CLEAR_DIRTY | UPL_COMMIT_FREE_ON_EMPTY;
-	if (!spl_ubc_is_mapped(vp, NULL))
-		commit_flags |= UPL_COMMIT_SPECULATE;
-
 	kern_return_t commit_ret = ubc_upl_commit_range(upl, 0, upl_size, commit_flags);
 
 	if (commit_ret != KERN_SUCCESS) {
