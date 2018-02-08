@@ -4894,8 +4894,7 @@ skip_lock_acquisition:
 			    spl_ubc_is_mapped(vp, NULL),
 			    spl_ubc_is_mapped_writable(vp),
 			    zp->z_id, fsname, fname, ap->a_flags);
-			if (commit_from_page < pg_index
-			    && !mapped_write) {
+			if (commit_from_page < pg_index) {
 				pageout_op->state = "interim commit";
 				pageout_op->line = __LINE__;
 				int interim_commit_flags = 0;
@@ -4906,6 +4905,8 @@ skip_lock_acquisition:
 						interim_commit_flags |=
 						    UPL_COMMIT_INACTIVATE;
 				}
+				if (mapped_write)
+					interim_commit_flags = UPL_COMMIT_SET_DIRTY;
 				const off_t commit_from_byte = commit_from_page * PAGE_SIZE_64;
 				const off_t commit_size = start_of_range - commit_from_byte;
 				int interim_commit_ret = ubc_upl_commit_range(upl,
@@ -5175,8 +5176,7 @@ skip_lock_acquisition:
 		}
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 		const off_t start_of_tail = lowest_page_dismissed * PAGE_SIZE;
-		if (commit == B_TRUE && !mapped_write &&
-		    (!spl_ubc_is_mapped_writable(vp) && !ISSET(ap->a_flags, UPL_MSYNC))) {
+		if (commit == B_TRUE) {
 			pageout_op->state = "final commit";
 			pageout_op->line = __LINE__;
 			int final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
@@ -5186,6 +5186,8 @@ skip_lock_acquisition:
 				if (!spl_ubc_is_mapped(vp, NULL))
 					final_commit_flags |= UPL_COMMIT_INACTIVATE;
 			}
+			if (mapped_write)
+				final_commit_flags = UPL_COMMIT_SET_DIRTY;
 			off_t commit_size = ap->a_size;
 			if (commit_from_page > 0)
 				commit_size -= commit_from_page * PAGE_SIZE_64;
