@@ -5213,8 +5213,6 @@ skip_lock_acquisition:
 			pageout_op->state = "final abort";
 			pageout_op->line = __LINE__;
 			off_t abort_size = ap->a_size;
-			if (mapped_write || spl_ubc_is_mapped_writable(vp))
-				commit_from_page = 0;
 			if (commit_from_page > 0)
 				abort_size -= commit_from_page * PAGE_SIZE_64;
 			int abort_flags = UPL_ABORT_FREE_ON_EMPTY;
