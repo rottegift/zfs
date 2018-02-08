@@ -4849,7 +4849,8 @@ skip_lock_acquisition:
 
 	ASSERT3S(upl_end_pg, >=, 0);
 
-	boolean_t mapped_write = spl_ubc_is_mapped_writable(vp);
+	boolean_t mapped_write =
+	    spl_ubc_is_mapped_writable(vp) && !ISSET(ap->a_flags, UPL_MSYNC);
 
 	for (pg_index = 0; pg_index < just_past_last_valid_pg; ) {
 		pageout_op->line = __LINE__;
@@ -5174,7 +5175,8 @@ skip_lock_acquisition:
 		}
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 		const off_t start_of_tail = lowest_page_dismissed * PAGE_SIZE;
-		if (commit == B_TRUE && !mapped_write && !spl_ubc_is_mapped_writable(vp)) {
+		if (commit == B_TRUE && !mapped_write &&
+		    (!spl_ubc_is_mapped_writable(vp) && !ISSET(ap->a_flags, UPL_MSYNC))) {
 			pageout_op->state = "final commit";
 			pageout_op->line = __LINE__;
 			int final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
