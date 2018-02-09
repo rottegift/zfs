@@ -5634,8 +5634,8 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 
 	dprintf("+vnop_mnomap: %p\n", ap->a_vp);
 
-//	ZFS_ENTER(zfsvfs);
-//	ZFS_VERIFY_ZP(zp);
+	ZFS_ENTER(zfsvfs);
+	ZFS_VERIFY_ZP(zp);
 
 	ASSERT(vnode_isreg(vp));
 
@@ -5644,9 +5644,47 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		return (ENODEV);
 	}
 
+	/*
+	 * we are about to give up the last mmap, but let's
+	 * wait until any other operations on the file have
+	 * gone through (especially paging actions).   while
+	 * here, clean the file.
+	 */
+
+	rl_t *rl = zfs_try_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+	if (rl == NULL) {
+		printf("ZFS: %s:%d: waiting for RL_WRITER lock for file %s (z_in_pager_op %d)\n",
+		    __func__, __LINE__,
+		    zp->z_name_cache, zp->z_in_pager_op);
+		rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
+	}
+	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
+	uint64_t tries = z_map_rw_lock(zp, &need_release,
+	    &need_upgrade, __func__, __LINE__);
+
+	off_t resid_off = 0;
+	int msync_retval = zfs_msync(zp, rl, (off_t)0, ubc_getsize(vp), &resid_off,
+	    UBC_PUSHALL);
+
+	z_map_drop_lock(zp, &need_release, &need_upgrade);
+	zfs_range_unlock(rl);
+	if (tries > 2) {
+		printf("ZFS: %s:%d: contention (tries %llu) on file %s\n",
+		    __func__, __LINE__, tries, zp->z_name_cache);
+	}
+	if (msync_retval != 0) {
+		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+		printf("ZFS: %s:%d: zfs_msync returned ERROR %d"
+		    " usize %llu zsize %llu resid_off %llu"
+		    " zid %llu fs %s file %s\n",
+		    __func__, __LINE__, msync_retval,
+		    ubc_getsize(vp), zp->z_size, resid_off,
+		    zp->z_id, fsname, zp->z_name_cache);
+	}
+
 	VNOPS_OSX_STAT_BUMP(mnomap_calls);
 
-//	ZFS_EXIT(zfsvfs);
+	ZFS_EXIT(zfsvfs);
 
 	dprintf("-vnop_mnomap\n");
 	return (0);
