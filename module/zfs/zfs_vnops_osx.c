@@ -5658,6 +5658,8 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 		    zp->z_name_cache, zp->z_in_pager_op);
 		rl = zfs_range_lock(zp, 0, UINT64_MAX, RL_WRITER);
 	}
+	ASSERT3P(tsd_get(rl_key), ==, NULL);
+	tsd_set(rl_key, rl);
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
 	uint64_t tries = z_map_rw_lock(zp, &need_release,
 	    &need_upgrade, __func__, __LINE__);
@@ -5667,6 +5669,8 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	    UBC_PUSHALL);
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
+	ASSERT3P(tsd_get(rl_key), ==, rl);
+	tsd_set(rl_key, NULL);
 	zfs_range_unlock(rl);
 	if (tries > 2) {
 		printf("ZFS: %s:%d: contention (tries %llu) on file %s\n",
