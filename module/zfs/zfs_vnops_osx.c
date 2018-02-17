@@ -2556,7 +2556,7 @@ norwlock:
 
 		if (upl_offset != 0
 		    || (uint64_t)zero_len > PAGE_SIZE_64
-		    || trunc_page_64(file_sz) < trunc_page_64(off + len)) {
+		    || trunc_page_64(file_sz) < trunc_page_64(off + upl_offset + len)) {
 			printf("ZFS:%s:%d: zero-filling past EOF"
 			    " file size %llu"
 			    " eof_in_vaddr_range %llu zero_len %ld"
