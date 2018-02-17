@@ -1439,12 +1439,12 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 	}
 
 	for (int clean_i = 0, same = 0; clean_i < 10; clean_i++) {
-		if (t_dirty > 0 || t_precious > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
+		if (t_dirty > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
 			int prev_dirty = t_dirty;
 			int prev_pageout = t_pageout;
 			int prev_busy = t_busy;
 			VNOPS_STAT_INCR(mappedread_unusual_pages,
-			    t_dirty + t_precious + t_busy + t_pageout);
+			    t_dirty + t_busy + t_pageout);
 			off_t resid_msync = 0;
 			VNOPS_STAT_BUMP(zfs_read_clean_on_read);
 			ASSERT0(vnode_isrecycled(vp));
@@ -1454,11 +1454,11 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 			    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
 			if (msync_retval != 0) {
 				printf("ZFS: %s:%d: (iter %d) (lock? %d tries %lld) zfs_msync error %d (resid %llu)"
-				    " for start %llu end %llu (unusual pages d %d p %d b %d errs %d file %s\n",
+				    " for start %llu end %llu (unusual pages d %d pr %d b %d po %d a %d errs %d file %s\n",
 				    __func__, __LINE__, clean_i, did_lock, tries,
 				    msync_retval, resid_msync,
 				    upl_file_offset, upl_file_offset + upl_size,
-				    t_dirty, t_precious, t_busy, t_errs,
+				    t_dirty, t_precious, t_busy, t_pageout, t_absent, t_errs,
 				    filename);
 			}
 			int t_errs = zfs_ubc_range_all_flags(zp, vp,
