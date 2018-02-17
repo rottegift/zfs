@@ -2555,8 +2555,7 @@ norwlock:
 			VNOPS_OSX_STAT_BUMP(pagein_zero_fill_w_upl_offset);
 
 		if (upl_offset != 0
-		    || (uint64_t)zero_len > PAGE_SIZE_64
-		    || trunc_page_64(file_sz) < trunc_page_64(off + upl_offset + len)) {
+		    || (uint64_t)zero_len > PAGE_SIZE_64) {
 			printf("ZFS:%s:%d: zero-filling past EOF"
 			    " file size %llu"
 			    " eof_in_vaddr_range %llu zero_len %ld"
