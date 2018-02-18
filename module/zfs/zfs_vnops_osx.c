@@ -2522,9 +2522,11 @@ norwlock:
 
 	dprintf("vaddr %p with upl_off 0x%x\n", vaddr, upl_offset);
 	vaddr += upl_offset;
+	ASSERT3S(len, >, upl_offset);
+	len -= upl_offset;
 
 	/* Can't read beyond EOF - but we need to zero those extra bytes. */
-
+#if 0
 	const off_t vaddr_range_start = off + upl_offset; // vaddr points here
 	const off_t vaddr_range_end = off + len;
 	ASSERT3U(vaddr_range_end, >, vaddr_range_start);
@@ -2557,6 +2559,7 @@ norwlock:
 		if (upl_offset != 0
 		    || (uint64_t)zero_len > PAGE_SIZE_64) {
 			printf("ZFS:%s:%d: zero-filling past EOF"
+			    " a_f_offset %llu a_size %lu a_pl_offset %lu"
 			    " file size %llu"
 			    " eof_in_vaddr_range %llu zero_len %ld"
 			    " upl_offset %u upl start %llu"
@@ -2564,6 +2567,7 @@ norwlock:
 			    " new len %lld"
 			    " zid %llu fs %s file %s\n",
 			    __func__, __LINE__,
+			    ap->a_f_offset, ap->a_size, ap->a_pl_offset,
 			    file_sz,
 			    eof_in_vaddr_range, zero_len,
 			    upl_offset, off,
@@ -2576,6 +2580,7 @@ norwlock:
 
 		len = new_len;
 	}
+#endif
 
 	/*
 	 * Fill pages with data from the file.
