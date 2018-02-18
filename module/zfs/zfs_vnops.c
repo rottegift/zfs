@@ -1439,6 +1439,11 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 	}
 
 	for (int clean_i = 0, same = 0; clean_i < 10; clean_i++) {
+		if (ISSET(zp->z_pflags, ZFS_IMMUTABLE)
+		    || vnode_vfsisrdonly(vp)
+		    || !spa_writeable(dmu_objset_spa(zp->z_zfsvfs->z_os))) {
+			break;
+		}
 		if (t_dirty > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
 			int prev_dirty = t_dirty;
 			int prev_pageout = t_pageout;
