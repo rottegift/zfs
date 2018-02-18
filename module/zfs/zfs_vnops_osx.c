@@ -5651,8 +5651,15 @@ zfs_vnop_mnomap(struct vnop_mnomap_args *ap)
 	    &need_upgrade, __func__, __LINE__);
 
 	off_t resid_off = 0;
-	int msync_retval = zfs_msync(zp, rl, (off_t)0, ubc_getsize(vp), &resid_off,
-	    UBC_PUSHALL);
+	int msync_retval = 0;
+
+	if (!ISSET(zp->z_pflags, ZFS_IMMUTABLE)
+	    && !vnode_vfsisrdonly(vp)
+	    && spa_writeable(dmu_objset_spa(zfsvfs->z_os))) {
+		// clean out r/w objects
+		msync_retval = zfs_msync(zp, rl, (off_t)0, ubc_getsize(vp), &resid_off,
+		    UBC_PUSHALL);
+	}
 
 	z_map_drop_lock(zp, &need_release, &need_upgrade);
 	ASSERT3P(tsd_get(rl_key), ==, rl);
