@@ -168,9 +168,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pagein_calls;
 	kstat_named_t pagein_pages;
 	kstat_named_t pagein_want_lock;
-	kstat_named_t pagein_zero_fill;
-	kstat_named_t pagein_zero_fill_w_upl_offset;
-	kstat_named_t pagein_zero_fill_gt_page;
+	kstat_named_t pagein_w_upl_offset;
 } vnops_osx_stats_t;
 
 static vnops_osx_stats_t vnops_osx_stats = {
@@ -209,9 +207,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pagein_calls",                      KSTAT_DATA_UINT64 },
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 	{ "pagein_want_lock",                  KSTAT_DATA_UINT64 },
-	{ "pagein_zero_fill",                  KSTAT_DATA_UINT64 },
-	{ "pagein_zero_fill_w_upl_offset",     KSTAT_DATA_UINT64 },
-	{ "pagein_zero_fill_gt_page",          KSTAT_DATA_UINT64 },
+	{ "pagein_w_upl_offset",               KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_OSX_STAT(statname)           (vnops_osx_stats.statname.value.ui64)
@@ -2523,9 +2519,21 @@ norwlock:
 	dprintf("vaddr %p with upl_off 0x%x\n", vaddr, upl_offset);
 	vaddr += upl_offset;
 	ASSERT3S(len, >, upl_offset);
+	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 
-	if (upl_offset > 0
-	    || ap->a_f_offset + ap->a_size > zp->z_size) {
+	/*
+	 * Empirically, we do not have to zero-fill the EOF page if
+	 * usize is the same as zsize; in practice they are kept tightly
+	 * in sync, and will be equal during pagein.
+	 *
+	 * Let's bleat about the (very rare) case when upl_offset is
+	 * nonzero, as well as if zsize != usize.
+	 */
+
+	if (upl_offset > 0)
+		VNOPS_OSX_STAT_BUMP(pagein_w_upl_offset);
+
+	if (upl_offset > 0 || zp->z_size != ubc_getsize(vp)) {
 		/*
 		 * don't adjust len.  quoting vnode_if.h:
 		 *
@@ -2547,63 +2555,6 @@ norwlock:
 		    zp->z_size, ubc_getsize(vp), file_sz,
 		    zp->z_id, fsname, fname);
 	}
-
-	/* Can't read beyond EOF - but we need to zero those extra bytes. */
-#if 0
-	const off_t vaddr_range_start = off + upl_offset; // vaddr points here
-	const off_t vaddr_range_end = off + len;
-	ASSERT3U(vaddr_range_end, >, vaddr_range_start);
-	ASSERT0(upl_offset); // just debugging
-
-	if (vaddr_range_end > file_sz) {
-		VNOPS_OSX_STAT_BUMP(pagein_zero_fill);
-
-		ASSERT3U(file_sz, ==, ubc_getsize(vp));
-		ASSERT3U(off, <, file_sz);
-
-		// now we want to zero from file_sz to range_end
-	        // relative to range_start
-
-		const uint64_t eof_in_vaddr_range = file_sz - vaddr_range_start;
-		const size_t zero_len = vaddr_range_end - file_sz;
-
-		ASSERT3S(len, >, zero_len);
-		VERIFY3U(zero_len, <, MAX_UPL_TRANSFER_BYTES);
-
-		// DMU read from vaddr_range_start to file_sz
-		const off_t new_len = len - zero_len;
-
-		if (zero_len > PAGE_SIZE_64)
-			VNOPS_OSX_STAT_BUMP(pagein_zero_fill_gt_page);
-
-		if (upl_offset > 0)
-			VNOPS_OSX_STAT_BUMP(pagein_zero_fill_w_upl_offset);
-
-		if (upl_offset != 0
-		    || (uint64_t)zero_len > PAGE_SIZE_64) {
-			printf("ZFS:%s:%d: zero-filling past EOF"
-			    " a_f_offset %llu a_size %lu a_pl_offset %lu"
-			    " file size %llu"
-			    " eof_in_vaddr_range %llu zero_len %ld"
-			    " upl_offset %u upl start %llu"
-			    " vaddr_range_start..end [%llu..%llu]"
-			    " new len %lld"
-			    " zid %llu fs %s file %s\n",
-			    __func__, __LINE__,
-			    ap->a_f_offset, ap->a_size, ap->a_pl_offset,
-			    file_sz,
-			    eof_in_vaddr_range, zero_len,
-			    upl_offset, off,
-			    vaddr_range_start, vaddr_range_end,
-			    new_len,
-			    zp->z_id, fsname, fname);
-		}
-
-		memset(&vaddr[eof_in_vaddr_range], 0, zero_len);
-
-		len = new_len;
-	}
-#endif
 
 	/*
 	 * Fill pages with data from the file.
