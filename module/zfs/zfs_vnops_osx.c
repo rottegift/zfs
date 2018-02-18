@@ -2523,7 +2523,30 @@ norwlock:
 	dprintf("vaddr %p with upl_off 0x%x\n", vaddr, upl_offset);
 	vaddr += upl_offset;
 	ASSERT3S(len, >, upl_offset);
-	len -= upl_offset;
+
+	if (upl_offset > 0
+	    || ap->a_f_offset + ap->a_size > zp->z_size) {
+		/*
+		 * don't adjust len.  quoting vnode_if.h:
+		 *
+		 * @param pl_offset Offset in UPL at which to start placing data.
+		 * @param size Amount of data to page in (in bytes).
+		 *
+		 * unclear is whether we want to zero anything beyond file_sz
+		 */
+		printf("ZFS: %s:%d: upl_offset %u"
+		    " a_f_offset %llu a_size %lu"
+		    " a_flags 0x%x"
+		    " end of upl %llu"
+		    " zsize %llu usize %llu file_sz %llu"
+		    " zid %llu fs %s file %s\n",
+		    __func__, __LINE__, upl_offset,
+		    ap->a_f_offset, ap->a_size,
+		    ap->a_flags,
+		    ap->a_f_offset + ap->a_size,
+		    zp->z_size, ubc_getsize(vp), file_sz,
+		    zp->z_id, fsname, fname);
+	}
 
 	/* Can't read beyond EOF - but we need to zero those extra bytes. */
 #if 0
