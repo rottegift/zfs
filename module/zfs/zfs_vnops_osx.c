@@ -3381,7 +3381,6 @@ start_tx:
 	ASSERT3S(error, ==, 0);
 	if (error != 0) {
 		dmu_tx_abort(tx);
-		zio_data_buf_free(safebuf, write_size);
 		pageout_op->state = "tx abort";
 		pageout_op->line = __LINE__;
 		printf("ZFS: %s:%d: dmu_tx_assign error %d, in range [%u..%d]"
