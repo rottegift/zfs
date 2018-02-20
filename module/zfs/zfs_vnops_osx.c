@@ -4872,7 +4872,7 @@ skip_lock_acquisition:
 			/* gather up a range of absent pages */
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
-				if (upl_page_present(pl, page_past_end_of_range))
+				if (upl_valid_page(pl, page_past_end_of_range))
 					break;
 			}
 			pageout_op->line = __LINE__;
@@ -4884,7 +4884,7 @@ skip_lock_acquisition:
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			// this is a bit noisy
 			// want to know if it's sqlite/pma stuff though
-			printf("ZFS: %s:%d: skipping invalid/not-present page"
+			printf("ZFS: %s:%d: aborting invalid/not-present page"
 			    " upl bytes [%lld..%lld] (%lld pages)"
 			    " of file bytes [%lld..%lld] (UPL %d pages,"
 			    " commmit_from_page %lld to pg_index %lld, bumping cfp to %lld)"
@@ -4905,11 +4905,11 @@ skip_lock_acquisition:
 			if (commit_from_page < pg_index) {
 				pageout_op->state = "interim commit";
 				pageout_op->line = __LINE__;
-				int interim_commit_flags = 0;
+				const int interim_commit_flags = 0;
 				const off_t commit_from_byte = commit_from_page * PAGE_SIZE_64;
 				const off_t commit_size = start_of_range - commit_from_byte;
 				int interim_commit_ret = ubc_upl_commit_range(upl,
-				    commit_from_page * PAGE_SIZE_64,
+				    commit_from_byte,
 				    commit_size, interim_commit_flags);
 				if (interim_commit_ret != KERN_SUCCESS) {
 					// this is almost certainly a_flags == 0x8
@@ -4925,6 +4925,50 @@ skip_lock_acquisition:
 					    __func__, __LINE__, interim_commit_ret,
 					    commit_from_page, pg_index,
 					    commit_from_byte, commit_size,
+					    ap->a_f_offset, ap->a_size, ap->a_flags,
+					    spl_ubc_is_mapped(vp, NULL),
+					    spl_ubc_is_mapped_writable(vp),
+					    spl_upl_get_size(upl),
+					    zp->z_id, fsname, fname);
+				}
+			}
+			if (spl_ubc_is_mapped(vp, NULL)) {
+				// if the file is mapped, do an explicit abort
+				// rather than skipping over the range.
+				// we could do this for unmapped files too,
+				// in principle, but it only seems to be a problem
+				// for files with long-held PROT_WRITE mmaps under
+				// heavy memory pressure
+				pageout_op->state = "mapped abort";
+				pageout_op->line = __LINE__;
+				const int interim_abort_flags = 0;
+			        const off_t abort_from_byte = start_of_range;
+				const off_t abort_size = end_of_range - start_of_range;
+				const off_t abort_from_page = abort_from_byte / PAGE_SIZE_64;
+				printf("ZFS: %s:%d: interim abort for mapped file"
+				    " page index %lld - %lld"
+				    " UPL bytes %llu - %llu (numbytes: %llu)"
+				    " [args: %llu (st), %lu (sz) 0x%x (flags)]"
+				    " mappedwrite? %d"
+				    " usize %llu zid %llu fs %s file %s\n",
+				    __func__, __LINE__,
+				    abort_from_page, pg_index,
+				    start_of_range, end_of_range, abort_size,
+				    ap->a_f_offset, ap->a_size, ap->a_flags,
+				    spl_ubc_is_mapped_writable(vp),
+				    ubc_getsize(vp), zp->z_id, fsname, fname);
+				int interim_abort_ret = ubc_upl_abort_range(upl,
+				    abort_from_byte, abort_size, interim_abort_flags);
+				if (interim_abort_ret != KERN_SUCCESS) {
+					printf("ZFS: %s:%d: ERROR %d (but carrying on) interim abort"
+					    " page index %lld - %lld [args: %llu (st), %llu (sz)]"
+					    " for UPL a_f_offset %llu a_size %lu"
+					    " a_flags 0x%x (mapped? %d writable? %d)"
+					    " upl->size %u"
+					    " zid %llu fs %s file %s\n",
+					    __func__, __LINE__, interim_abort_ret,
+					    abort_from_page, pg_index,
+					    abort_from_byte, abort_size,
 					    ap->a_f_offset, ap->a_size, ap->a_flags,
 					    spl_ubc_is_mapped(vp, NULL),
 					    spl_ubc_is_mapped_writable(vp),
