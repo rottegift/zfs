@@ -176,7 +176,7 @@ dn_mtx_destroy(kmutex_t *mtx)
 		    mtx->file, mtx->line,
 		    mtx->func, mtx->state);
 		spl_backtrace("db_mtx_destroy vs held mutex");
-		int maxcount = 60000;
+		int maxcount = 60000000;
 		do {
 			void IODelay(unsigned microseconds);
 			IODelay(1);
