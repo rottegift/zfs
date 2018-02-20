@@ -655,15 +655,19 @@ zfs_range_unlock(rl_t *rl)
 	znode_t *zp = rl->r_zp;
 	list_t free_list;
 	rl_t *free_rl;
+	boolean_t mutex_entered = B_FALSE;
 
-	ASSERT3S(zp->z_range_locks, >, 0);
+	if (zp) {
+		mutex_enter(&zp->z_range_lock);
+		mutex_entered = B_TRUE;
+		ASSERT3S(zp->z_range_locks, >, 0);
+	}
 
 	ASSERT(rl->r_type == RL_WRITER || rl->r_type == RL_READER);
 	ASSERT(rl->r_cnt == 1 || rl->r_cnt == 0);
 	ASSERT(!rl->r_proxy);
 	list_create(&free_list, sizeof (rl_t), offsetof(rl_t, rl_node));
 
-	mutex_enter(&zp->z_range_lock);
 	if (rl->r_type == RL_WRITER) {
 		/* writer locks can't be shared or split */
 		avl_remove(&zp->z_range_avl, rl);
@@ -682,7 +686,14 @@ zfs_range_unlock(rl_t *rl)
 		zfs_range_unlock_reader(zp, rl, &free_list);
 	}
 	rl->r_caller = NULL;
-	mutex_exit(&zp->z_range_lock);
+
+	if (zp) {
+		mutex_exit(&zp->z_range_lock);
+		mutex_entered = B_FALSE;
+	}
+
+	if (mutex_entered == B_TRUE)
+		panic("zp vanished while mutex held!");
 
 	while ((free_rl = list_head(&free_list)) != NULL) {
 		list_remove(&free_list, free_rl);
@@ -691,7 +702,8 @@ zfs_range_unlock(rl_t *rl)
 
 	list_destroy(&free_list);
 
-	zp->z_range_locks--;
+	if (zp)
+		zp->z_range_locks--;
 }
 
 /*
