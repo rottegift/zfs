@@ -2587,16 +2587,15 @@ norwlock:
 		dprintf("pagein from off 0x%llx len 0x%llx into address %p (len 0x%lx)\n",
 				off, readlen, vaddr, len);
 
-		if (upl_page_present(pl, cur_page)) {
-			printf("ZFS: %s:%d: PAGEIN, WARNING, skipping page present"
-			    " (valid? %d) (dirty? %d)"
+		if (upl_valid_page(pl, cur_page)) {
+			printf("ZFS: %s:%d: PAGEIN, WARNING, skipping valid page"
+			    " (dirty? %d)"
 			    " at cur_page %d (cur len %lu, off %llu)"
 			    " a_f_offset %llu a_size %lu a_flags 0x%x"
 			    " a_pl_offset %u"
 			    " mapped? %d writable? %d"
 			    " zsize %llu usize %llu fsname %s file %s\n",
 			    __func__, __LINE__,
-			    upl_valid_page(pl, cur_page),
 			    upl_dirty_page(pl, cur_page),
 			    cur_page, len, off,
 			    ap->a_f_offset, ap->a_size, ap->a_flags,
@@ -2608,6 +2607,7 @@ norwlock:
 			cur_page++;
 			off += readlen;
 			vaddr += readlen;
+			len -= readlen;
 			continue;
 		}
 
@@ -2620,7 +2620,7 @@ norwlock:
 		} else {
 			bytes_read += readlen;
 		}
-			    cur_page++;
+		cur_page++;
 		off += readlen;
 		vaddr += readlen;
 		len -= readlen;
