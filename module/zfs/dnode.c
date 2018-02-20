@@ -176,10 +176,10 @@ dn_mtx_destroy(kmutex_t *mtx)
 		    mtx->file, mtx->line,
 		    mtx->func, mtx->state);
 		spl_backtrace("db_mtx_destroy vs held mutex");
-		int maxcount = 600;
+		int maxcount = 60000;
 		do {
 			void IODelay(unsigned microseconds);
-			IODelay(100);
+			IODelay(1);
 			maxcount--;
 			if (maxcount < 1) {
 				printf("ZFS: %s:%d TIMEOUT waiting for"
