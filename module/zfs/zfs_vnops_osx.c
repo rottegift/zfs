@@ -2577,14 +2577,39 @@ norwlock:
 	 * Fill pages with data from the file.
 	 */
 	uint64_t bytes_read = 0;
+	int cur_page = upl_offset / PAGE_SIZE;
+
+	upl_page_info_t *pl = ubc_upl_pageinfo(upl);
 
 	while (len > 0) {
-		uint64_t readlen;
-
-		readlen = MIN(PAGESIZE, len);
+		const uint64_t readlen = MIN(PAGESIZE, len);
 
 		dprintf("pagein from off 0x%llx len 0x%llx into address %p (len 0x%lx)\n",
 				off, readlen, vaddr, len);
+
+		if (upl_page_present(pl, cur_page)) {
+			printf("ZFS: %s:%d: PAGEIN, WARNING, skipping page present"
+			    " (valid? %d) (dirty? %d)"
+			    " at cur_page %d (cur len %lu, off %llu)"
+			    " a_f_offset %llu a_size %lu a_flags 0x%x"
+			    " a_pl_offset %u"
+			    " mapped? %d writable? %d"
+			    " zsize %llu usize %llu fsname %s file %s\n",
+			    __func__, __LINE__,
+			    upl_valid_page(pl, cur_page),
+			    upl_dirty_page(pl, cur_page),
+			    cur_page, len, off,
+			    ap->a_f_offset, ap->a_size, ap->a_flags,
+			    ap->a_pl_offset,
+			    spl_ubc_is_mapped(vp, NULL),
+			    spl_ubc_is_mapped_writable(vp),
+			    zp->z_size, ubc_getsize(vp),
+			    fsname, fname);
+			cur_page++;
+			off += readlen;
+			vaddr += readlen;
+			continue;
+		}
 
 		error = dmu_read(zp->z_zfsvfs->z_os, zp->z_id, off, readlen,
 		    (void *)vaddr, DMU_READ_PREFETCH);
@@ -2595,6 +2620,7 @@ norwlock:
 		} else {
 			bytes_read += readlen;
 		}
+			    cur_page++;
 		off += readlen;
 		vaddr += readlen;
 		len -= readlen;
