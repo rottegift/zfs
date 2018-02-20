@@ -161,6 +161,7 @@ dnode_cons(void *arg, void *unused, int kmflag)
 	return (0);
 }
 
+#if defined(__APPLE__) && defined(_KERNEL)
 static void
 dn_mtx_destroy(kmutex_t *mtx)
 {
@@ -195,6 +196,7 @@ dn_mtx_destroy(kmutex_t *mtx)
 	}
 	mutex_destroy(mtx);
 }
+#endif
 
 /* ARGSUSED */
 static void
@@ -204,7 +206,7 @@ dnode_dest(void *arg, void *unused)
 	dnode_t *dn = arg;
 
 	rw_destroy(&dn->dn_struct_rwlock);
-#ifndef __APPLE__
+#if !defined(__APPLE__) || !defined(_KERNEL)
 	mutex_destroy(&dn->dn_mtx);
 #else
         /* releasing held mutex can happen here */
