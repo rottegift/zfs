@@ -2561,7 +2561,7 @@ norwlock:
 	 */
 
 	if (spl_ubc_is_mapped_writable(vp)) {
-		printf("ZFS: %s:%d: PAGEIN mmapped-write file"
+		dprintf("ZFS: %s:%d: PAGEIN mmapped-write file"
 		    " a_f_offset %llu a_size %lu a_flags 0x%x"
 		    " a_pl_offset (upl_offset) %d"
 		    " zsize %llu usize %llu zid %llu"
