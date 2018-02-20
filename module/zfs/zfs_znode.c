@@ -1740,13 +1740,15 @@ zfs_znode_free(znode_t *zp)
 	 */
 	for (unsigned int ctr = 0; ; ctr++) {
 		mutex_enter(&zp->z_range_lock);
-		if (zp->z_range_locks > 0
-		    && (ctr % 1000) == 0) {
-			printf("ZFS: %s:%d: waiting for z_range_locks (%d)"
-			    " to drain for zid %llu file %s (ctr %u)",
-			    __func__, __LINE__,
-			    zp->z_range_locks,
-			    zp->z_id, zp->z_name_cache, ctr);
+		if (zp->z_range_locks > 0) {
+			mutex_exit(&zp->z_range_lock);
+			if ((ctr % 1000) == 0) {
+				printf("ZFS: %s:%d: waiting for z_range_locks (%d)"
+				    " to drain for zid %llu file %s (ctr %u)",
+				    __func__, __LINE__,
+				    zp->z_range_locks,
+				    zp->z_id, zp->z_name_cache, ctr);
+			}
 			void IOSleep(unsigned milliseconds);
 			IOSleep(1);
 		} else {
