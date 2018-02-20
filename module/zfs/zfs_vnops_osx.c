@@ -2557,6 +2557,23 @@ norwlock:
 	}
 
 	/*
+	 * note if this is a mmapped-write pagein
+	 */
+
+	if (spl_ubc_is_mapped_writable(vp)) {
+		printf("ZFS: %s:%d: PAGEIN mmapped-write file"
+		    " a_f_offset %llu a_size %lu a_flags 0x%x"
+		    " a_pl_offset (upl_offset) %d"
+		    " zsize %llu usize %llu zid %llu"
+		    " fsname %s file %s\n",
+		    __func__, __LINE__,
+		    ap->a_f_offset, ap->a_size, ap->a_flags,
+		    ap->a_pl_offset,
+		    zp->z_size, ubc_getsize(vp), zp->z_id,
+		    fsname, fname);
+	}
+
+	/*
 	 * Fill pages with data from the file.
 	 */
 	uint64_t bytes_read = 0;
