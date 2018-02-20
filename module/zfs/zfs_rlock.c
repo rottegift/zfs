@@ -192,7 +192,7 @@ wait:
 		    __func__, __LINE__,
 		    new->r_caller, new->r_line,
 		    new->r_off, new->r_len,
-		    (zp) ? zp->z_name_cache : "(null)",
+		    (zp && POINTER_IS_VALID(zp)) ? zp->z_name_cache : "(null)",
 		    (rl_caller != NULL) ? rl_caller : "(null)",
 		    (rl) ? rl->r_line : 0,
 		    (rl) ? rl->r_len : 0,
@@ -409,7 +409,7 @@ retry:
 			    __func__, __LINE__,
 			    new->r_caller, new->r_line,
 			    new->r_off, new->r_len,
-			    (zp) ? zp->z_name_cache : "(null)",
+			    (zp && POINTER_IS_VALID(zp)) ? zp->z_name_cache : "(null)",
 			    (prev && prev->r_caller) ? prev->r_caller : "(null)",
 			    (prev) ? prev->r_line : 0,
 			    (prev) ? prev->r_off : 0,
@@ -444,7 +444,7 @@ retry:
 			    __func__, __LINE__,
 			    new->r_caller, new->r_line,
 			    new->r_off, new->r_len,
-			    (zp) ? zp->z_name_cache : "(null)",
+			    (zp && POINTER_IS_VALID(zp)) ? zp->z_name_cache : "(null)",
 			    (next && next->r_caller) ? next->r_caller : "(null)",
 			    (next) ? next->r_line : 0,
 			    (next) ? next->r_off : 0,
@@ -657,7 +657,7 @@ zfs_range_unlock(rl_t *rl)
 	rl_t *free_rl;
 	boolean_t mutex_entered = B_FALSE;
 
-	if (zp) {
+	if (zp && POINTER_IS_VALID(zp)) {
 		mutex_enter(&zp->z_range_lock);
 		mutex_entered = B_TRUE;
 		ASSERT3S(zp->z_range_locks, >, 0);
@@ -687,7 +687,7 @@ zfs_range_unlock(rl_t *rl)
 	}
 	rl->r_caller = NULL;
 
-	if (zp) {
+	if (zp && POINTER_IS_VALID(zp)) {
 		mutex_exit(&zp->z_range_lock);
 		mutex_entered = B_FALSE;
 	}
@@ -702,7 +702,7 @@ zfs_range_unlock(rl_t *rl)
 
 	list_destroy(&free_list);
 
-	if (zp)
+	if (zp && POINTER_IS_VALID(zp))
 		zp->z_range_locks--;
 }
 
@@ -716,6 +716,7 @@ zfs_range_reduce(rl_t *rl, uint64_t off, uint64_t len)
 {
 	znode_t *zp = rl->r_zp;
 
+	ASSERT(POINTER_IS_VALID(zp));
 	ASSERT3S(zp->z_range_locks, >, 0);
 
 	/* Ensure there are no other locks */
