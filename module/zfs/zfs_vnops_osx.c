@@ -4966,7 +4966,7 @@ skip_lock_acquisition:
 					    " upl->size %u"
 					    " zid %llu fs %s file %s\n",
 					    __func__, __LINE__, interim_commit_ret,
-					    commit_from_page, pg_index,
+					    commit_from_page, page_past_end_of_range,
 					    commit_from_byte, commit_size,
 					    ap->a_f_offset, ap->a_size, ap->a_flags,
 					    spl_ubc_is_mapped(vp, NULL),
@@ -4995,7 +4995,7 @@ skip_lock_acquisition:
 				    " mappedwrite? %d"
 				    " usize %llu zid %llu fs %s file %s\n",
 				    __func__, __LINE__,
-				    abort_from_page, pg_index,
+				    abort_from_page, page_past_end_of_range,
 				    start_of_range, end_of_range, abort_size,
 				    ap->a_f_offset, ap->a_size, ap->a_flags,
 				    spl_ubc_is_mapped_writable(vp),
