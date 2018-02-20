@@ -161,6 +161,41 @@ dnode_cons(void *arg, void *unused, int kmflag)
 	return (0);
 }
 
+static void
+dn_mtx_destroy(kmutex_t *mtx)
+{
+	// check to see if it's held, and if it is, dump a stack
+	// with void spl_backtrace(char *thesignal)
+	if (mtx->m_owner != NULL
+	    || mtx->state == ENTER
+	    || mtx->state == TRYENTER) {
+		printf("ZFS: %s:%d: asked to destroy held mutex! waiting!"
+		    " mtx->file %s mtx->line %d"
+                    " mtx->func %s mtx->state 0x%x\n",
+		    __func__, __LINE__,
+		    mtx->file, mtx->line,
+		    mtx->func, mtx->state);
+		spl_backtrace("db_mtx_destroy vs held mutex");
+		int maxcount = 600;
+		do {
+			void IODelay(unsigned microseconds);
+			IODelay(100);
+			maxcount--;
+			if (maxcount < 1) {
+				printf("ZFS: %s:%d TIMEOUT waiting for"
+				    " mutex to become unheld"
+				    " mtx->file %s mtx->line %d"
+				    " mtx->func %s mtx->state 0x%x\n",
+				    __func__, __LINE__,
+				    mtx->file, mtx->line,
+				    mtx->func, mtx->state);
+				break;
+			}
+		} while (mtx->state == ENTER || mtx->state == TRYENTER || mtx->m_owner != NULL);
+	}
+	mutex_destroy(mtx);
+}
+
 /* ARGSUSED */
 static void
 dnode_dest(void *arg, void *unused)
@@ -169,7 +204,12 @@ dnode_dest(void *arg, void *unused)
 	dnode_t *dn = arg;
 
 	rw_destroy(&dn->dn_struct_rwlock);
+#ifndef __APPLE__
 	mutex_destroy(&dn->dn_mtx);
+#else
+        /* releasing held mutex can happen here */
+	dn_mtx_destroy(&dn->dn_mtx);
+#endif
 	mutex_destroy(&dn->dn_dbufs_mtx);
 	cv_destroy(&dn->dn_notxholds);
 	refcount_destroy(&dn->dn_holds);
