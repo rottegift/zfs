@@ -4596,11 +4596,18 @@ already_acquired_locks:
 		extern int zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl);
 		error = zfs_write_maybe_extend_file(zp, ap->a_f_offset, ap->a_size, rl);
 		if (error) {
+			printf("ZFS: %s:%d: (extend fail) returning error %d"
+			    " a_f_offset %llu a_size %lu zsize %llu usize %llu"
+			    " fs %s file %s\n",
+			    __func__, __LINE__, error,
+			    ap->a_f_offset, ap->a_size, zp->z_size, ubc_getsize(vp),
+			    fsname, fname);
+			/* on error, zfs_write_maybe_extend_file does zfs_range_unlock */
+			rl = NULL;
+			drop_rl = B_FALSE;
+			tsd_set(rl_key, (rl_t *)tsd_rl_at_entry);
 			ASSERT3P(upl, ==, NULL);
 			ZFS_EXIT(zfsvfs);
-			printf("ZFS: %s:%d: (extend fail) returning error %d"
-			    " fs %s file %s\n",
-			    __func__, __LINE__, error, fsname, fname);
 			goto pageout_done;
 		}
 	}
