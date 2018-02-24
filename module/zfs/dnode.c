@@ -176,7 +176,8 @@ dn_mtx_destroy(kmutex_t *mtx)
 		    __func__, __LINE__,
 		    mtx->file, mtx->line,
 		    mtx->func, mtx->state);
-		spl_backtrace("db_mtx_destroy vs held mutex");
+		//spl_backtrace seems to wreck system :(
+		//spl_backtrace("db_mtx_destroy vs held mutex");
 		int maxcount = 60000000;
 		do {
 			void IODelay(unsigned microseconds);
