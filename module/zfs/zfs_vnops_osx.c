@@ -156,6 +156,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_want_lock;
 	kstat_named_t pageoutv2_upl_iosync;
 	kstat_named_t pageoutv2_upl_iosync_skipped;
+	kstat_named_t pageoutv2_upl_precious_tails;
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
 	kstat_named_t pageoutv2_absent_pages_seen;
@@ -195,6 +196,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_want_lock",               KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync",              KSTAT_DATA_UINT64 },
 	{ "pageoutv2_upl_iosync_skipped",      KSTAT_DATA_UINT64 },
+	{ "pageoutv2_upl_precious_tails",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_absent_pages_seen",       KSTAT_DATA_UINT64 },
@@ -4814,7 +4816,7 @@ skip_lock_acquisition:
 					    fsname, fname);
 					upl_valid_pages_in_tail++;
 				} else {
-					printf("ZFS: %s:%d: mapped (writable? %d) file"
+					dprintf("ZFS: %s:%d: mapped (writable? %d) file"
 					    " valid but not dirty page, breaking"
 					    " at page_index %d of a_f_offset %llu a_size %lu"
 					    " a_flags 0x%x zsize %llu usize %llu"
@@ -4824,7 +4826,7 @@ skip_lock_acquisition:
 					    page_index, ap->a_f_offset, ap->a_size,
 					    ap->a_flags, zp->z_size, ubc_getsize(vp),
 					    zp->z_id, fsname, fname);
-					upl_valid_pages_in_tail++;
+					VNOPS_OSX_STAT_BUMP(pageoutv2_upl_precious_tails);
 					break;
 				}
 			}
@@ -5166,7 +5168,7 @@ skip_lock_acquisition:
                         ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			// this doesn't happen often at all, so let's see what the cause is
-			printf("ZFS: %s:%d counting precious (valid-but-not-dirty) upl bytes"
+			dprintf("ZFS: %s:%d counting precious (valid-but-not-dirty) upl bytes"
 			    " [%lld..%lld] (%lld pages) of file bytes [%lld..%lld] (%d pages)"
 			    " fs %s file %s\n", __func__, __LINE__,
 			    start_of_range, end_of_range, pages_in_range,
