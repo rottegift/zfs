@@ -4802,24 +4802,22 @@ skip_lock_acquisition:
 			if (upl_dirty_page(pl, page_index))
 				upl_dirty_pages_after_boundary++;
 			continue;
-		}
-		if (upl_dirty_page(pl, page_index)) {
+		} else 	if (upl_dirty_page(pl, page_index)) {
+			break;
+		} else 	if (upl_valid_page(pl, page_index)) {
+			dprintf("ZFS: %s:%d: mapped (writable? %d) file"
+			    " valid but not dirty page, breaking"
+			    " at page_index %d of a_f_offset %llu a_size %lu"
+			    " a_flags 0x%x zsize %llu usize %llu"
+			    " zid %llu fsname %s file %s\n",
+			    __func__, __LINE__,
+			    spl_ubc_is_mapped_writable(vp),
+			    page_index, ap->a_f_offset, ap->a_size,
+			    ap->a_flags, zp->z_size, ubc_getsize(vp),
+			    zp->z_id, fsname, fname);
+			VNOPS_OSX_STAT_BUMP(pageoutv2_upl_precious_tails);
 			break;
 		} else {
-			if (upl_valid_page(pl, page_index)) {
-					dprintf("ZFS: %s:%d: mapped (writable? %d) file"
-					    " valid but not dirty page, breaking"
-					    " at page_index %d of a_f_offset %llu a_size %lu"
-					    " a_flags 0x%x zsize %llu usize %llu"
-					    " zid %llu fsname %s file %s\n",
-					    __func__, __LINE__,
-					    spl_ubc_is_mapped_writable(vp),
-					    page_index, ap->a_f_offset, ap->a_size,
-					    ap->a_flags, zp->z_size, ubc_getsize(vp),
-					    zp->z_id, fsname, fname);
-					VNOPS_OSX_STAT_BUMP(pageoutv2_upl_precious_tails);
-					break;
-			}
 			upl_pages_dismissed++;
 		}
 	}
@@ -4886,9 +4884,10 @@ skip_lock_acquisition:
 		ASSERT3S(lowest_page_dismissed, >, 0);
 		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
 		const int end_of_tail = ap->a_size;
-		printf("ZFS: %s:%d: mapped file (writable? %d) trimmable tail"
+		printf("ZFS: %s:%d: (mapped? %d writable? %d) trimmable tail"
 		    " [%d..%d] zid %llu fs %s file %s\n",
 		    __func__, __LINE__,
+		    spl_ubc_is_mapped(vp, NULL),
 		    spl_ubc_is_mapped_writable(vp),
 		    start_of_tail, end_of_tail,
 		    zp->z_id, fsname, fname);
@@ -5307,7 +5306,7 @@ skip_lock_acquisition:
 			pageout_op->state = "final commit";
 			pageout_op->line = __LINE__;
 			const int final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
-			off_t commit_size = (off_t)ap->a_size - start_of_tail;
+			off_t commit_size = start_of_tail;
 			if (commit_from_page > 0)
 				commit_size -= commit_from_page * PAGE_SIZE_64;
 			ASSERT3S(commit_size, >=, PAGE_SIZE_64);
@@ -5336,7 +5335,7 @@ skip_lock_acquisition:
 			pageout_op->line = __LINE__;
 			const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
 			const off_t start_of_tail = lowest_page_dismissed * PAGE_SIZE_64;
-			off_t abort_size = (off_t)ap->a_size - start_of_tail;
+			off_t abort_size = start_of_tail;
 			if (commit_from_page > 0)
 				abort_size -= commit_from_page * PAGE_SIZE_64;
 			ASSERT3S(abort_size, >=, PAGE_SIZE_64);
