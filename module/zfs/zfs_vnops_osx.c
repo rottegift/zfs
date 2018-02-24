@@ -4894,7 +4894,13 @@ skip_lock_acquisition:
 		int abort_flags = 0;
 		int abort_tail_ret = ubc_upl_abort_range(upl,
 		    start_of_tail, end_of_tail, abort_flags);
-		if (abort_tail_ret != KERN_SUCCESS) {
+		if (abort_tail_ret != KERN_SUCCESS
+		    && abort_tail_ret != KERN_FAILURE) {
+			/*
+			 * KERN_FAILURE is almost certainly because
+			 * our tail has already been emptied out by
+			 * the kernel, so we can ignore it
+			 */
 			printf("ZFS: %s:%d ERROR %d aborting tail of UPL"
 			    " [%d..%d] a_f_offset %llu a_size %lu"
 			    "  zid %llu fsname %s fname %s\n",
@@ -4905,14 +4911,15 @@ skip_lock_acquisition:
 			error = abort_tail_ret;
 			int abort_tail_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
 			ASSERT3S(abort_tail_failure_abort, ==, KERN_SUCCESS);
+		} else {
+			printf("ZFS: %s:%d: (ret %d) %d pages [%d..%d] trimmed from tail of %d page UPL"
+			    " (valid pages in tail %d)[%lld..%lld] fs %s file %s (mapped? %d write? %d)\n",
+			    __func__, __LINE__, abort_tail_ret, upl_pages_dismissed,
+			    start_of_tail, end_of_tail, pages_in_upl,
+			    upl_valid_pages_in_tail,
+			    f_start_of_upl, f_end_of_upl, fsname, fname,
+			    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp));
 		}
-		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
-		    " (valid pages in tail %d)[%lld..%lld] fs %s file %s (mapped? %d write? %d)\n",
-		    __func__, __LINE__, upl_pages_dismissed,
-		    start_of_tail, end_of_tail, pages_in_upl,
-		    upl_valid_pages_in_tail,
-		    f_start_of_upl, f_end_of_upl, fsname, fname,
-		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp));
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
 
