@@ -4805,13 +4805,28 @@ skip_lock_acquisition:
 			break;
 		} else {
 			if (upl_valid_page(pl, page_index)) {
-				dprintf("ZFS: %s:%d: page index %d (of %d) not dirty but"
-				    " valid, dismissing anyway XXX, [%lld..%lld] in"
-				    " filesize %lld fs %s file %s\n",
-				    __func__, __LINE__, page_index, pages_in_upl - 1,
-				    f_start_of_upl, f_end_of_upl, zp->z_size,
-				    fsname, fname);
-				upl_valid_pages_in_tail++;
+				if (!spl_ubc_is_mapped(vp, NULL)) {
+					dprintf("ZFS: %s:%d: page index %d (of %d) not dirty but"
+					    " valid, dismissing anyway XXX, [%lld..%lld] in"
+					    " filesize %lld fs %s file %s\n",
+					    __func__, __LINE__, page_index, pages_in_upl - 1,
+					    f_start_of_upl, f_end_of_upl, zp->z_size,
+					    fsname, fname);
+					upl_valid_pages_in_tail++;
+				} else {
+					printf("ZFS: %s:%d: mapped (writable? %d) file"
+					    " valid but not dirty page, breaking"
+					    " at page_index %d of a_f_offset %llu a_size %lu"
+					    " a_flags 0x%x zsize %llu usize %llu"
+					    " zid %llu fsname %s file %s\n",
+					    __func__, __LINE__,
+					    spl_ubc_is_mapped_writable(vp),
+					    page_index, ap->a_f_offset, ap->a_size,
+					    ap->a_flags, zp->z_size, ubc_getsize(vp),
+					    zp->z_id, fsname, fname);
+					upl_valid_pages_in_tail++;
+					break;
+				}
 			}
 			upl_pages_dismissed++;
 		}
