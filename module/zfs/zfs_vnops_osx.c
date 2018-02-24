@@ -2518,7 +2518,6 @@ norwlock:
 
 	dprintf("vaddr %p with upl_off 0x%x\n", vaddr, upl_offset);
 	vaddr += upl_offset;
-	ASSERT3S(len, >, upl_offset);
 	ASSERT3U(ubc_getsize(vp), ==, zp->z_size);
 
 	/*
