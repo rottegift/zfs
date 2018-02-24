@@ -4845,21 +4845,43 @@ skip_lock_acquisition:
 			if (unmapret == KERN_SUCCESS)
 				v_addr = 0;
 		}
-		int commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
-		if (ISSET(a_flags, UPL_MSYNC) && !spl_ubc_is_mapped(vp, NULL))
-			commit_flags |= UPL_COMMIT_SPECULATE;
-		int commit_inactivate = ubc_upl_commit_range(upl, 0, ap->a_size,
-		    commit_flags);
-		if (commit_inactivate != KERN_SUCCESS) {
-			printf("ZFS: %s:%d: ERROR %d committing whole UPL as a range"
-			    " 0..%lu at file offset %llu zid %llu fs %s file %s\n",
-			    __func__, __LINE__,
-			    commit_inactivate,
-			    ap->a_size, ap->a_f_offset,
-			    zp->z_id, fsname, fname);
-			error = commit_inactivate;
-			int commit_inactivate_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
-			ASSERT3S(commit_inactivate_failure_abort, ==, KERN_SUCCESS);
+		if (!spl_ubc_is_mapped(vp, NULL)) {
+			int commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
+			if (ISSET(a_flags, UPL_MSYNC) && !spl_ubc_is_mapped(vp, NULL))
+				commit_flags |= UPL_COMMIT_SPECULATE;
+			int commit_inactivate = ubc_upl_commit_range(upl, 0, ap->a_size,
+			    commit_flags);
+			if (commit_inactivate != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: ERROR %d committing whole UPL as a range"
+				    " 0..%lu at file offset %llu zid %llu fs %s file %s\n",
+				    __func__, __LINE__,
+				    commit_inactivate,
+				    ap->a_size, ap->a_f_offset,
+				    zp->z_id, fsname, fname);
+				error = commit_inactivate;
+				int commit_inactivate_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
+				ASSERT3S(commit_inactivate_failure_abort, ==, KERN_SUCCESS);
+			}
+		} else {
+			int abort_flags = 0;
+			int abort_empty_ret = ubc_upl_abort_range(upl, 0, ap->a_size,
+			    abort_flags);
+			if (abort_empty_ret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: ERROR %d aborting whole UPL of mapped file"
+				    " as a range 0..%lu at file offset %llu zid %llu fs %s file %s\n",
+				    __func__, __LINE__, abort_empty_ret,
+				    ap->a_size, ap->a_f_offset, zp->z_id,
+				    fsname, fname);
+				error = abort_empty_ret;
+				int abort_empty_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
+				ASSERT3S(abort_empty_failure_abort, ==, KERN_SUCCESS);
+			} else {
+				printf("ZFS: %s:%d successfullly aborted whole UPL of mapped file"
+				    " as a range 0..%lu at file offset %llu zid %llu fs %s file %s\n",
+				    __func__, __LINE__, ap->a_size,
+				    ap->a_f_offset, zp->z_id,
+				    fsname, fname);
+			}
 		}
 		upl = NULL;
 		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
@@ -4873,12 +4895,36 @@ skip_lock_acquisition:
 		ASSERT3S(lowest_page_dismissed, >, 0);
 		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
 		const int end_of_tail = ap->a_size;
+		if (spl_ubc_is_mapped(vp, NULL)) {
+			printf("ZFS: %s:%d: mapped file (writable? %d) trimmable tail"
+			    " [%d..%d] zid %llu fs %s file %s\n",
+			    __func__, __LINE__,
+			    spl_ubc_is_mapped_writable(vp),
+			    start_of_tail, end_of_tail,
+			    zp->z_id, fsname, fname);
+			int abort_flags = 0;
+			int abort_tail_ret = ubc_upl_abort_range(upl,
+			    start_of_tail, end_of_tail, abort_flags);
+			if (abort_tail_ret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d ERROR %d aborting tail of UPL"
+				    " [%d..%d] a_f_offset %llu a_size %lu"
+				    "  zid %llu fsname %s fname %s\n",
+				    __func__, __LINE__, abort_tail_ret,
+				    start_of_tail, end_of_tail,
+				    ap->a_f_offset, ap->a_size,
+				    zp->z_id, fsname, fname);
+				error = abort_tail_ret;
+				int abort_tail_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
+				ASSERT3S(abort_tail_failure_abort, ==, KERN_SUCCESS);
+			}
+		}
 		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
-		    " (valid pages in tail %d)[%lld..%lld] fs %s file %s\n",
+		    " (valid pages in tail %d)[%lld..%lld] fs %s file %s (mapped? %d write? %d)\n",
 		    __func__, __LINE__, upl_pages_dismissed,
 		    start_of_tail, end_of_tail, pages_in_upl,
 		    upl_valid_pages_in_tail,
-		    f_start_of_upl, f_end_of_upl, fsname, fname);
+		    f_start_of_upl, f_end_of_upl, fsname, fname,
+		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp));
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 	}
 
