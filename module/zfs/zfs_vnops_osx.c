@@ -4876,11 +4876,13 @@ skip_lock_acquisition:
 				int abort_empty_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
 				ASSERT3S(abort_empty_failure_abort, ==, KERN_SUCCESS);
 			} else {
-				printf("ZFS: %s:%d successfullly aborted whole UPL of mapped file"
-				    " as a range 0..%lu at file offset %llu zid %llu fs %s file %s\n",
-				    __func__, __LINE__, ap->a_size,
-				    ap->a_f_offset, zp->z_id,
-				    fsname, fname);
+				if (!ISSET(a_flags, UPL_MSYNC)) {
+					printf("ZFS: %s:%d successfullly aborted whole UPL of mapped file (PAGEOUT)"
+					    " as a range 0..%lu at file offset %llu zid %llu fs %s file %s\n",
+					    __func__, __LINE__, ap->a_size,
+					    ap->a_f_offset, zp->z_id,
+					    fsname, fname);
+				}
 			}
 		}
 		upl = NULL;
