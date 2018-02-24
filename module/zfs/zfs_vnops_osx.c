@@ -4807,15 +4807,6 @@ skip_lock_acquisition:
 			break;
 		} else {
 			if (upl_valid_page(pl, page_index)) {
-				if (!spl_ubc_is_mapped(vp, NULL)) {
-					dprintf("ZFS: %s:%d: page index %d (of %d) not dirty but"
-					    " valid, dismissing anyway XXX, [%lld..%lld] in"
-					    " filesize %lld fs %s file %s\n",
-					    __func__, __LINE__, page_index, pages_in_upl - 1,
-					    f_start_of_upl, f_end_of_upl, zp->z_size,
-					    fsname, fname);
-					upl_valid_pages_in_tail++;
-				} else {
 					dprintf("ZFS: %s:%d: mapped (writable? %d) file"
 					    " valid but not dirty page, breaking"
 					    " at page_index %d of a_f_offset %llu a_size %lu"
@@ -4828,7 +4819,6 @@ skip_lock_acquisition:
 					    zp->z_id, fsname, fname);
 					VNOPS_OSX_STAT_BUMP(pageoutv2_upl_precious_tails);
 					break;
-				}
 			}
 			upl_pages_dismissed++;
 		}
@@ -4862,44 +4852,26 @@ skip_lock_acquisition:
 			if (unmapret == KERN_SUCCESS)
 				v_addr = 0;
 		}
-		if (!spl_ubc_is_mapped(vp, NULL)) {
-			int commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
-			if (ISSET(a_flags, UPL_MSYNC) && !spl_ubc_is_mapped(vp, NULL))
-				commit_flags |= UPL_COMMIT_SPECULATE;
-			int commit_inactivate = ubc_upl_commit_range(upl, 0, ap->a_size,
-			    commit_flags);
-			if (commit_inactivate != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: ERROR %d committing whole UPL as a range"
-				    " 0..%lu at file offset %llu zid %llu fs %s file %s\n",
-				    __func__, __LINE__,
-				    commit_inactivate,
-				    ap->a_size, ap->a_f_offset,
-				    zp->z_id, fsname, fname);
-				error = commit_inactivate;
-				int commit_inactivate_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
-				ASSERT3S(commit_inactivate_failure_abort, ==, KERN_SUCCESS);
-			}
+		const int abort_empty_flags = UPL_ABORT_FREE_ON_EMPTY;
+		const int abort_empty_ret = ubc_upl_abort_range(upl, 0, ap->a_size,
+		    abort_empty_flags);
+		if (abort_empty_ret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d: ERROR %d aborting whole UPL of mapped file"
+			    " as a range 0..%lu at file offset %llu zid %llu fs %s file %s\n",
+			    __func__, __LINE__, abort_empty_ret,
+			    ap->a_size, ap->a_f_offset, zp->z_id,
+			    fsname, fname);
+			error = abort_empty_ret;
+			const int abort_empty_failure_abort =
+			    ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
+			ASSERT3S(abort_empty_failure_abort, ==, KERN_SUCCESS);
 		} else {
-			int abort_flags = UPL_ABORT_FREE_ON_EMPTY;
-			int abort_empty_ret = ubc_upl_abort_range(upl, 0, ap->a_size,
-			    abort_flags);
-			if (abort_empty_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d: ERROR %d aborting whole UPL of mapped file"
+			if (!ISSET(a_flags, UPL_MSYNC)) {
+				printf("ZFS: %s:%d successfullly aborted whole UPL of mapped file (PAGEOUT)"
 				    " as a range 0..%lu at file offset %llu zid %llu fs %s file %s\n",
-				    __func__, __LINE__, abort_empty_ret,
-				    ap->a_size, ap->a_f_offset, zp->z_id,
+				    __func__, __LINE__, ap->a_size,
+				    ap->a_f_offset, zp->z_id,
 				    fsname, fname);
-				error = abort_empty_ret;
-				int abort_empty_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
-				ASSERT3S(abort_empty_failure_abort, ==, KERN_SUCCESS);
-			} else {
-				if (!ISSET(a_flags, UPL_MSYNC)) {
-					printf("ZFS: %s:%d successfullly aborted whole UPL of mapped file (PAGEOUT)"
-					    " as a range 0..%lu at file offset %llu zid %llu fs %s file %s\n",
-					    __func__, __LINE__, ap->a_size,
-					    ap->a_f_offset, zp->z_id,
-					    fsname, fname);
-				}
 			}
 		}
 		upl = NULL;
@@ -4914,28 +4886,26 @@ skip_lock_acquisition:
 		ASSERT3S(lowest_page_dismissed, >, 0);
 		const int start_of_tail = lowest_page_dismissed * PAGE_SIZE;
 		const int end_of_tail = ap->a_size;
-		if (spl_ubc_is_mapped(vp, NULL)) {
-			printf("ZFS: %s:%d: mapped file (writable? %d) trimmable tail"
-			    " [%d..%d] zid %llu fs %s file %s\n",
-			    __func__, __LINE__,
-			    spl_ubc_is_mapped_writable(vp),
+		printf("ZFS: %s:%d: mapped file (writable? %d) trimmable tail"
+		    " [%d..%d] zid %llu fs %s file %s\n",
+		    __func__, __LINE__,
+		    spl_ubc_is_mapped_writable(vp),
+		    start_of_tail, end_of_tail,
+		    zp->z_id, fsname, fname);
+		int abort_flags = 0;
+		int abort_tail_ret = ubc_upl_abort_range(upl,
+		    start_of_tail, end_of_tail, abort_flags);
+		if (abort_tail_ret != KERN_SUCCESS) {
+			printf("ZFS: %s:%d ERROR %d aborting tail of UPL"
+			    " [%d..%d] a_f_offset %llu a_size %lu"
+			    "  zid %llu fsname %s fname %s\n",
+			    __func__, __LINE__, abort_tail_ret,
 			    start_of_tail, end_of_tail,
+			    ap->a_f_offset, ap->a_size,
 			    zp->z_id, fsname, fname);
-			int abort_flags = 0;
-			int abort_tail_ret = ubc_upl_abort_range(upl,
-			    start_of_tail, end_of_tail, abort_flags);
-			if (abort_tail_ret != KERN_SUCCESS) {
-				printf("ZFS: %s:%d ERROR %d aborting tail of UPL"
-				    " [%d..%d] a_f_offset %llu a_size %lu"
-				    "  zid %llu fsname %s fname %s\n",
-				    __func__, __LINE__, abort_tail_ret,
-				    start_of_tail, end_of_tail,
-				    ap->a_f_offset, ap->a_size,
-				    zp->z_id, fsname, fname);
-				error = abort_tail_ret;
-				int abort_tail_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
-				ASSERT3S(abort_tail_failure_abort, ==, KERN_SUCCESS);
-			}
+			error = abort_tail_ret;
+			int abort_tail_failure_abort = ubc_upl_abort_commit_inactivate_failure(upl, UPL_ABORT_ERROR);
+			ASSERT3S(abort_tail_failure_abort, ==, KERN_SUCCESS);
 		}
 		printf("ZFS: %s:%d: %d pages [%d..%d] trimmed from tail of %d page UPL"
 		    " (valid pages in tail %d)[%lld..%lld] fs %s file %s (mapped? %d write? %d)\n",
@@ -5332,14 +5302,18 @@ skip_lock_acquisition:
 			commit = B_FALSE;
 		}
 		const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
-		const off_t start_of_tail = lowest_page_dismissed * PAGE_SIZE;
+		const off_t start_of_tail = lowest_page_dismissed * PAGE_SIZE_64;
 		if (commit == B_TRUE) {
 			pageout_op->state = "final commit";
 			pageout_op->line = __LINE__;
-			int final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
-			off_t commit_size = ap->a_size;
+			const int final_commit_flags = UPL_COMMIT_FREE_ON_EMPTY;
+			off_t commit_size = (off_t)ap->a_size - start_of_tail;
 			if (commit_from_page > 0)
 				commit_size -= commit_from_page * PAGE_SIZE_64;
+			ASSERT3S(commit_size, >=, PAGE_SIZE_64);
+			ASSERT3S(commit_size, <=, ap->a_size);
+			if (upl_pages_dismissed > 0)
+				ASSERT3S(commit_size, <, ap->a_size);
 			int final_commit_ret = ubc_upl_commit_range(upl,
 			    commit_from_page * PAGE_SIZE_64, commit_size, final_commit_flags);
 			if (final_commit_ret != KERN_SUCCESS) {
@@ -5360,9 +5334,15 @@ skip_lock_acquisition:
 		} else {
 			pageout_op->state = "final abort";
 			pageout_op->line = __LINE__;
-			off_t abort_size = ap->a_size;
+			const int lowest_page_dismissed = pages_in_upl - upl_pages_dismissed;
+			const off_t start_of_tail = lowest_page_dismissed * PAGE_SIZE_64;
+			off_t abort_size = (off_t)ap->a_size - start_of_tail;
 			if (commit_from_page > 0)
 				abort_size -= commit_from_page * PAGE_SIZE_64;
+			ASSERT3S(abort_size, >=, PAGE_SIZE_64);
+			ASSERT3S(abort_size, <=, ap->a_size);
+			if (upl_pages_dismissed > 0)
+				ASSERT3S(abort_size, <, ap->a_size);
 			int abort_flags = UPL_ABORT_FREE_ON_EMPTY;
 			if (error)
 				abort_flags |= UPL_ABORT_ERROR;
