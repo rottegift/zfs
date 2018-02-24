@@ -4878,7 +4878,7 @@ skip_lock_acquisition:
 		VNOPS_OSX_STAT_BUMP(pageoutv2_no_pages_valid);
 		VNOPS_OSX_STAT_INCR(pageoutv2_invalid_tail_pages, upl_pages_dismissed);
 		goto pageout_done;
-	} else if (upl_pages_dismissed > 0 && upl_valid_pages_in_tail > 0) {
+	} else if (upl_pages_dismissed > 0) {
 		pageout_op->line = __LINE__;
 		pageout_op->state = "dismissing UPL tail";
 		ASSERT3S(pages_in_upl, >, 1);
