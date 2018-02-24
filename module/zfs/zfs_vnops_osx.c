@@ -4863,7 +4863,7 @@ skip_lock_acquisition:
 				ASSERT3S(commit_inactivate_failure_abort, ==, KERN_SUCCESS);
 			}
 		} else {
-			int abort_flags = 0;
+			int abort_flags = UPL_ABORT_FREE_ON_EMPTY;
 			int abort_empty_ret = ubc_upl_abort_range(upl, 0, ap->a_size,
 			    abort_flags);
 			if (abort_empty_ret != KERN_SUCCESS) {
