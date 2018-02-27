@@ -123,6 +123,7 @@ typedef struct vnops_stats {
 	kstat_named_t fill_holes_rop_present_bytes_skipped;
 	kstat_named_t fill_holes_upl_valid_pages_skipped;
 	kstat_named_t fill_holes_upl_absent_pages_filled;
+	kstat_named_t safe_write_transactions;
 	kstat_named_t zfs_write_calls;
 	kstat_named_t zfs_write_low_mem_sleep;
 	kstat_named_t zfs_write_low_mem_wait;
@@ -153,6 +154,7 @@ static vnops_stats_t vnops_stats = {
 	{ "fill_holes_rop_present_bytes_skipped",        KSTAT_DATA_UINT64 },
 	{ "fill_holes_upl_valid_pages_skipped",          KSTAT_DATA_UINT64 },
 	{ "fill_holes_upl_absent_pages_filled",          KSTAT_DATA_UINT64 },
+	{ "safe_write_transactions",                     KSTAT_DATA_UINT64 },
 	{ "zfs_write_calls",                             KSTAT_DATA_UINT64 },
 	{ "zfs_write_low_mem_sleep",                     KSTAT_DATA_UINT64 },
 	{ "zfs_write_low_mem_wait",                      KSTAT_DATA_UINT64 },
@@ -1970,6 +1972,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 			    __func__, __LINE__, woff, start_resid,
 			    zp->z_blksz, zp->z_size,
 			    ubc_getsize(vp), zp->z_name_cache);
+			VNOPS_STAT_BUMP(safe_write_transactions);
 			dmu_tx_hold_write(tx, zp->z_id, 0, end);
 		}
 		zfs_sa_upgrade_txholds(tx, zp);
