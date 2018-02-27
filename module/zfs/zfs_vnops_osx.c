@@ -6060,7 +6060,7 @@ zfs_vnop_allocate(struct vnop_allocate_args *ap)
 	int err = 0;
 
 	ASSERT3P(zp, !=, NULL);
-	if (!zp) return ENODEV;
+	if (!POINTER_IS_VALID(zp) || !zp->z_sa_hdl) return ENODEV;
 
 	zfsvfs = zp->z_zfsvfs;
 
