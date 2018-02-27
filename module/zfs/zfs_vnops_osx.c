@@ -5031,18 +5031,19 @@ skip_lock_acquisition:
 			const off_t abort_from_byte = start_of_range;
 			const off_t abort_size = end_of_range - start_of_range;
 			const off_t abort_from_page = abort_from_byte / PAGE_SIZE_64;
-			printf("ZFS: %s:%d: interim abort for mapped file"
-			    " page index %lld - %lld"
-			    " UPL bytes %llu - %llu (numbytes: %llu)"
-			    " [args: %llu (st), %lu (sz) 0x%x (flags)]"
-			    " mappedwrite? %d"
-			    " usize %llu zid %llu fs %s file %s\n",
-			    __func__, __LINE__,
-			    abort_from_page, page_past_end_of_range,
-			    start_of_range, end_of_range, abort_size,
-			    ap->a_f_offset, ap->a_size, ap->a_flags,
-			    spl_ubc_is_mapped_writable(vp),
-			    ubc_getsize(vp), zp->z_id, fsname, fname);
+			if (spl_ubc_is_mapped_writable(vp)) {
+				printf("ZFS: %s:%d: interim abort for mapped file"
+				    " page index %lld - %lld"
+				    " UPL bytes %llu - %llu (numbytes: %llu)"
+				    " [args: %llu (st), %lu (sz) 0x%x (flags)]"
+				    " (mapped writable)"
+				    " usize %llu zid %llu fs %s file %s\n",
+				    __func__, __LINE__,
+				    abort_from_page, page_past_end_of_range,
+				    start_of_range, end_of_range, abort_size,
+				    ap->a_f_offset, ap->a_size, ap->a_flags,
+				    ubc_getsize(vp), zp->z_id, fsname, fname);
+			}
 			int interim_abort_ret = ubc_upl_abort_range(upl,
 			    abort_from_byte, abort_size, interim_abort_flags);
 			if (interim_abort_ret != KERN_SUCCESS) {
