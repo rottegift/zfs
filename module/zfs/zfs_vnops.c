@@ -1964,7 +1964,7 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 		if (dmu_write_is_safe(zp, woff, start_resid)) {
 			dmu_tx_hold_write(tx, zp->z_id, woff, start_resid);
 		} else {
-			printf("ZFS: %s:%d: write safety: woff %llu start_resid %llu"
+			dprintf("ZFS: %s:%d: write safety: woff %llu start_resid %llu"
 			    " z_blksz %u"
 			    " zsize %llu usize %llu file %s\n",
 			    __func__, __LINE__, woff, start_resid,
