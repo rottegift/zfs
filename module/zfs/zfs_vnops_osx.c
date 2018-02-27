@@ -2719,7 +2719,7 @@ inline static void
 inc_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 {
 	ASSERT3P(zp, !=, NULL);
-	if (!zp) {
+	if (!zp || !POINTER_IS_VALID(zp)) {
 		printf("ZFS: error %s:%d: zp is null!\n", __func__, __LINE__);
 		return;
 	}
@@ -2745,7 +2745,7 @@ inline static void
 dec_z_in_pager_op(znode_t *zp, const char *fsname, const char *fname)
 {
 	ASSERT3P(zp, !=, NULL);
-	if (!zp) {
+	if (!zp || !POINTER_IS_VALID(zp)) {
 		dprintf("ZFS: error %s:%d: zp is null!\n", __func__, __LINE__);
 		return;
 	}
@@ -3858,7 +3858,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 	/* Short-circuit ZFS_ENTER_NOERROR */
-	if (!zp || !zp->z_zfsvfs || !zp->z_sa_hdl) {
+	if (!zp || !POINTER_IS_VALID(zp) || !zp->z_zfsvfs || !zp->z_sa_hdl) {
 		printf("ZFS: vnop_pageout: null zp or zfsvfs\n");
 		zp->z_in_pager_op--;
 		ASSERT3S(zp->z_in_pager_op, >=, 0);
@@ -3889,7 +3889,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	 * ZFS_ENTER_NOERROR and have to wait, we can cause other
 	 * threads to block on vfs activities.
 	 */
-	if (zp && zp->z_sa_hdl &&
+	if (POINTER_IS_VALID(zp) && zp->z_sa_hdl &&
 	    (rw_write_held(&zp->z_map_lock) || zp->z_in_pager_op == 1)) {
 		/* no collision, or we are re-entering, but whine about underflow */
 		if (zp->z_in_pager_op != 1)
@@ -3897,11 +3897,12 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 			    __func__, __LINE__, zp->z_in_pager_op,
 			    rw_write_held(&zp->z_map_lock), zp->z_name_cache);
 	} else {
-		if (zp) {
+		if (POINTER_IS_VALID(zp)) {
 			ASSERT3P(zp->z_sa_hdl, !=, NULL);
 			ASSERT3S(zp->z_in_pager_op, ==, 1);
 		}
-		if (zp && zp->z_sa_hdl && !rw_write_held(&zp->z_map_lock) && tsd_get(rl_key) == NULL) {
+		if (POINTER_IS_VALID(zp)
+		    && zp->z_sa_hdl && !rw_write_held(&zp->z_map_lock) && tsd_get(rl_key) == NULL) {
 			/*
 			 * since 7f288ae22df26 this is a userland msync(2), so
 			 * we can recover if we can get an RL and z_map_lock
@@ -3918,14 +3919,14 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 		/* spin, mainly waiting for z_in_pager_op to drop to 0, or for us to grab the lock
 		 * if we do not already have it.  (is this necessary?  probably not) */
 		boolean_t lock_got = B_FALSE;
-		while (zp && zp->z_sa_hdl
+		while (POINTER_IS_VALID(zp) && zp->z_sa_hdl
 		    && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted
 		    && zp->z_in_pager_op > 1
 		    && !rw_write_held(&zp->z_map_lock)) {
 			extern void IOSleep(unsigned milliseconds);
 			IOSleep(1);
 			VNOPS_OSX_STAT_BUMP(pageoutv2_spin_sleeps);
-			if (zp && (zp->z_size <= ap->a_f_offset)) {
+			if (POINTER_IS_VALID(zp) && (zp->z_size <= ap->a_f_offset)) {
 				/* probably truncated, but we can deal with that below */
 				printf("ZFS: %s:%d: BREAK (in_pager_op %d)"
 				    " usize %llu; zsize %llu < %llu ap->a_f_offset, file %s\n",
@@ -3941,7 +3942,7 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	}
 
 start_3614_case:
-	if (zp && zp->z_sa_hdl) {
+	if (POINTER_IS_VALID(zp) && zp->z_sa_hdl) {
 		if (zp && zp->z_sa_hdl && zp->z_zfsvfs && !zp->z_zfsvfs->z_unmounted && zp->z_zfsvfs->z_vfs) {
 			inc_z_in_pager_op(zp,
 			    vfs_statfs(zp->z_zfsvfs->z_vfs)->f_mntfromname,
@@ -5624,7 +5625,7 @@ zfs_vnop_mmap(struct vnop_mmap_args *ap)
 
 	//DECLARE_CRED_AND_CONTEXT(ap);
 
-	if (!zp) return ENODEV;
+	if (!zp || !POINTER_IS_VALID(zp)) return ENODEV;
 
 	zfsvfs = zp->z_zfsvfs;
 
@@ -5797,7 +5798,7 @@ zfs_vnop_inactive(struct vnop_inactive_args *ap)
 
 	dprintf("vnop_inactive: zp %p vp %p type %u\n", zp, vp, vnode_vtype(vp));
 
-	if (!zp) return 0; /* zfs_remove will clear it in fastpath */
+	if (!zp || !POINTER_IS_VALID(zp)) return 0; /* zfs_remove will clear it in fastpath */
 
 	zfsvfs = zp->z_zfsvfs;
 
@@ -5882,7 +5883,7 @@ zfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	ASSERT3P(zp, !=, NULL);
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
 	dprintf("+vnop_reclaim zp %p/%p type %d\n", zp, vp, vnode_vtype(vp));
-	if (!zp) goto out;
+	if (!zp || !POINTER_IS_VALID(zp)) goto out;
 
 
 	ASSERT3P(zp->z_sa_hdl, !=, NULL);
@@ -6176,7 +6177,7 @@ zfs_vnop_pathconf(struct vnop_pathconf_args *ap)
 	{
 		znode_t *zp = VTOZ(ap->a_vp);
 		*valp = 1;
-		if (zp && zp->z_zfsvfs) {
+		if (POINTER_IS_VALID(zp) && zp->z_zfsvfs) {
 			zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 			*valp = (zfsvfs->z_case == ZFS_CASE_SENSITIVE) ? 1 : 0;
 		}
@@ -7056,7 +7057,7 @@ zfs_vnop_blktooff(struct vnop_blktooff_args *ap)
 
 	znode_t *zp = VTOZ(ap->a_vp);
 	ASSERT3P(zp, !=, NULL);
-	if (zp == NULL)
+	if (zp == NULL || !POINTER_IS_VALID(zp))
 		return (ENODEV);
 
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
@@ -7115,7 +7116,7 @@ zfs_vnop_offtoblk(struct vnop_offtoblk_args *ap)
 
 	znode_t *zp = VTOZ(ap->a_vp);
 	ASSERT3P(zp, !=, NULL);
-	if (zp == NULL)
+	if (zp == NULL || !POINTER_IS_VALID(zp))
 		return (ENODEV);
 
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
@@ -7189,7 +7190,7 @@ zfs_vnop_blockmap(struct vnop_blockmap_args *ap)
 
 	znode_t *zp = VTOZ(ap->a_vp);
 	ASSERT3P(zp, !=, NULL);
-	if (zp == NULL)
+	if (zp == NULL || !POINTER_IS_VALID(zp))
 		return (ENODEV);
 
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
@@ -7270,7 +7271,7 @@ zfs_vnop_blockmap(struct vnop_blockmap_args *ap)
 	}
 
 	zp = VTOZ(ap->a_vp);
-	if (!zp) return (ENODEV);
+	if (!zp || !POINTER_IS_VALID(zp)) return (ENODEV);
 
 	zfsvfs = zp->z_zfsvfs;
 	if (!zfsvfs) return (ENODEV);

@@ -3573,7 +3573,7 @@ top:
 		}
 	}
 
-	if (zp == NULL) {
+	if (zp == NULL || !POINTER_IS_VALID(zp)) {
 		uint64_t txtype;
 
 		/*
@@ -3712,7 +3712,7 @@ out:
 		zfs_dirent_unlock(dl);
 
 	if (error) {
-		if (zp)
+		if (zp && POINTER_IS_VALID(zp))
 			VN_RELE(ZTOV(zp));
 	} else {
 		*vpp = ZTOV(zp);
@@ -5061,7 +5061,7 @@ zero:
 	    && vnode_isreg(vp)
 	    && ubc_getsize(vp) > 0
 	    && is_file_clean(vp, ubc_getsize(vp))) {
-		if (zp) {
+		if (zp && POINTER_IS_VALID(zp)) {
 			printf("ZFS: %s:%d: WARNING vnode_isrecycled + file dirty but skipping sync"
 			    " zsize %llu zid %llu fs %s file %s\n",
 			    __func__, __LINE__, zp->z_size, zp->z_id, fname, fsname);

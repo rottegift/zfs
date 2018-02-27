@@ -1497,7 +1497,7 @@ again:
 	zp = zfs_znode_alloc(zfsvfs, db, doi.doi_data_block_size,
 	    doi.doi_bonus_type, NULL);
 
-	if (zp == NULL) {
+	if (zp == NULL || !POINTER_IS_VALID(zp)) {
 		err = SET_ERROR(ENOENT);
 		ZFS_OBJ_HOLD_EXIT(zfsvfs, obj_num);
 		getnewvnode_drop_reserve();
