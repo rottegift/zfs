@@ -159,10 +159,10 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_upl_precious_tails;
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
-	kstat_named_t pageoutv2_absent_pages_seen;
 	kstat_named_t pageoutv2_invalid_pages_m_seen;
 	kstat_named_t pageoutv2_invalid_pages_p_seen;
-	kstat_named_t pageoutv2_precious_pages_seen;
+	kstat_named_t pageoutv2_precious_pages_m_seen;
+	kstat_named_t pageoutv2_precious_pages_p_seen;
 	kstat_named_t pageoutv2_dirty_pages_blustered;
 	kstat_named_t pageoutv2_error;
 	kstat_named_t pageoutv1_pages;
@@ -199,10 +199,10 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_upl_precious_tails",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
-	{ "pageoutv2_absent_pages_seen",       KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_pages_m_seen",    KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_pages_p_seen",    KSTAT_DATA_UINT64 },
-	{ "pageoutv2_precious_pages_seen",     KSTAT_DATA_UINT64 },
+	{ "pageoutv2_precious_pages_m_seen",   KSTAT_DATA_UINT64 },
+	{ "pageoutv2_precious_pages_p_seen",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_dirty_pages_blustered",   KSTAT_DATA_UINT64 },
 	{ "pageoutv2_error",                   KSTAT_DATA_UINT64 },
 	{ "pageoutv1_pages",                   KSTAT_DATA_UINT64 },
@@ -5022,49 +5022,41 @@ skip_lock_acquisition:
 					    zp->z_id, fsname, fname);
 				}
 			}
-			if (spl_ubc_is_mapped(vp, NULL)) {
-				// if the file is mapped, do an explicit abort
-				// rather than skipping over the range.
-				// we could do this for unmapped files too,
-				// in principle, but it only seems to be a problem
-				// for files with long-held PROT_WRITE mmaps under
-				// heavy memory pressure
-				pageout_op->state = "mapped abort";
-				pageout_op->line = __LINE__;
-				const int interim_abort_flags = 0;
-			        const off_t abort_from_byte = start_of_range;
-				const off_t abort_size = end_of_range - start_of_range;
-				const off_t abort_from_page = abort_from_byte / PAGE_SIZE_64;
-				printf("ZFS: %s:%d: interim abort for mapped file"
-				    " page index %lld - %lld"
-				    " UPL bytes %llu - %llu (numbytes: %llu)"
-				    " [args: %llu (st), %lu (sz) 0x%x (flags)]"
-				    " mappedwrite? %d"
-				    " usize %llu zid %llu fs %s file %s\n",
-				    __func__, __LINE__,
-				    abort_from_page, page_past_end_of_range,
-				    start_of_range, end_of_range, abort_size,
+			pageout_op->state = "interim abort";
+			pageout_op->line = __LINE__;
+			const int interim_abort_flags = 0;
+			const off_t abort_from_byte = start_of_range;
+			const off_t abort_size = end_of_range - start_of_range;
+			const off_t abort_from_page = abort_from_byte / PAGE_SIZE_64;
+			printf("ZFS: %s:%d: interim abort for mapped file"
+			    " page index %lld - %lld"
+			    " UPL bytes %llu - %llu (numbytes: %llu)"
+			    " [args: %llu (st), %lu (sz) 0x%x (flags)]"
+			    " mappedwrite? %d"
+			    " usize %llu zid %llu fs %s file %s\n",
+			    __func__, __LINE__,
+			    abort_from_page, page_past_end_of_range,
+			    start_of_range, end_of_range, abort_size,
+			    ap->a_f_offset, ap->a_size, ap->a_flags,
+			    spl_ubc_is_mapped_writable(vp),
+			    ubc_getsize(vp), zp->z_id, fsname, fname);
+			int interim_abort_ret = ubc_upl_abort_range(upl,
+			    abort_from_byte, abort_size, interim_abort_flags);
+			if (interim_abort_ret != KERN_SUCCESS) {
+				printf("ZFS: %s:%d: ERROR %d (but carrying on) interim abort"
+				    " page index %lld - %lld [args: %llu (st), %llu (sz)]"
+				    " for UPL a_f_offset %llu a_size %lu"
+				    " a_flags 0x%x (mapped? %d writable? %d)"
+				    " upl->size %u"
+				    " zid %llu fs %s file %s\n",
+				    __func__, __LINE__, interim_abort_ret,
+				    abort_from_page, pg_index,
+				    abort_from_byte, abort_size,
 				    ap->a_f_offset, ap->a_size, ap->a_flags,
+				    spl_ubc_is_mapped(vp, NULL),
 				    spl_ubc_is_mapped_writable(vp),
-				    ubc_getsize(vp), zp->z_id, fsname, fname);
-				int interim_abort_ret = ubc_upl_abort_range(upl,
-				    abort_from_byte, abort_size, interim_abort_flags);
-				if (interim_abort_ret != KERN_SUCCESS) {
-					printf("ZFS: %s:%d: ERROR %d (but carrying on) interim abort"
-					    " page index %lld - %lld [args: %llu (st), %llu (sz)]"
-					    " for UPL a_f_offset %llu a_size %lu"
-					    " a_flags 0x%x (mapped? %d writable? %d)"
-					    " upl->size %u"
-					    " zid %llu fs %s file %s\n",
-					    __func__, __LINE__, interim_abort_ret,
-					    abort_from_page, pg_index,
-					    abort_from_byte, abort_size,
-					    ap->a_f_offset, ap->a_size, ap->a_flags,
-					    spl_ubc_is_mapped(vp, NULL),
-					    spl_ubc_is_mapped_writable(vp),
-					    spl_upl_get_size(upl),
-					    zp->z_id, fsname, fname);
-				}
+				    spl_upl_get_size(upl),
+				    zp->z_id, fsname, fname);
 			}
 			if (ISSET(a_flags, UPL_MSYNC))
 				VNOPS_OSX_STAT_INCR(pageoutv2_invalid_pages_m_seen, pages_in_range);
@@ -5073,56 +5065,9 @@ skip_lock_acquisition:
 			pg_index = page_past_end_of_range;
 			commit_from_page = pg_index;
 			continue;
-		}
-		/* present but not valid page (i.e., it's got an address but is marked absent) */
-		if (!upl_valid_page(pl, pg_index)) {
-			pageout_op->state = "found absent";
-			pageout_op->line = __LINE__;
-			ASSERT0(upl_dirty_page(pl, pg_index));
-			ASSERT(upl_page_present(pl, pg_index));
-			int64_t page_past_end_of_range = pg_index + 1;
-			/* gather up a range of valid (and present) pages */
-			for ( ; page_past_end_of_range < just_past_last_valid_pg;
-			      page_past_end_of_range++) {
-				if (upl_dirty_page(pl, pg_index)) {
-					break;
-				} else if (!upl_page_present(pl, pg_index)) {
-					break;
-				} else if (upl_valid_page(pl, pg_index)) {
-					continue;
-				} else {
-					printf("ZFS: %s:%d: anomalous page index %lld"
-					    " pres? %d val? %d dir? %d"
-					    " in upl of %d pages file pos [%llu..%llu]"
-					    " zid %llu fs %s file %s\n",
-					    __func__, __LINE__, pg_index,
-					    upl_page_present(pl, pg_index),
-					    upl_valid_page(pl, pg_index),
-					    upl_dirty_page(pl, pg_index),
-					    pages_in_upl, f_start_of_upl, f_end_of_upl,
-					    zp->z_id, fsname, fname);
-					break;
-				}
-			}
-			pageout_op->line = __LINE__;
-			ASSERT3S(page_past_end_of_range, <=, just_past_last_valid_pg);
-			const off_t start_of_range = pg_index * PAGE_SIZE_64;
-			const off_t end_of_range = page_past_end_of_range * PAGE_SIZE_64;
-			const off_t pages_in_range = page_past_end_of_range - pg_index;
-			ASSERT3S(pages_in_range, ==, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
-			ASSERT3S(end_of_range, <=, ap->a_size);
-			if (xxxbleat) printf("ZFS: %s:%d: counting absent (but addressed)"
-			    " upl bytes [%lld..%lld] (%lld pages)"
-			    " of file bytes [%lld..%lld] (%d pages)"
-			    " fs %s file %s (flags 0x%x)\n", __func__, __LINE__,
-			    start_of_range, end_of_range, pages_in_range,
-			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname, ap->a_flags);
-			VNOPS_OSX_STAT_INCR(pageoutv2_absent_pages_seen, pages_in_range);
-			pg_index = page_past_end_of_range;
-			continue;
-		}
-		/* we found a valid but not dirty page */
-		else if (upl_valid_page(pl, pg_index) && !upl_dirty_page(pl, pg_index)) {
+		} else if (!upl_dirty_page(pl, pg_index)
+		    && upl_valid_page(pl, pg_index)) {
+			/* page has a mapping and not mark absent or dirty */
 			pageout_op->state = "found valid, not dirty";
 			pageout_op->line = __LINE__;
 			int64_t page_past_end_of_range = pg_index + 1;
@@ -5150,7 +5095,10 @@ skip_lock_acquisition:
 			    start_of_range, end_of_range, pages_in_range,
 			    f_start_of_upl, f_end_of_upl, pages_in_upl, fsname, fname);
 			pageout_op->line = __LINE__;
-			VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_seen, pages_in_range);
+			if (ISSET(ap->a_flags, UPL_MSYNC))
+				VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_m_seen, pages_in_range);
+			else
+				VNOPS_OSX_STAT_INCR(pageoutv2_precious_pages_p_seen, pages_in_range);
 			pg_index = page_past_end_of_range;
 			continue;
 		}
