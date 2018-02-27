@@ -4977,24 +4977,24 @@ skip_lock_acquisition:
 			ASSERT3S(end_of_range, <=, ap->a_size);
 			// this is a bit noisy
 			// want to know if it's sqlite/pma stuff though
-			printf("ZFS: %s:%d: aborting invalid/not-present page"
-			    " upl bytes [%lld..%lld] (%lld pages)"
-			    " of file bytes [%lld..%lld] (UPL %d pages,"
-			    " commmit_from_page %lld to pg_index %lld, bumping cfp to %lld)"
-			    " and comitting [%lld..%lld] (index %lld..%lld) (upl_end_pg %lld,"
-			    "  lowest dismissed %d)"
-			    " mapped? %d writable? %d"
-			    " zid %llu fs %s file %s (flags 0x%x)\n",
-			    __func__, __LINE__,
-			    start_of_range, end_of_range, pages_in_range,
-			    f_start_of_upl, f_end_of_upl, pages_in_upl,
-			    commit_from_page, pg_index, page_past_end_of_range,
-			    commit_from_page * PAGE_SIZE_64, start_of_range,
-			    commit_from_page, pg_index,
-			    upl_end_pg, pages_in_upl - upl_pages_dismissed,
-			    spl_ubc_is_mapped(vp, NULL),
-			    spl_ubc_is_mapped_writable(vp),
-			    zp->z_id, fsname, fname, ap->a_flags);
+			if (spl_ubc_is_mapped_writable(vp)) {
+				printf("ZFS: %s:%d: aborting invalid/not-present page"
+				    " upl bytes [%lld..%lld] (%lld pages)"
+				    " of file bytes [%lld..%lld] (UPL %d pages,"
+				    " commmit_from_page %lld to pg_index %lld, bumping cfp to %lld)"
+				    " and comitting [%lld..%lld] (index %lld..%lld) (upl_end_pg %lld,"
+				    "  lowest dismissed %d)"
+				    " (mapped writable)"
+				    " zid %llu fs %s file %s (flags 0x%x)\n",
+				    __func__, __LINE__,
+				    start_of_range, end_of_range, pages_in_range,
+				    f_start_of_upl, f_end_of_upl, pages_in_upl,
+				    commit_from_page, pg_index, page_past_end_of_range,
+				    commit_from_page * PAGE_SIZE_64, start_of_range,
+				    commit_from_page, pg_index,
+				    upl_end_pg, pages_in_upl - upl_pages_dismissed,
+				    zp->z_id, fsname, fname, ap->a_flags);
+			}
 			if (commit_from_page < pg_index) {
 				pageout_op->state = "interim commit";
 				pageout_op->line = __LINE__;
