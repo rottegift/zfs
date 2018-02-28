@@ -159,6 +159,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pageoutv2_upl_precious_tails;
 	kstat_named_t pageoutv2_no_pages_valid;
 	kstat_named_t pageoutv2_invalid_tail_pages;
+	kstat_named_t pageoutv2_interim_commits;
 	kstat_named_t pageoutv2_invalid_pages_m_seen;
 	kstat_named_t pageoutv2_invalid_pages_p_seen;
 	kstat_named_t pageoutv2_precious_pages_m_seen;
@@ -199,6 +200,7 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pageoutv2_upl_precious_tails",      KSTAT_DATA_UINT64 },
 	{ "pageoutv2_no_pages_valid",          KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_tail_pages",      KSTAT_DATA_UINT64 },
+	{ "pageoutv2_interim_commits",         KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_pages_m_seen",    KSTAT_DATA_UINT64 },
 	{ "pageoutv2_invalid_pages_p_seen",    KSTAT_DATA_UINT64 },
 	{ "pageoutv2_precious_pages_m_seen",   KSTAT_DATA_UINT64 },
@@ -5023,6 +5025,8 @@ skip_lock_acquisition:
 					    spl_ubc_is_mapped_writable(vp),
 					    spl_upl_get_size(upl),
 					    zp->z_id, fsname, fname);
+				} else {
+					VNOPS_OSX_STAT_BUMP(pageoutv2_interim_commits);
 				}
 			}
 			pageout_op->state = "interim abort";
@@ -5194,7 +5198,7 @@ skip_lock_acquisition:
 				    " (writable? %d) file, range in UPL [%llu..%llu],"
 				    " pages in UPL [%llu..%u] UPL"
 				    " a_f_offset %llu a_size %lu (pgs %llu) a_flags 0x%x"
-				    " zid %llu fs %s file %s\n",
+				    " zid %llu fs %s file %s (cfp %llu)\n",
 				    __func__, __LINE__,
 				    spl_ubc_is_mapped_writable(vp),
 				    start_of_range, end_of_range,
@@ -5202,7 +5206,7 @@ skip_lock_acquisition:
 				    ap->a_f_offset, ap->a_size,
 				    howmany(ap->a_size, PAGE_SIZE_64),
 				    ap->a_flags,
-				    zp->z_id, fsname, fname);
+				    zp->z_id, fsname, fname, commit_from_page);
 			}
 			VNOPS_OSX_STAT_INCR(pageoutv2_dirty_pages_blustered, pages_in_range);
 			pg_index = page_past_end_of_range;
