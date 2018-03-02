@@ -2273,25 +2273,21 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		ASSERT0(vnode_isrecycled(vp));
 		int xfer_resid = (int) this_chunk;
 
-		if ((ioflag & FAPPEND) == 0) {
-			off_t msync_resid = 0;
-			ASSERT3U(rl->r_off, <=, this_off);
-			ASSERT3U(rl->r_off + rl->r_len, >=, this_off + this_chunk);
-			int msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
-			if (msync_err) {
-				printf("ZFS: %s:%d: error cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
-				    __func__, __LINE__, this_off, this_off + this_chunk, msync_resid, fname, fsname);
-			}
-
-			/* fill any holes */
-			int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk, FILL_FOR_WRITE);
+		/*
+		 * If we are not appending, then bring in any missing
+		 * pages.  Note any unusual pages.
+		 */
+		if ((ioflag & FAPPEND) == 0
+		    && trunc_page_64(zp->z_size) >= round_page_64(this_off)) {
+			ASSERT3S(this_chunk, >, 0);
+			int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk,
+			    FILL_FOR_WRITE);
 			if (fill_err) {
 				printf("ZFS: %s:%d: error filling holes [%lld, %lld] file %s\n",
 				    __func__, __LINE__, this_off, this_off + this_chunk, zp->z_name_cache);
 			}
 
 			ASSERT3S(ubcsize_before_cluster_ops, ==, ubc_getsize(vp));
-
 
 			const off_t rstart = uio_offset(uio);
 			const off_t rend = uio_offset(uio) + xfer_resid;
@@ -2300,26 +2296,18 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			int t_errs = zfs_ubc_range_all_flags(zp, vp, rstart, rend,
 			    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
 
-			if (t_dirty > 0 || t_busy > 0) {
+			if (t_dirty > 0 || t_busy > 0 || t_absent > 0 || t_pageout > 0) {
 				// interested most in case where busy > 0 and EOF ~ usize
 				ASSERT0(vnode_isrecycled(vp));
-				off_t resid_msync = 0;
-				int msync_retval = zfs_msync(zp, rl, rstart, rend, &resid_msync, UBC_PUSHALL);
-				printf("ZFS: %s:%d: WARNING (msync_retval %d, resid %lld)"
+				printf("ZFS: %s:%d: WARNING (unusual pages)"
 				    " (t_errs %d) busy %d dirty %d precious %d absent %d pageout %d"
 				    " of %llu pages in range [%llu..%llu] (zsize %llu usize %llu)"
 				    " of fs %s file %s before cluster copy\n",
-				    __func__, __LINE__, msync_retval, resid_msync,
+				    __func__, __LINE__,
 				    t_errs, t_busy, t_dirty, t_precious, t_absent, t_pageout,
 				    howmany(rend - rstart, PAGE_SIZE_64),
 				    rstart, rend, zp->z_size, ubc_getsize(vp),
 				    fsname, fname);
-				msync_resid = 0;
-				msync_err = zfs_msync(zp, rl, this_off, this_off + this_chunk, &msync_resid, UBC_PUSHALL);
-				if (msync_err) {
-					printf("ZFS: %s:%d: error post-fill cleaning range [%lld..%lld] (resid now %lld) fs %s file %s\n",
-					    __func__, __LINE__, this_off, this_off + this_chunk, msync_resid, fname, fsname);
-				}
 			}
 		}
 
