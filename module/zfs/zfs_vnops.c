@@ -135,7 +135,6 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_write_helper_iters;
 	kstat_named_t zfs_write_isreg_want_lock;
 	kstat_named_t zfs_read_calls;
-	kstat_named_t zfs_read_clean_on_read;
 	kstat_named_t zfs_read_low_mem_sleep;
 	kstat_named_t zfs_read_low_mem_yield;
 	kstat_named_t mappedread_unusual_pages;
@@ -166,7 +165,6 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_write_helper_iters",                      KSTAT_DATA_UINT64 },
 	{ "zfs_write_isreg_want_lock",                   KSTAT_DATA_UINT64 },
 	{ "zfs_read_calls",                              KSTAT_DATA_UINT64 },
-	{ "zfs_read_clean_on_read",                      KSTAT_DATA_UINT64 },
 	{ "zfs_read_low_mem_sleep",                      KSTAT_DATA_UINT64 },
 	{ "zfs_read_low_mem_yield",                      KSTAT_DATA_UINT64 },
 	{ "mappedread_unusual_pages",  	                 KSTAT_DATA_UINT64 },
@@ -1124,7 +1122,23 @@ ubc_fill_holes_in_range(vnode_t *vp, off_t start_byte, off_t end_byte, fill_hole
 	const off_t aligned_file_end = round_page_64(end_byte);
 	const size_t total_size = aligned_file_end - aligned_file_offset;
 
-	ASSERT3S(total_size, >, 0);
+	if (!(total_size >= PAGE_SIZE_64)) {
+		znode_t *zp = VTOZ(vp);
+		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
+		const char *fname = zp->z_name_cache;
+		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+		printf("ZFS: %s:%d: total_size == %ld"
+		    " start %llu end %llu who_for 0x%x"
+		    " aligned_off %llu aligned end %llu"
+		    " zsize %llu usize %llu"
+		    " fs %s file %s\n",
+		    __func__, __LINE__,
+		    total_size,
+		    start_byte, end_byte, who_for,
+		    aligned_file_offset, aligned_file_end,
+		    zp->z_size, ubc_getsize(vp),
+		    fsname, fname);
+	}
 
 	off_t cur_off = aligned_file_offset;
 	off_t size_done = 0;
@@ -1425,14 +1439,9 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 	ASSERT3S(upl_size, >=, PAGE_SIZE_64);
 	ASSERT3S(upl_size, >=, inbytes);
 
-	/* possibly clean any unusual pages */
+	/* take rw lock */
 
 	boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
-	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
-	int t_errs = zfs_ubc_range_all_flags(zp, vp,
-	    upl_file_offset, upl_file_offset + upl_size,
-	    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-
 	uint64_t tries = 0;
 	boolean_t did_lock = B_FALSE;
 	if (!rw_write_held(&zp->z_map_lock)) {
@@ -1440,75 +1449,35 @@ mappedread_new(vnode_t *vp, int arg_bytes, struct uio *uio, znode_t *zp, rl_t *r
 		did_lock = B_TRUE;
 	}
 
-	for (int clean_i = 0, same = 0; clean_i < 10; clean_i++) {
-		if (ISSET(zp->z_pflags, ZFS_IMMUTABLE)
-		    || vnode_vfsisrdonly(vp)
-		    || !spa_writeable(dmu_objset_spa(zp->z_zfsvfs->z_os))) {
-			break;
-		}
-		if (t_dirty > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
-			int prev_dirty = t_dirty;
-			int prev_pageout = t_pageout;
-			int prev_busy = t_busy;
-			VNOPS_STAT_INCR(mappedread_unusual_pages,
-			    t_dirty + t_busy + t_pageout);
-			off_t resid_msync = 0;
-			VNOPS_STAT_BUMP(zfs_read_clean_on_read);
-			ASSERT0(vnode_isrecycled(vp));
-			ASSERT3U(rl->r_off, <=, upl_file_offset);
-			ASSERT3U(rl->r_off + rl->r_len, >=, upl_file_offset + upl_size);
-			int msync_retval = zfs_msync(zp, rl, upl_file_offset,
-			    upl_file_offset + upl_size, &resid_msync, UBC_PUSHALL);
-			if (msync_retval != 0) {
-				printf("ZFS: %s:%d: (iter %d) (lock? %d tries %lld) zfs_msync error %d (resid %llu)"
-				    " for start %llu end %llu (unusual pages d %d pr %d b %d po %d a %d errs %d file %s\n",
-				    __func__, __LINE__, clean_i, did_lock, tries,
-				    msync_retval, resid_msync,
-				    upl_file_offset, upl_file_offset + upl_size,
-				    t_dirty, t_precious, t_busy, t_pageout, t_absent, t_errs,
-				    filename);
-			}
-			int t_errs = zfs_ubc_range_all_flags(zp, vp,
-			    upl_file_offset, upl_file_offset + upl_size,
-			    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
-			if (t_dirty > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
-				printf("ZFS: %s:%d: (iter %d, same %d) (lock? %d) unusual pages after unusual-page msync:"
-				    " dirty %d (prev %d) pageout %d (prev %d) precious %d absent %d busy %d (prev %d)"
-				    " errs %d range [%llu..%llu] (zsize %lld usize %lld) (mapped? %d write? %d) file %s\n",
-				    __func__, __LINE__,
-				    clean_i, same, did_lock,
-				    t_dirty, prev_dirty, t_pageout, prev_pageout,  t_precious, t_absent,
-				    t_busy, prev_busy,
-				    t_errs,
-				    upl_file_offset, upl_file_offset + upl_size,
-				    zp->z_size, ubc_getsize(vp),
-				    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp), filename);
-				if (t_dirty == prev_dirty
-				    && t_busy == prev_busy
-				    && t_pageout == prev_pageout) {
-					if (same > 2) {
-						printf("ZFS: %s:%d no change in unusual pages, breaking,"
-						    " t_busy %d t_pageout %d t_dirty %d, file %s\n", __func__, __LINE__,
-						    t_busy, t_pageout, t_dirty, filename);
-						break;
-					} else {
-						same++;
-					}
-				} else {
-					same = 0;
-				}
-				extern void IOSleep(unsigned milliseconds);
-				IOSleep(1);
-			} else {
-				break;
-			}
-		}
+	/* make note of unusual pages */
+
+	int t_dirty = 0, t_pageout = 0, t_precious = 0, t_absent = 0, t_busy = 0;
+	int t_errs = zfs_ubc_range_all_flags(zp, vp,
+	    upl_file_offset, upl_file_offset + upl_size,
+	    __func__, &t_dirty, &t_pageout, &t_precious, &t_absent, &t_busy);
+
+	if (t_dirty > 0 || t_busy > 0 || t_pageout > 0 || zp->z_size != ubc_getsize(vp)) {
+		VNOPS_STAT_INCR(mappedread_unusual_pages,
+		    t_dirty + t_busy + t_pageout);
+		ASSERT0(vnode_isrecycled(vp));
+		ASSERT3U(rl->r_off, <=, upl_file_offset);
+		ASSERT3U(rl->r_off + rl->r_len, >=, upl_file_offset + upl_size);
+		printf("ZFS: %s:%d: (lock? %d) unusual pages"
+		    " dirty %d pageout %d precious %d absent %d busy %d"
+		    " errs %d range [%llu..%llu] (zsize %lld usize %lld) (mapped? %d write? %d) file %s\n",
+		    __func__, __LINE__,
+		    did_lock,
+		    t_dirty, t_pageout, t_precious, t_absent, t_busy,
+		    t_errs,
+		    upl_file_offset, upl_file_offset + upl_size,
+		    zp->z_size, ubc_getsize(vp),
+		    spl_ubc_is_mapped(vp, NULL), spl_ubc_is_mapped_writable(vp), filename);
 	}
 
 	/* pull in any absent pages */
-
 	ASSERT3U(round_page_64(zp->z_size), >=, upl_file_offset + upl_size);
 	ASSERT3U(round_page_64(ubc_getsize(vp)), >=, upl_file_offset + upl_size);
+
 	err = fill_holes_in_range(vp, upl_file_offset, upl_size, FILL_FOR_READ);
 
 	if (err != 0) {
