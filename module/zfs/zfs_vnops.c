@@ -2201,10 +2201,15 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		end_size = this_off + this_chunk;
 
 		/*
-		 * if we are appending, read in the last page of the file:
-		 * do this before bumping up z_size
+		 * if we are appending and the offset we are writing to
+		 * is not page aligned (i.e., we will be modifying an
+		 * already-existing page in the file), then read in the
+		 * last page of the file.  do this before bumping up
+		 * z_size.
+		 *
 		 */
-		if (ioflag & FAPPEND) {
+		if (ioflag & FAPPEND
+		    && (this_off & PAGE_MASK_64) != 0) {
 			int fappend_fill_err = ubc_fill_holes_in_range(vp,
 			    trunc_page_64(this_off), round_page_64(this_off), FILL_FOR_WRITE);
 			if (fappend_fill_err) {
