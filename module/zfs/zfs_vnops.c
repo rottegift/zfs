@@ -2277,8 +2277,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		 * If we are not appending, then bring in any missing
 		 * pages.  Note any unusual pages.
 		 */
-		if ((ioflag & FAPPEND) == 0
-		    && trunc_page_64(zp->z_size) >= round_page_64(this_off)) {
+		if ((ioflag & FAPPEND) == 0) {
 			ASSERT3S(this_chunk, >, 0);
 			int fill_err = ubc_fill_holes_in_range(vp, this_off, this_off + this_chunk,
 			    FILL_FOR_WRITE);
