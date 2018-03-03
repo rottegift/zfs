@@ -2208,10 +2208,13 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		 * z_size.
 		 *
 		 */
-		if (ioflag & FAPPEND
-		    && (this_off & PAGE_MASK_64) != 0) {
+		if (ioflag & FAPPEND) {
+			const off_t tr_this_off = trunc_page_64(this_off);
+			off_t rn_this_off = round_page_64(this_off);
+			if (rn_this_off == tr_this_off)
+				rn_this_off += PAGE_SIZE_64;
 			int fappend_fill_err = ubc_fill_holes_in_range(vp,
-			    trunc_page_64(this_off), round_page_64(this_off), FILL_FOR_WRITE);
+			    tr_this_off, rn_this_off, FILL_FOR_WRITE);
 			if (fappend_fill_err) {
 				printf("ZFS: %s:%d: FAPPEND, error %d filling last bytes of file"
 				    " zsize %llu usize %llu"
