@@ -269,6 +269,7 @@ extern int ubc_invalidate_range(znode_t *zp, rl_t *rl, off_t start_byte, off_t e
 typedef enum fill_holes_direction {
 	FILL_FOR_READ = 0,
 	FILL_FOR_WRITE = 1,
+	FILL_FOR_APPEND = 2,
 } fill_holes_direction_t;
 extern int ubc_fill_holes_in_range(vnode_t *vp, off_t    start_byte, off_t end_byte, fill_holes_direction_t who_for);
 extern int ubc_refresh_range(vnode_t *vp, off_t start_byte, off_t end_byte);

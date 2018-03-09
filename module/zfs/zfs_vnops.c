@@ -1115,7 +1115,7 @@ ubc_fill_holes_in_range(vnode_t *vp, off_t start_byte, off_t end_byte, fill_hole
 {
 
 	ASSERT3S(start_byte, <=, end_byte);
-	ASSERT3S(end_byte, <=, round_page_64(ubc_getsize(vp)));
+	if (who_for != FILL_FOR_APPEND) { ASSERT3S(end_byte, <=, round_page_64(ubc_getsize(vp))); }
 	ASSERT3S(start_byte, <=, round_page_64(ubc_getsize(vp)));
 
 	const off_t aligned_file_offset = trunc_page_64(start_byte);
@@ -2214,7 +2214,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 			if (rn_this_off == tr_this_off)
 				rn_this_off += PAGE_SIZE_64;
 			int fappend_fill_err = ubc_fill_holes_in_range(vp,
-			    tr_this_off, rn_this_off, FILL_FOR_WRITE);
+			    tr_this_off, rn_this_off, FILL_FOR_APPEND);
 			if (fappend_fill_err) {
 				printf("ZFS: %s:%d: FAPPEND, error %d filling last bytes of file"
 				    " zsize %llu usize %llu"
