@@ -2604,7 +2604,7 @@ zfs_write_isreg(vnode_t *vp, znode_t *zp, zfsvfs_t *zfsvfs, uio_t *uio, int iofl
 		if (ioflag & FAPPEND
 		    && (zp->z_size != uio_offset(uio)
 			|| zp->z_size != def_woff_plus_resid_dispatched)) {
-			    printf("ZFS: %s:%d: STRANGE (FAPPEND) z_size %llu"
+			    dprintf("ZFS: %s:%d: updating (FAPPEND) z_size %llu"
 				" should be equal"
 				" to uio_offset(uio) %llu and"
 				" def_woff_plus_resid_dispatched %llu,"
