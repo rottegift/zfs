@@ -108,9 +108,7 @@ then
     fi
     if [ -f /etc/zfs/caches/Trinity.cache ]
     then
-        /usr/sbin/sysctl ldi.debug.use_iokit_from_path=0 ldi.debug.use_iokit_from_dev=0
 	docacheimport Trinity && TRINITY_CACHE_DONE=1
-	/usr/sbin/sysctl ldi.debug.use_iokit_from_path=1 ldi.debug.use_iokit_from_dev=1
     fi
     if [ -f /etc/zfs/caches/Safety.cache ]
     then
