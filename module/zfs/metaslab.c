@@ -193,7 +193,7 @@ boolean_t metaslab_trace_enabled = B_TRUE;
  * to every exceed this value. In debug mode, the system will panic if this
  * limit is ever reached allowing for further investigation.
  */
-uint64_t metaslab_trace_max_entries = 5000;
+uint64_t metaslab_trace_max_entries = 10000;
 
 static uint64_t metaslab_weight(metaslab_t *);
 static void metaslab_set_fragmentation(metaslab_t *);
