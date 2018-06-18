@@ -586,9 +586,11 @@ dbuf_evict_thread(void)
  * dbuf cache using the callers context.
  */
 
+#if defined(__APPLE__) && defined(_KERNEL)
 static _Atomic int16_t dbuf_directly_evicting_threads = 0;
 extern void IOSleep(unsigned milliseconds);
 extern void IODelay(unsigned microseconds);
+#endif
 
 static void
 dbuf_evict_notify(void)
@@ -632,6 +634,7 @@ dbuf_evict_notify(void)
 	 */
 	if (refcount_count(&dbuf_cache_size) > dbuf_cache_target_bytes()) {
 		if (dbuf_cache_above_hiwater()) {
+#if defined(__APPLE__) && defined(_KERNEL)
 			if (dbuf_directly_evicting_threads++ > (max_ncpus / 2)) {
 				IOSleep(1);
 				/*
@@ -649,9 +652,12 @@ dbuf_evict_notify(void)
 				 * not have had to evict.
 				 */
 			}
+#endif
 			dbuf_evict_one();
+#if defined(__APPLE__) && defined(_KERNEL)
 			dbuf_directly_evicting_threads--;
 			ASSERT3S(dbuf_directly_evicting_threads, >=, 0);
+#endif
 		}
 		cv_signal(&dbuf_evict_cv);
 	}
