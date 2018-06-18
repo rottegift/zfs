@@ -585,6 +585,11 @@ dbuf_evict_thread(void)
  * If the dbuf cache is at its high water mark, then evict a dbuf from the
  * dbuf cache using the callers context.
  */
+
+static _Atomic int16_t dbuf_directly_evicting_threads = 0;
+extern void IOSleep(unsigned milliseconds);
+extern void IODelay(unsigned microseconds);
+
 static void
 dbuf_evict_notify(void)
 {
@@ -615,10 +620,39 @@ dbuf_evict_notify(void)
 	 * We check if we should evict without holding the dbuf_evict_lock,
 	 * because it's OK to occasionally make the wrong decision here,
 	 * and grabbing the lock results in massive lock contention.
+	 *
+	 * We will contend over an atomic count of directly evicting threads, which
+	 * drives the decision on whether or not to yield to the other hyperthread
+	 * on this CPU (if there are other threads directly evicting but fewer than
+	 * half max_ncpus) or to deschedule this thread for a millisecond (if there
+	 * are more direct evictors than that).    The latter can happen given
+	 * a large number of concurrent zfs list operations, for example, and this
+	 * thread should not contribute to stealing all the CPU resources from userland
+	 * and other lower priority kernel threads.
 	 */
 	if (refcount_count(&dbuf_cache_size) > dbuf_cache_target_bytes()) {
-		if (dbuf_cache_above_hiwater())
+		if (dbuf_cache_above_hiwater()) {
+			if (dbuf_directly_evicting_threads++ > (max_ncpus / 2)) {
+				IOSleep(1);
+				/*
+				 * we could in principle recheck here, at the cost
+				 * of further contention of the dbuf size variable;
+				 * kstat instrumentation would be useful in that
+				 * case.   Just evicting anyway is a reasonable-seeming
+				 * tradeoff.
+				 */
+			} else if (dbuf_directly_evicting_threads > 1) {
+				IODelay(1);
+				/*
+				 * With this small a wait, rechecking is probably
+				 * not useful; at worst we evict one buffer we would
+				 * not have had to evict.
+				 */
+			}
 			dbuf_evict_one();
+			dbuf_directly_evicting_threads--;
+			ASSERT3S(dbuf_directly_evicting_threads, >=, 0);
+		}
 		cv_signal(&dbuf_evict_cv);
 	}
 }
