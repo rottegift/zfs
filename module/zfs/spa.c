@@ -142,7 +142,7 @@ const zio_taskq_info_t zio_taskqs[ZIO_TYPES][ZIO_TASKQ_TYPES] = {
 	/* ISSUE	ISSUE_HIGH	INTR		INTR_HIGH */
 	{ ZTI_ONE,	ZTI_NULL,	ZTI_ONE,	ZTI_NULL }, /* NULL */
 	{ ZTI_N(8),	ZTI_NULL,	ZTI_P(12, 8),	ZTI_NULL }, /* READ */
-	{ ZTI_P(12, 8),	ZTI_N(5),	ZTI_N(8),	ZTI_N(5) }, /* WRITE */
+	{ ZTI_BATCH,	ZTI_N(5),	ZTI_N(8),	ZTI_N(5) }, /* WRITE */
 	{ ZTI_P(12, 8),	ZTI_NULL,	ZTI_ONE,	ZTI_NULL }, /* FREE */
 	{ ZTI_ONE,	ZTI_NULL,	ZTI_ONE,	ZTI_NULL }, /* CLAIM */
 	{ ZTI_ONE,	ZTI_NULL,	ZTI_ONE,	ZTI_NULL }, /* IOCTL */
@@ -848,6 +848,11 @@ spa_get_errlists(spa_t *spa, avl_tree_t *last, avl_tree_t *scrub)
 	    offsetof(spa_error_entry_t, se_avl));
 }
 
+#ifdef __APPLE__
+/* fake a struct_proc * so that its addr is not equal to &p0 */
+struct proc *spa_batchpr = { 0 };
+#endif
+
 static void
 spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 {
@@ -902,12 +907,26 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 			    zio_type_name[t], zio_taskq_types[q]);
 		}
 
+#ifndef __APPLE__
 		if (zio_taskq_sysdc && spa->spa_proc != &p0) {
 			if (batch)
 				flags |= TASKQ_DC_BATCH;
 
 			tq = taskq_create_sysdc(name, value, 50, INT_MAX,
 			    spa->spa_proc, zio_taskq_basedc, flags);
+#else
+		if (zio_taskq_sysdc) { // we don't need an LWP on the mac
+			if (batch)
+				flags |= TASKQ_DC_BATCH;
+
+			if (spa->spa_proc != &p0) {
+				tq = taskq_create_sysdc(name, value, 50, INT_MAX,
+				    spa->spa_proc, zio_taskq_basedc, flags);
+			} else {
+				tq = taskq_create_sysdc(name, value, 50, INT_MAX,
+				    &spa_batchpr, zio_taskq_basedc, flags);
+			}
+#endif
 		} else {
 			pri_t pri = maxclsyspri;
 			/*
