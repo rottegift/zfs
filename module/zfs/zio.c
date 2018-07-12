@@ -3391,14 +3391,17 @@ zio_vdev_io_start(zio_t *zio)
 				break;
 			}
 
-			if (i % 60) {
 #ifdef _KERNEL
+			if ((i % 60) == 0) {
 				void IOSleep(unsigned milliseconds);
 				IOSleep(1);
+			} else if ((i % 2) == 0) {
+				kpreempt(KPREEMPT_SYNC);
+			}
 #else
+			if ((i % 60) == 0)
 				delay(1);
 #endif
-			}
 
 			uint64_t new = ddi_get_lbolt64();
 			uint64_t old = spa->spa_last_io;
