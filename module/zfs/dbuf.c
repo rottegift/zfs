@@ -626,7 +626,7 @@ dbuf_evict_notify(void)
 	 * We will contend over an atomic count of directly evicting threads, which
 	 * drives the decision on whether or not to yield to the other hyperthread
 	 * on this CPU (if there are other threads directly evicting but fewer than
-	 * half max_ncpus) or to deschedule this thread for a millisecond (if there
+	 * max_ncpus) or to deschedule this thread for a millisecond (if there
 	 * are more direct evictors than that).    The latter can happen given
 	 * a large number of concurrent zfs list operations, for example, and this
 	 * thread should not contribute to stealing all the CPU resources from userland
@@ -635,7 +635,7 @@ dbuf_evict_notify(void)
 	if (refcount_count(&dbuf_cache_size) > dbuf_cache_target_bytes()) {
 		if (dbuf_cache_above_hiwater()) {
 #if defined(__APPLE__) && defined(_KERNEL)
-			if (dbuf_directly_evicting_threads++ > (max_ncpus / 2)) {
+			if (dbuf_directly_evicting_threads++ >= max_ncpus) {
 				IOSleep(1);
 				/*
 				 * we could in principle recheck here, at the cost
