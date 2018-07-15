@@ -636,7 +636,7 @@ dbuf_evict_notify(void)
 		if (dbuf_cache_above_hiwater()) {
 #if defined(__APPLE__) && defined(_KERNEL)
 			if (dbuf_directly_evicting_threads++ >= max_ncpus) {
-				IOSleep(1);
+				//IOSleep(1);
 				/*
 				 * we could in principle recheck here, at the cost
 				 * of further contention of the dbuf size variable;
@@ -645,7 +645,7 @@ dbuf_evict_notify(void)
 				 * tradeoff.
 				 */
 			} else if (dbuf_directly_evicting_threads > 1) {
-				IODelay(1);
+				//IODelay(1);
 				/*
 				 * With this small a wait, rechecking is probably
 				 * not useful; at worst we evict one buffer we would
