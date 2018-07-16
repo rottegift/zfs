@@ -635,26 +635,25 @@ dbuf_evict_notify(void)
 	if (refcount_count(&dbuf_cache_size) > dbuf_cache_target_bytes()) {
 		if (dbuf_cache_above_hiwater()) {
 #if defined(__APPLE__) && defined(_KERNEL)
-			if (dbuf_directly_evicting_threads++ >= max_ncpus) {
-				//IOSleep(1);
-				/*
-				 * we could in principle recheck here, at the cost
-				 * of further contention of the dbuf size variable;
-				 * kstat instrumentation would be useful in that
-				 * case.   Just evicting anyway is a reasonable-seeming
-				 * tradeoff.
-				 */
-			} else if (dbuf_directly_evicting_threads > 1) {
-				//IODelay(1);
-				/*
-				 * With this small a wait, rechecking is probably
-				 * not useful; at worst we evict one buffer we would
-				 * not have had to evict.
-				 */
+			/* gate: only allow a franction of  direct evictors at a time */
+			extern unsigned int physical_ncpus;
+			ASSERT3U(physical_ncpus, >, 0);
+			dbuf_directly_evicting_threads++;
+			ASSERT3S(dbuf_directly_evicting_threads, <, 2048);
+			for (int i = 0 ; dbuf_directly_evicting_threads > 1; i++) {
+				if (dbuf_directly_evicting_threads >= physical_ncpus)
+					kpreempt(KPREEMPT_SYNC);
+				else if ((i % physical_ncpus) == 0)
+					kpreempt(KPREEMPT_SYNC);
+				else
+					IODelay(1);
+				if (!dbuf_cache_above_hiwater())
+					goto skip_direct_eviction;
 			}
 #endif
 			dbuf_evict_one();
 #if defined(__APPLE__) && defined(_KERNEL)
+		skip_direct_eviction:
 			dbuf_directly_evicting_threads--;
 			ASSERT3S(dbuf_directly_evicting_threads, >=, 0);
 #endif
