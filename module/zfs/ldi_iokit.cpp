@@ -37,6 +37,10 @@
  * Evan Susarret in 2015.
  */
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winconsistent-missing-override"
+#pragma GCC diagnostic ignored "-Wdeprecated-register"
+
 /*
  * Apple IOKit (c++)
  */
