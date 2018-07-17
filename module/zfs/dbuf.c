@@ -643,12 +643,11 @@ dbuf_evict_notify(void)
 			for (int i = 0 ; dbuf_directly_evicting_threads > 1; i++) {
 				if (dbuf_directly_evicting_threads >= physical_ncpus)
 					kpreempt(KPREEMPT_SYNC);
-				else if ((i % physical_ncpus) == 0)
-					kpreempt(KPREEMPT_SYNC);
-				else
+				else if (i != 0 && (i % physical_ncpus) == 0)
 					IODelay(1);
 				if (!dbuf_cache_above_hiwater())
 					goto skip_direct_eviction;
+				kpreempt(KPREEMPT_SYNC);
 			}
 #endif
 			dbuf_evict_one();
