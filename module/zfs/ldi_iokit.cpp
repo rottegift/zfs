@@ -1347,14 +1347,15 @@ buf_strategy_iokit(ldi_buf_t *lbp, struct ldi_handle *lhp)
 
 	/* Priority of I/O */
 	if (lbp->b_flags & B_THROTTLED_IO) {
+	  lbp->b_flags &= ~B_THROTTLED_IO;
 	  iobp->ioattr.priority = kIOStoragePriorityBackground;
 	  if (lbp->b_flags & B_WRITE)
 	    iobp->ioattr.priority--;
 	}
 	else if ((lbp->b_flags & B_ASYNC) == 0 || (lbp->b_flags & B_WRITE))
-	  iobp->ioattr.priority = kIOStoragePriorityDefault;
+	  iobp->ioattr.priority = kIOStoragePriorityDefault - 1;
 	else
-	  iobp->ioattr.priority = kIOStoragePriorityLow;
+	  iobp->ioattr.priority = kIOStoragePriorityDefault;
 
 	/* Allocate a memory descriptor pointing to the data address */
 	iobp->iomem = IOMemoryDescriptor::withAddress(

@@ -992,10 +992,10 @@ vdev_disk_io_start(zio_t *zio)
 			flags = B_WRITE;
 			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
-			flags = B_WRITE | B_ASYNC;
+			flags = B_WRITE | B_ASYNC | B_THROTTLED_IO;
 			spl_throttle_set_thread_io_policy(IOPOL_THROTTLE);
 		} else {
-			flags = B_WRITE | B_ASYNC | B_THROTTLED_IO;
+			flags = B_WRITE | B_ASYNC;
 		}       spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
 		break;
 
