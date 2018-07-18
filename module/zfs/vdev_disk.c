@@ -974,16 +974,29 @@ vdev_disk_io_start(zio_t *zio)
 		zio_execute(zio);
 		return;
 
+		/*
+		 * writes should take higher priority over reads
+		 *
+		 * sync zios should take hoigher priority over asyncs
+		 *
+		 * scrub/resilver should take lower priority
+		 *
+		 * B_ASYNC throws off a new thread with a callback to this thread,
+		 * unless B_PASSIVE
+		 *
+		 * IOPOL_PASSIVE is *high* priority (THROTTLE_LEVEL_TIER0)
+		 *
+		 */
 	case ZIO_TYPE_WRITE:
 		if (zio->io_priority == ZIO_PRIORITY_SYNC_WRITE) {
 			flags = B_WRITE;
 			spl_throttle_set_thread_io_policy(IOPOL_IMPORTANT);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
-			flags = B_WRITE | B_ASYNC | B_PASSIVE;
-			spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
+			flags = B_WRITE | B_ASYNC;
+			spl_throttle_set_thread_io_policy(IOPOL_THROTTLE);
 		} else {
-			flags = B_WRITE | B_ASYNC | B_PASSIVE;
-		}       spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
+			flags = B_WRITE | B_ASYNC | B_THROTTLED_IO;
+		}       spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
 		break;
 
 	case ZIO_TYPE_READ:
@@ -991,7 +1004,7 @@ vdev_disk_io_start(zio_t *zio)
 			flags = B_READ;
 			spl_throttle_set_thread_io_policy(IOPOL_STANDARD);
 		} else if (zio->io_priority == ZIO_PRIORITY_SCRUB) {
-			flags = B_READ | B_ASYNC;
+			flags = B_READ | B_ASYNC | B_THROTTLED_IO;
 			spl_throttle_set_thread_io_policy(IOPOL_THROTTLE);
 		} else {
 			flags = B_READ | B_ASYNC;
@@ -1065,6 +1078,9 @@ vdev_disk_io_start(zio_t *zio)
 	const hrtime_t iostart = gethrtime();
 
 	error = ldi_strategy(dvd->vd_lh, bp);
+	/*
+	 * return to IOPOL_PASSIVE to avoid self-throttling
+	 */
 	spl_throttle_set_thread_io_policy(IOPOL_PASSIVE);
 
 	const hrtime_t ioend = gethrtime();
