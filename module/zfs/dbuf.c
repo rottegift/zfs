@@ -635,7 +635,10 @@ dbuf_evict_notify(void)
 	if (refcount_count(&dbuf_cache_size) > dbuf_cache_target_bytes()) {
 		if (dbuf_cache_above_hiwater()) {
 #if defined(__APPLE__) && defined(_KERNEL)
-			/* gate: only allow a franction of  direct evictors at a time */
+			/* wake up evict thread, deschedule this thread */
+			cv_signal(&dbuf_evict_cv);
+			kpreempt(KPREEMPT_SYNC);
+			/* gate: only allow a fraction of direct evictors at a time */
 			extern unsigned int physical_ncpus;
 			ASSERT3U(physical_ncpus, >, 0);
 			dbuf_directly_evicting_threads++;
@@ -649,15 +652,20 @@ dbuf_evict_notify(void)
 					goto skip_direct_eviction;
 				kpreempt(KPREEMPT_SYNC);
 			}
-#endif
+#else
 			dbuf_evict_one();
+#endif
 #if defined(__APPLE__) && defined(_KERNEL)
+			if (dbuf_cache_above_hiwater())
+				dbuf_evict_one();
 		skip_direct_eviction:
 			dbuf_directly_evicting_threads--;
 			ASSERT3S(dbuf_directly_evicting_threads, >=, 0);
-#endif
+		}
+#else
 		}
 		cv_signal(&dbuf_evict_cv);
+#endif
 	}
 }
 
