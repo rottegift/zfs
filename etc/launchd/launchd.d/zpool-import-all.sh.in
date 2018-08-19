@@ -118,6 +118,10 @@ then
     then
 	docacheimport Quarto && QUARTO_CACHE_DONE=1
     fi
+    if [ -f /etc/zfs/caches/ipool.cache ]
+    then
+	docacheimport ipool && IPOOL_CACHE_DONE=1
+    fi
     if [ -f /etc/zfs/caches/homepool.cache ]
     then
 	echo "attempting to cache import homepool"
@@ -140,10 +144,11 @@ if((SSDPOOL_CACHE_DONE)); then echo ssdpool imported via cache.; fi
 if((TRINITY_CACHE_DONE)); then echo Trinity imported via cache.; fi
 if((SAFETY_CACHE_DONE)); then echo Safety imported via cache.; fi
 if((QUARTO_CACHE_DONE)); then echo Quarto imported via cache.; fi
+if((IPOOL_CACHE_DONE)); then echo ipool imported via cache.; fi
 if((HOMEPOOL_CACHE_DONE)); then echo homepool imported via cache.; fi
 if((DUAL_CACHE_DONE)); then echo Dual imported via cache.; fi
 
-if ((!ZPOOL_IMPORT_CACHE && ((! ((SSDPOOL_CACHE_DONE || SAFETY_CACHE_DONE || QUARTO_CACHE_DONE || TRINITY_CACHE_DONE || HOMEPOOL_CACHE_DONE || DUAL_CACHE_DONE ))))))
+if ((!ZPOOL_IMPORT_CACHE && ((! ((SSDPOOL_CACHE_DONE || SAFETY_CACHE_DONE || QUARTO_CACHE_DONE || TRINITY_CACHE_DONE || HOMEPOOL_CACHE_DONE || DUAL_CACHE_DONE || IPOOL_CACHE_DONE ))))))
 then
     echo "Nothing imported via caches.  Running zpool import -d /etc/zfs/devices"
     "${ZPOOL}" import -d /etc/zfs/devices
@@ -176,7 +181,7 @@ echo "Touching the file ${ZPOOL_IMPORT_ALL_COOKIE}"
 touch "${ZPOOL_IMPORT_ALL_COOKIE}"
 
 echo "Setting cachefile properties"
-for i in ssdpool Safety Trinity Quarto homepool Dual
+for i in ssdpool Safety Trinity Quarto ipool homepool Dual
 do
     "${ZPOOL}" set cachefile=/etc/zfs/caches/$i.cache $i
 done
