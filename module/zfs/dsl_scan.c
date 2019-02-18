@@ -2105,6 +2105,13 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 		 */
 		if (ddi_get_lbolt64() - spa->spa_last_io <= zfs_scan_idle)
 			delay(scan_delay);
+#ifdef __APPLE__
+		/* every 64 visits, give another thread a chance */
+		else if ((scn->scn_visited_this_txg % 64ULL) == 0ULL &&
+		    (scn->scn_visited_this_txg > 0ULL)) {
+			kpreempt(KPREEMPT_SYNC);
+		}
+#endif // __APPLE__
 
 		zio_nowait(zio_read(NULL, spa, bp,
 		    abd_alloc_for_io(size, B_FALSE), size, dsl_scan_scrub_done,
