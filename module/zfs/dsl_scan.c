@@ -2019,22 +2019,26 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 
 		/*
 		 * When a user is logged in at the macOS GUI, we would
-		 * often hit the cv_wait() and stay there for many
-		 * seconds.  Scrubs and resilvers would thus stall for
-		 * long periods, and take an eternity to finish for a
-		 * sizable job.
+		 * often hit the standard cv_wait() above and stay
+		 * there for many seconds.  Scrubs and resilvers would
+		 * thus stall for long periods, and take an eternity
+		 * to finish for a sizable job.
 		 *
-		 * If we stall after ~ 500 ms, then we wake up once a
-		 * millisecond, and if there hasbeen neither an
-		 * intervening "important" I/O nor other progress on the
-		 * scrub, we stop waiting for a signal, even if we are
-		 * over maxinflight (but not if we are over
-		 * dribble_threshold).
+		 * Instead, if we are over maxinflight, we timeout of
+		 * the wait after 10ms (if we are still waiting) to
+		 * see if we can make forward progress.
+		 *
+		 * If forward progress is stalled after 500 ms, then
+		 * we wake up every five milliseconds, and if there
+		 * has been neither an intervening "important" I/O nor
+		 * other progress on the scrub, we stop waiting for a
+		 * signal, even if we are over maxinflight (but not if
+		 * we are over dribble_threshold).
 		 */
 
 		const hrtime_t begin = gethrtime();
-		const int dribble_threshold = 10000; // about ten seconds of work
-		const hrtime_t dribble_every = MSEC2NSEC(1);
+		const int dribble_threshold = 1000; // about ten seconds of work
+		const hrtime_t dribble_every = MSEC2NSEC(10);
 		const hrtime_t stalled_after = MSEC2NSEC(500);
 		boolean_t stalled = B_FALSE;
 		uint32_t wakeups = 0;
@@ -2101,6 +2105,25 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 		 */
 		if (ddi_get_lbolt64() - spa->spa_last_io <= zfs_scan_idle)
 			delay(scan_delay);
+#if defined(__APPLE__) && defined(_KERNEL)
+		/* every 64 visits, yield to give another thread a chance
+		 * but every 1024 visits, suspend the thread for a millisecond
+		 */
+		else if ((scn->scn_visited_this_txg % 1024ULL) == 0ULL &&
+		    (scn->scn_visited_this_txg > 0ULL)) {
+			extern void IOSleep(unsigned milliseconds);
+			IOSleep(1);
+		} else if ((scn->scn_visited_this_txg % 64ULL) == 0ULL &&
+		    (scn->scn_visited_this_txg > 0ULL)) {
+			/* every second approx., sleep a millisecond */
+			extern void IOSleep(unsigned milliseconds);
+			const hrtime_t elap = NSEC2MSEC(gethrtime() - scn->scn_sync_start_time);
+			if ((elap % 1000ULL) == 0ULL)
+				IOSleep(1);
+			else
+				kpreempt(KPREEMPT_SYNC);
+		}
+#endif // __APPLE__ && _KERNEL
 
 		zio_nowait(zio_read(NULL, spa, bp,
 		    abd_alloc_for_io(size, B_FALSE), size, dsl_scan_scrub_done,
