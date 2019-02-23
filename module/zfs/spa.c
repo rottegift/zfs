@@ -853,8 +853,6 @@ spa_get_errlists(spa_t *spa, avl_tree_t *last, avl_tree_t *scrub)
 struct proc *spa_batchpr = { 0 };
 #endif
 
-static uint16_t spa_num = 0;
-
 static void
 spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 {
@@ -902,12 +900,13 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 		taskq_t *tq;
 
 		if (count > 1) {
-			(void) snprintf(name, sizeof (name), "%s_%s_%u_pool%u",
-			    zio_type_name[t], zio_taskq_types[q], i, spa_num);
+			(void) snprintf(name, sizeof (name), "%s_%s_%u_%s",
+			    zio_type_name[t], zio_taskq_types[q], i, spa->spa_name);
 		} else {
-			(void) snprintf(name, sizeof (name), "%s_%s_pool%u",
-			    zio_type_name[t], zio_taskq_types[q], spa_num);
+			(void) snprintf(name, sizeof (name), "%s_%s_%s",
+			    zio_type_name[t], zio_taskq_types[q], spa->spa_name);
 		}
+
 #ifndef __APPLE__
 		if (zio_taskq_sysdc && spa->spa_proc != &p0) {
 			if (batch)
@@ -1036,7 +1035,6 @@ spa_create_zio_taskqs(spa_t *spa)
 			spa_taskqs_init(spa, t, q);
 		}
 	}
-	spa_num++;
 }
 
 #if defined(_KERNEL) && defined(HAVE_SPA_THREAD)
