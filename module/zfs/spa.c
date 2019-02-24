@@ -937,8 +937,11 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 			 * like illumos it should be decremented.
 			 */
 			if (t == ZIO_TYPE_WRITE && q == ZIO_TASKQ_ISSUE)
-#ifdef LINUX
-				pri++;
+#ifdef __APPLE__
+				pri--;
+			/* Reduce other ISSUE and INTR types as well */
+			if (q == ZIO_TASKQ_ISSUE || q == ZIO_TASKQ_INTERRUPT)
+				pri--;
 #else
 				pri--;
 #endif
