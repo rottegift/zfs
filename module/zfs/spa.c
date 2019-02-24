@@ -900,11 +900,11 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 		taskq_t *tq;
 
 		if (count > 1) {
-			(void) snprintf(name, sizeof (name), "%s_%s_%u_%s",
-			    zio_type_name[t], zio_taskq_types[q], i, spa->spa_name);
+			(void) snprintf(name, sizeof (name), "%s_%s_%u",
+			    zio_type_name[t], zio_taskq_types[q], i);
 		} else {
-			(void) snprintf(name, sizeof (name), "%s_%s_%s",
-			    zio_type_name[t], zio_taskq_types[q], spa->spa_name);
+			(void) snprintf(name, sizeof (name), "%s_%s",
+			    zio_type_name[t], zio_taskq_types[q]);
 		}
 
 #ifndef __APPLE__
