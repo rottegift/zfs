@@ -936,11 +936,24 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 			 * means incrementing the priority value on platforms
 			 * like illumos it should be decremented.
 			 */
+#ifndef __APPLE__
 			if (t == ZIO_TYPE_WRITE && q == ZIO_TASKQ_ISSUE)
 #ifdef LINUX
 				pri++;
 #else
 				pri--;
+#endif
+#endif
+#ifdef __APPLE__
+		        /* ZIO_INTERRUPT tasks, especially
+                         * the read one (during scrubs) can
+			 * consume a lot of CPU, so should be
+			 * handled differently.
+			 */
+			if (q == ZIO_TASKQ_INTERRUPT &&
+			    (t == ZIO_TYPE_READ ||
+			     t== ZIO_TYPE_WRITE))
+				flags |= TASKQ_TIMESHARE;
 #endif
 
 			tq = taskq_create_proc(name, value, pri, 50,
