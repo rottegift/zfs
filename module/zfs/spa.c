@@ -944,7 +944,7 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 				pri--;
 #endif
 #endif
-#ifdef __APPLE__
+#if defined(__APPLE__) && defined(_KERNEL)
 		        /* ZIO_INTERRUPT tasks, especially
                          * the read one (during scrubs) can
 			 * consume a lot of CPU, so should be
