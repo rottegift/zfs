@@ -942,6 +942,18 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 				pri--;
 			}
 
+#ifdef __APPLE__
+			/*
+			 * depower read INTR taskq
+			 * as this is heavily exercised in scrub
+			 * which hurts with quick pools and
+			 * crypto checksumming
+			 */
+			if (t == ZIO_TYPE_READ && q == ZIO_TASKQ_INTERRUPT) {
+				pri--;
+			}
+#endif
+
 			tq = taskq_create_proc(name, value, pri, 50,
 			    INT_MAX, spa->spa_proc, flags);
 		}
