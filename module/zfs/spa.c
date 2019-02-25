@@ -936,15 +936,11 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 			 * means incrementing the priority value on platforms
 			 * like illumos it should be decremented.
 			 */
-			if (t == ZIO_TYPE_WRITE && q == ZIO_TASKQ_ISSUE)
-#ifdef __APPLE__
+			if (t == ZIO_TYPE_WRITE && q == ZIO_TASKQ_ISSUE) {
+				printf("ZFS: huh? should not be here! %s:%d\n",
+				    __func__, __LINE__);
 				pri--;
-			/* Reduce other ISSUE and INTR types as well */
-			if (q == ZIO_TASKQ_ISSUE || q == ZIO_TASKQ_INTERRUPT)
-				pri--;
-#else
-				pri--;
-#endif
+			}
 
 			tq = taskq_create_proc(name, value, pri, 50,
 			    INT_MAX, spa->spa_proc, flags);
