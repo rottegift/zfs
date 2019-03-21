@@ -713,7 +713,7 @@ dsl_scan_prefetch(dsl_scan_t *scn, arc_buf_t *buf, blkptr_t *bp,
 	SET_BOOKMARK(&czb, objset, object, BP_GET_LEVEL(bp), blkid);
 
 	(void) arc_read(scn->scn_zio_root, scn->scn_dp->dp_spa, bp,
-	    NULL, NULL, ZIO_PRIORITY_ASYNC_READ,
+	    NULL, NULL, ZIO_PRIORITY_SCRUB,
 	    zio_flags, &flags, &czb);
 }
 
