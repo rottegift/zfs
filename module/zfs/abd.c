@@ -548,6 +548,12 @@ abd_alloc_linear(size_t size, boolean_t is_metadata)
 	if (is_metadata) {
 		abd->abd_u.abd_linear.abd_buf = zio_buf_alloc(size);
 	} else {
+		if (size > SPA_MAXBLOCKSIZE) {
+			printf("%s%d: WILL PANIC size %lu > SPA_MAXBLOCKSIZE\n",
+			    __FILE__, __LINE__, size);
+			delay(300);
+		}
+		VERIFY3U(size, <=, SPA_MAXBLOCKSIZE);
 		abd->abd_u.abd_linear.abd_buf = zio_data_buf_alloc(size);
 	}
 

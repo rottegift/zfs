@@ -5402,6 +5402,12 @@ arc_get_data_buf(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
 		return (zio_buf_alloc(size));
 	} else {
 		ASSERT(type == ARC_BUFC_DATA);
+		if (size > SPA_MAXBLOCKSIZE) {
+			printf("%s%d: WILL PANIC write_size %llu > SPA_MAXBLOCKSIZE\n",
+			    __FILE__, __LINE__, size);
+			delay(300);
+		}
+		VERIFY3U(size, <=, SPA_MAXBLOCKSIZE);
 		return (zio_data_buf_alloc(size));
 	}
 }

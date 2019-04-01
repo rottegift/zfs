@@ -3385,6 +3385,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	}
 	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
 
+	if (write_size > SPA_MAXBLOCKSIZE) {
+		printf("%s%d: WILL PANIC write_size %llu > SPA_MAXBLOCKSIZE\n",
+		    __FILE__, __LINE__, write_size);
+		delay(300);
+	}
+	VERIFY3U(write_size, <=, SPA_MAXBLOCKSIZE);
 	void *safebuf = zio_data_buf_alloc(write_size);
 
 	pageout_op->line = __LINE__;

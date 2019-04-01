@@ -1307,6 +1307,13 @@ zil_itx_create(uint64_t txtype, size_t lrsize)
 
 	lrsize = P2ROUNDUP_TYPED(lrsize, sizeof (uint64_t), size_t);
 
+	size_t calc_size = offsetof(itx_t, itx_lr) + lrsize;
+	if (calc_size > SPA_MAXBLOCKSIZE) {
+		printf("%s%d: WILL PANIC calcsize %lu > SPA_MAXBLOCKSIZE\n",
+		    __FILE__, __LINE__, calc_size);
+		delay(300);
+	}
+	VERIFY3U(offsetof(itx_t, itx_lr) + lrsize, <=, SPA_MAXBLOCKSIZE);
 	itx = zio_data_buf_alloc(offsetof(itx_t, itx_lr) + lrsize);
 	itx->itx_lr.lrc_txtype = txtype;
 	itx->itx_lr.lrc_reclen = lrsize;
