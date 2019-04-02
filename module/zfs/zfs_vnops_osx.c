@@ -3252,6 +3252,7 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT0(upl_offset & PAGE_MASK_64);
 	ASSERT0(size & PAGE_MASK_64);
 	ASSERT3S(size, >=, PAGE_SIZE_64);
+	VERIFY3U(size, <, SPA_MAXBLOCKSIZE);
 
 	ASSERT3S(ubc_getsize(ZTOV(zp)), ==, filesize);
 
@@ -3386,8 +3387,12 @@ bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
 	ASSERT3S(round_page_64(upl_offset + write_size), <=, upl_offset + size);
 
 	if (write_size > SPA_MAXBLOCKSIZE) {
-		printf("%s%d: WILL PANIC write_size %llu > SPA_MAXBLOCKSIZE\n",
-		    __FILE__, __LINE__, write_size);
+		printf("ZFS: %s%d: WILL PANIC write_size %llu > SPA_MAXBLOCKSIZE "
+		    "upl_offset %u, f_offset %llu, fs %s, id %llu, file %s\n",
+		    __FILE__, __LINE__, write_size,
+		    upl_offset, f_offset,
+		    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
+		    zp->z_id, zp->z_name_cache);
 		delay(300);
 	}
 	VERIFY3U(write_size, <=, SPA_MAXBLOCKSIZE);
@@ -5159,9 +5164,25 @@ skip_lock_acquisition:
 			pageout_op->state = "calling bluster";
 			pageout_op->line = __LINE__;
 
+
+			const int bluster_size = end_of_range - start_of_range;
+			if (bluster_size >= MIN(MAX_UPL_TRANSFER_BYTES, SPA_MAXBLOCKSIZE)) {
+				printf("ZFS: %s:%d: WILL PANIC! bluster_size %d "
+				    "end_of_range %lld start_of_range %lld "
+				    "pages remaining %lld "
+				    "fs %s id %llu file %s ",
+				    __func__, __LINE__, bluster_size,
+				    end_of_range, start_of_range,
+				    pages_remaining,
+				    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
+				    zp->z_id, zp->z_name_cache);
+				delay(300);
+			}
+			VERIFY3U(bluster_size, <, MIN(MAX_UPL_TRANSFER_BYTES, SPA_MAXBLOCKSIZE));
+
 			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
 			    f_start_of_upl,
-			    (end_of_range - start_of_range), filesize, a_flags, ap,
+			    bluster_size, filesize, a_flags, ap,
 			    pages_remaining, pageout_op);
 
 			pageout_op->func = __func__;
