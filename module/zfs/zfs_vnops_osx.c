@@ -5127,11 +5127,32 @@ skip_lock_acquisition:
 			pageout_op->line = __LINE__;
 			ASSERT(upl_valid_page(pl, pg_index));
 			int page_past_end_of_range = pg_index + 1;
+			int prospective_bluster_size = PAGE_SIZE;
 			for ( ; page_past_end_of_range < just_past_last_valid_pg;
 			      page_past_end_of_range++) {
 				if (!upl_dirty_page(pl, page_past_end_of_range))
 					break;
 				ASSERT(upl_dirty_page(pl, page_past_end_of_range));
+				prospective_bluster_size += PAGE_SIZE;
+				if (prospective_bluster_size >= MAX_UPL_TRANSFER_BYTES) {
+					printf("ZFS: %s:%d: range size %d greater than MAX_UPL_TRANSFER_BYTES %lu"
+					    " page_past_end_of_range %d just_past_last_valid_pg %lld"
+					    " pg_index %lld"
+					    " starting bluster_pageout early for dirty upl bytes"
+					    " [%lld..%lld]"
+					    " of file bytes [%lld..%lld] (pages in upl %d)"
+					    " fs %s zid %llu file %s\n",
+					    __func__, __LINE__,
+					    prospective_bluster_size, MAX_UPL_TRANSFER_BYTES,
+					    page_past_end_of_range, just_past_last_valid_pg,
+					    pg_index,
+					    pg_index * PAGE_SIZE_64, page_past_end_of_range * PAGE_SIZE_64,
+					    f_start_of_upl, f_end_of_upl, pages_in_upl,
+					    fsname, zp->z_id, fname);
+					zfs_dbgmsg("ZFS: %s:%d: bluster too big %s %llu %s\n",
+					    __func__, __LINE__, fsname, zp->z_id, fname);
+					break;
+				}
 			}
 			pageout_op->state = "gathered dirty range";
 			pageout_op->line = __LINE__;
