@@ -3822,8 +3822,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
 	int a_flags = ap->a_flags;
-	vm_offset_t	a_pl_offset = ap->a_pl_offset;
-	size_t a_size = ap->a_size;
+	const vm_offset_t	a_pl_offset = ap->a_pl_offset;
+	const size_t a_size = ap->a_size;
 	upl_t upl = ap->a_pl;
 	upl_page_info_t* pl;
 	znode_t *zp = VTOZ(vp);
@@ -3834,6 +3834,8 @@ pageoutv2_helper(struct vnop_pageout_args *ap)
 	boolean_t must_lock = B_FALSE;
 	const off_t end_of_pageout = ap->a_f_offset + ap->a_size;
 	caddr_t v_addr = 0;
+
+	ASSERT3U(ap->a_size, <=, MAX_UPL_TRANSFER_BYTES);
 
 	VNOPS_OSX_STAT_BUMP(pageoutv2_calls);
 
@@ -4729,8 +4731,9 @@ skip_lock_acquisition:
 	 * we're in control of any UPL we commit
 	 * make sure someone hasn't accidentally passed in UPL_NOCOMMIT
 	 */
+	ASSERT0(a_flags & UPL_NOCOMMIT);
 	a_flags &= ~UPL_NOCOMMIT;
-	a_pl_offset = 0;
+	ASSERT0(a_pl_offset);
 
 	if (a_flags & UPL_MSYNC) {
 	  request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY | UPL_KEEPCACHED;
@@ -5134,7 +5137,7 @@ skip_lock_acquisition:
 					break;
 				ASSERT(upl_dirty_page(pl, page_past_end_of_range));
 				prospective_bluster_size += PAGE_SIZE;
-				if (prospective_bluster_size >= MAX_UPL_TRANSFER_BYTES) {
+				if (prospective_bluster_size > MAX_UPL_TRANSFER_BYTES) {
 					printf("ZFS: %s:%d: range size %d greater than MAX_UPL_TRANSFER_BYTES %lu"
 					    " page_past_end_of_range %d just_past_last_valid_pg %lld"
 					    " pg_index %lld"
