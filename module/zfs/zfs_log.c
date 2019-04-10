@@ -479,6 +479,18 @@ zfs_log_write(zilog_t *zilog, dmu_tx_t *tx, int txtype,
 		    (zp != NULL)
 		    ? zp->z_name_cache
 		    : "<no filename>");
+		zfs_dbgmsg("zfs_log_write, resid %lu > MAX_UPL_SIZE_BYTES %u"
+		    " off %llu ioflag %x,"
+		    " fsname %s zid %llu fname %s\n",
+		    resid, MAX_UPL_SIZE_BYTES,
+		    off, ioflag,
+		    (zp != NULL && zp->z_zfsvfs != NULL && zp->z_zfsvfs->z_vfs != NULL)
+		    ? vfs_statfs(zp->z_zfsvfs->z_vfs)->f_mntfromname
+		    : "<no filesystem>",
+		    (zp != NULL) ? zp->z_id : 0,
+		    (zp != NULL)
+		    ? zp->z_name_cache
+		    : "<no filename>");
 	}
 
 	ASSERT3S(resid, >, 0);
