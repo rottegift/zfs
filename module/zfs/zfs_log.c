@@ -465,7 +465,22 @@ zfs_log_write(zilog_t *zilog, dmu_tx_t *tx, int txtype,
 	uintptr_t fsync_cnt;
 
 	extern const int MAX_UPL_SIZE_BYTES;
-	ASSERT3U(resid, <=, (ssize_t) MAX_UPL_SIZE_BYTES);
+	if (resid > MAX_UPL_SIZE_BYTES) {
+		printf("ZFS: %s:%d: big write, resid %lu > MAX_UPL_SIZE_BYTES %u"
+		    " off %llu ioflag %x,"
+		    " fsname %s zid %llu fname %s\n",
+		    __func__, __LINE__,
+		    resid, MAX_UPL_SIZE_BYTES,
+		    off, ioflag,
+		    (zp != NULL && zp->z_zfsvfs != NULL && zp->z_zfsvfs->z_vfs != NULL)
+		    ? vfs_statfs(zp->z_zfsvfs->z_vfs)->f_mntfromname
+		    : "<no filesystem>",
+		    (zp != NULL) ? zp->z_id : 0,
+		    (zp != NULL)
+		    ? zp->z_name_cache
+		    : "<no filename>");
+	}
+
 	ASSERT3S(resid, >, 0);
 
 	if (zil_replaying(zilog, tx) || zp->z_unlinked) {
