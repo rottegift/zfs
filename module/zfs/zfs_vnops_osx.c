@@ -4733,7 +4733,6 @@ skip_lock_acquisition:
 	 */
 	ASSERT0(a_flags & UPL_NOCOMMIT);
 	a_flags &= ~UPL_NOCOMMIT;
-	ASSERT0(a_pl_offset);
 
 	if (a_flags & UPL_MSYNC) {
 	  request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY | UPL_KEEPCACHED;
