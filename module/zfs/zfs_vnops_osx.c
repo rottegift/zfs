@@ -5184,10 +5184,6 @@ skip_lock_acquisition:
 			ASSERT3S(pages_remaining, >=, howmany(end_of_range - start_of_range, PAGE_SIZE_64));
 			ASSERT3S(end_of_range, <=, trimmed_upl_size);
 
-			pageout_op->state = "calling bluster";
-			pageout_op->line = __LINE__;
-
-
 			const int bluster_size = end_of_range - start_of_range;
 			if (bluster_size >= MIN(MAX_UPL_TRANSFER_BYTES, SPA_MAXBLOCKSIZE)) {
 				printf("ZFS: %s:%d: WILL PANIC! bluster_size %d "
@@ -5200,17 +5196,23 @@ skip_lock_acquisition:
 				    vfs_statfs(zfsvfs->z_vfs)->f_mntfromname,
 				    zp->z_id, zp->z_name_cache);
 				delay(300);
+				spl_backtrace("long bluster");
+				error = EIO;
+			} else {
+				pageout_op->state = "calling bluster";
+				pageout_op->line = __LINE__;
+
+				//VERIFY3U(bluster_size, <, MIN(MAX_UPL_TRANSFER_BYTES, SPA_MAXBLOCKSIZE));
+				error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
+				    f_start_of_upl,
+				    bluster_size, filesize, a_flags, ap,
+				    pages_remaining, pageout_op);
+
+				pageout_op->func = __func__;
+				pageout_op->line = __LINE__;
+				pageout_op->state = "returned from bluster";
 			}
-			VERIFY3U(bluster_size, <, MIN(MAX_UPL_TRANSFER_BYTES, SPA_MAXBLOCKSIZE));
 
-			error = bluster_pageout(zfsvfs, zp, upl, start_of_range,
-			    f_start_of_upl,
-			    bluster_size, filesize, a_flags, ap,
-			    pages_remaining, pageout_op);
-
-			pageout_op->func = __func__;
-			pageout_op->line = __LINE__;
-			pageout_op->state = "returned from bluster";
 
 			if (error != 0) {
 				pageout_op->state = "bluster returned error";
