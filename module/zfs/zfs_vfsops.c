@@ -191,6 +191,8 @@ extern void zfs_ioctl_fini(void);
 
 #endif
 
+uint64_t zfs_vfs_sync_writemap_skip = 0;
+
 int
 zfs_vfs_umcallback(vnode_t *vp, void * arg)
 {
@@ -288,17 +290,34 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    " usize %llu zid %llu fs %s fname %s\n",
 			    __func__, __LINE__, writable, ubc_getsize(vp),
 			    zp->z_id, fsname, fname);
-			flags = UBC_PUSHALL;
+			/* if we aren't unmounting then don't sync a write-mapped file */
+			if (writable) {
+				if (zfsvfs->z_is_unmounting) {
+					printf("ZFS: %s:%d: WARNING: unmounting and"
+					    " write-mapped sync usize %llu zid %llu"
+					    " fs %s fname%s",
+					    __func__, __LINE__, ubc_getsize(vp),
+					    zp->z_id, fsname, fname);
+				}
+			}
 		}
 
-		if (zp->z_in_pager_op == 0) {
-			ASSERT0(vnode_isrecycled(vp));
-			msync_retval = zfs_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
-		} else {
+		/* skip the sync if we are in the pager, or the file
+		 * is has a writable memory mapping (unless we are unmounting)
+		 */
+
+		if (zp->z_in_pager_op != 0) {
 			printf("ZFS: %s:%d: msync avoided because of z_in_pager_op (%d)"
 			    " (usize %llu) zid %llu fs %s file %s\n",
 			    __func__, __LINE__, zp->z_in_pager_op, ubc_getsize(vp),
 			    zp->z_id, fsname, fname);
+		}
+		else if (writable && !zfsvfs->z_is_unmounting) {
+			atomic_inc_64(&zfs_vfs_sync_writemap_skip);
+		}
+		else {
+			ASSERT0(vnode_isrecycled(vp));
+			msync_retval = zfs_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
 		}
 
 		z_map_drop_lock(zp, &need_release, &need_upgrade);

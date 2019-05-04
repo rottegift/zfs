@@ -159,6 +159,8 @@ typedef struct osx_kstat {
 	kstat_named_t zfs_resilver_min_time_ms;
 
 	kstat_named_t zio_delay_max;
+
+	kstat_named_t vfssync_writemap_skip;
 } osx_kstat_t;
 
 
@@ -272,6 +274,8 @@ extern int zfs_scan_min_time_ms;
 extern int zfs_resilver_min_time_ms;
 
 extern int zio_delay_max;
+
+extern uint64_t zfs_vfs_sync_writemap_skip;
 
 int        kstat_osx_init(void);
 void       kstat_osx_fini(void);

@@ -191,6 +191,7 @@ osx_kstat_t osx_kstat = {
 
 	{"zio_delay_max", KSTAT_DATA_UINT64 },
 
+	{"vfssync_writemap_skip", KSTAT_DATA_UINT64 },
 };
 
 
@@ -617,6 +618,8 @@ static int osx_kstat_update(kstat_t *ksp, int rw)
 		ks->zfs_resilver_min_time_ms.value.ui64 = (uint64_t) zfs_resilver_min_time_ms;
 
 		ks->zio_delay_max.value.ui64 = (uint64_t) zio_delay_max;
+
+		ks->vfssync_writemap_skip.value.ui64 = zfs_vfs_sync_writemap_skip;
 	}
 
 	return 0;
