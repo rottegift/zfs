@@ -649,8 +649,8 @@ dbuf_evict_notify(void)
 				} else if (i > 0) {
 					if (dbuf_directly_evicting_threads > 2)
 						IOSleep(1);
-					else if (dbuf_directly_evicting_threads > 1)
-						IODelay(5);
+					else if ((i % 100) == 0)
+						IOSleep(1);
 				}
 
 				if (!dbuf_cache_above_hiwater())
