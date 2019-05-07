@@ -644,12 +644,18 @@ dbuf_evict_notify(void)
 			dbuf_directly_evicting_threads++;
 			ASSERT3S(dbuf_directly_evicting_threads, <, 2048);
 			for (int i = 0 ; dbuf_directly_evicting_threads > 1; i++) {
-				if (dbuf_directly_evicting_threads >= physical_ncpus)
-					kpreempt(KPREEMPT_SYNC);
-				else if (i != 0 && (i % physical_ncpus) == 0)
-					IODelay(1);
+				if (dbuf_directly_evicting_threads >= physical_ncpus) {
+					IOSleep(1);
+				} else if (i > 0) {
+					if (dbuf_directly_evicting_threads > 2)
+						IOSleep(1);
+					else if (dbuf_directly_evicting_threads > 1)
+						IODelay(5);
+				}
+
 				if (!dbuf_cache_above_hiwater())
-					goto skip_direct_eviction;
+					  goto skip_direct_eviction;
+
 				kpreempt(KPREEMPT_SYNC);
 			}
 #else
@@ -723,7 +729,7 @@ retry:
 	 * All entries are queued via taskq_dispatch_ent(), so min/maxalloc
 	 * configuration is not required.
 	 */
-	dbu_evict_taskq = taskq_create("dbu_evict", 1, minclsyspri, 0, 0, 0);
+	dbu_evict_taskq = taskq_create("dbu_evict", 1, defclsyspri, 0, 0, 0);
 
 	dbuf_cache = multilist_create(sizeof (dmu_buf_impl_t),
 	    offsetof(dmu_buf_impl_t, db_cache_link),
