@@ -87,21 +87,31 @@ function docacheimport () (c=/etc/zfs/caches/$1.cache
 if ((!ZPOOL_CACHE_DONE))
 then
     set -e
-    SSDPOOL_CACHE_DONE=0
     TRINITY_CACHE_DONE=0
     SAFETY_CACHE_DONE=0
     DUAL_CACHE_DONE=0
     HOMEPOOL_CACHE_DONE=0
     echo "ZPOOL_CACHE_DONE = 0, therefore trying individual caches"
-    if [ -f /etc/zfs/caches/ssdpool.cache ]
-    then
-	docacheimport ssdpool && SSDPOOL_CACHE_DONE=1
-	if ((!SSDPOOL_CACHE_DONE))
-	then
-	    echo "ssdpool cache import failed, this is critical. bye."
-	    exit 1
-	fi
+    export SSDPOOL_GUID="8745912265166105705"
+    if [ `zpool get -H -p -o value guid ssdpool` -ne $SSDPOOL_GUID ]; then
+	    echo "ssdpool not already imported with guid" $SSDPOOL_GUID " this is critical. bye."
     fi
+    if [ `zfs get -H -p -o value mounted ssdpool/DATA/opt` -ne "yes" ]; then
+	zfs mount -a
+    fi
+    if [ `zfs get -H -p -o value mounted ssdpool/smd` -ne "yes" ]; then
+	zfs mount -a
+    fi
+
+#    if [ -f /etc/zfs/caches/ssdpool.cache ]
+#    then
+#	docacheimport ssdpool && SSDPOOL_CACHE_DONE=1
+#	if ((!SSDPOOL_CACHE_DONE))
+#	then
+#	    echo "ssdpool cache import failed, this is critical. bye."
+#	    exit 1
+#	fi
+#    fi
     if [ -f /etc/zfs/caches/Quarto.cache ]
     then
 	testcacheimport Quarto || echo 'Quarto test failed'
@@ -140,7 +150,6 @@ fi
 
 set +e
 if((ZPOOL_CACHE_DONE)); then echo Everything imported via cache.; fi
-if((SSDPOOL_CACHE_DONE)); then echo ssdpool imported via cache.; fi
 if((TRINITY_CACHE_DONE)); then echo Trinity imported via cache.; fi
 if((SAFETY_CACHE_DONE)); then echo Safety imported via cache.; fi
 if((QUARTO_CACHE_DONE)); then echo Quarto imported via cache.; fi
@@ -148,16 +157,13 @@ if((IPOOL_CACHE_DONE)); then echo ipool imported via cache.; fi
 if((HOMEPOOL_CACHE_DONE)); then echo homepool imported via cache.; fi
 if((DUAL_CACHE_DONE)); then echo Dual imported via cache.; fi
 
-if ((!ZPOOL_IMPORT_CACHE && ((! ((SSDPOOL_CACHE_DONE || SAFETY_CACHE_DONE || QUARTO_CACHE_DONE || TRINITY_CACHE_DONE || HOMEPOOL_CACHE_DONE || DUAL_CACHE_DONE || IPOOL_CACHE_DONE ))))))
+if ((!ZPOOL_IMPORT_CACHE && ((! ((SAFETY_CACHE_DONE || QUARTO_CACHE_DONE || TRINITY_CACHE_DONE || HOMEPOOL_CACHE_DONE || DUAL_CACHE_DONE || IPOOL_CACHE_DONE ))))))
 then
     echo "Nothing imported via caches.  Running zpool import -d /etc/zfs/devices"
     "${ZPOOL}" import -d /etc/zfs/devices
     date
 
     # should also make this work on mis; for now fallback will have to be manual
-    echo "Running zpool import -d /etc/zfs/devices ssdpool || exit 1"
-    "${ZPOOL}" import -d /etc/zfs/devices ssdpool || exit 1
-    date
 
     echo "Running zfs mount -a || exit 1"
     "${ZFS}" mount -a  || exit 1
@@ -181,7 +187,7 @@ echo "Touching the file ${ZPOOL_IMPORT_ALL_COOKIE}"
 touch "${ZPOOL_IMPORT_ALL_COOKIE}"
 
 echo "Setting cachefile properties"
-for i in ssdpool Safety Trinity Quarto ipool homepool Dual
+for i in Safety Trinity Quarto ipool homepool Dual
 do
     "${ZPOOL}" set cachefile=/etc/zfs/caches/$i.cache $i
 done
