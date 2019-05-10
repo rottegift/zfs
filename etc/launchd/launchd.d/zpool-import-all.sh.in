@@ -94,14 +94,16 @@ then
     echo "ZPOOL_CACHE_DONE = 0, therefore trying individual caches"
     export SSDPOOL_GUID="8745912265166105705"
     if [ `zpool get -H -p -o value guid ssdpool` -ne $SSDPOOL_GUID ]; then
-	    echo "ssdpool not already imported with guid" $SSDPOOL_GUID " this is critical. bye."
+	echo "ssdpool not already imported with guid" $SSDPOOL_GUID " this is critical. bye."
+	exit 1
     fi
-    if [ `zfs get -H -p -o value mounted ssdpool/DATA/opt` -ne "yes" ]; then
-	zfs mount -a
-    fi
-    if [ `zfs get -H -p -o value mounted ssdpool/smd` -ne "yes" ]; then
-	zfs mount -a
-    fi
+#    if [ `zfs get -H -p -o value mounted ssdpool/DATA/opt` -ne "yes" ]; then
+#	zfs mount -a
+#    fi
+#    if [ `zfs get -H -p -o value mounted ssdpool/smd` -ne "yes" ]; then
+#	zfs mount -a
+    #    fi
+    zfs mount -a
 
 #    if [ -f /etc/zfs/caches/ssdpool.cache ]
 #    then
