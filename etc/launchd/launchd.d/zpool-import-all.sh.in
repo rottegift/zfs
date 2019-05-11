@@ -2,6 +2,7 @@
 
 echo "+zpool-import-all.sh"
 date
+export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/usr/local/sbin:/usr/local/bin
 export ZPOOL=@sbindir@/zpool
 export ZFS=@sbindir@/zfs
 export ZPOOL_IMPORT_ALL_COOKIE=/var/run/org.openzfsonosx.zpool-import-all.didRun
