@@ -614,7 +614,11 @@ off_t fsize = zp->z_size;
 			//error = is_file_clean(ap->a_vp, zp->z_size);
 
 /* XXX be loud */
-printf("F_CHKCLEAN size %llu ret %d\n", fsize, error);
+			const char *fname = zp->z_name_cache;
+			const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
+			printf("F_CHKCLEAN size %llu ret %d fs %s fn %s zid %llu\n", fsize, error,
+			    (fsname == NULL) ?  "<null>" : fsname,
+			    fname, zp->z_id);
 			if (error) dprintf("F_CHKCLEAN ret %d\n", error);
 			break;
 
