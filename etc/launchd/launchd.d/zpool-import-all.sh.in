@@ -104,7 +104,7 @@ then
 #    if [ `zfs get -H -p -o value mounted ssdpool/smd` -ne "yes" ]; then
 #	zfs mount -a
     #    fi
-    zfs mount -a
+    zfs mount -a -v
 
 #    if [ -f /etc/zfs/caches/ssdpool.cache ]
 #    then
@@ -168,8 +168,8 @@ then
 
     # should also make this work on mis; for now fallback will have to be manual
 
-    echo "Running zfs mount -a || exit 1"
-    "${ZFS}" mount -a  || exit 1
+    echo "Running zfs mount -a -v || exit 1"
+    "${ZFS}" mount -a  -v || exit 1
     date
 
     echo "Running zpool import -d /etc/zfs/devices Trinity || exit 1"
@@ -195,8 +195,8 @@ do
     "${ZPOOL}" set cachefile=/etc/zfs/caches/$i.cache $i
 done
 
-echo "Running zfs mount -a || exit 1"
-"${ZFS}" mount -a  || exit 1
+echo "Running zfs mount -a -v || exit 1"
+"${ZFS}" mount -a  -v || exit 1
 
 date
 echo "-zpool-import-all.sh"
