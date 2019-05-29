@@ -876,14 +876,29 @@ IOReturn
 net_lundman_zfs_zvol_device::getWriteCacheState(bool *enabled)
 {
 	dprintf("getCacheState\n");
-	if (enabled) *enabled = true;
+	bool state = false;
+	if (zv && (zv->zv_flags & ZVOL_WCE))
+	  state = true;
+	if (enabled) *enabled = state;
 	return (kIOReturnSuccess);
 }
 
 IOReturn
 net_lundman_zfs_zvol_device::setWriteCacheState(bool enabled)
 {
-	dprintf("setWriteCache\n");
+  printf("ZFS: %s:%d setWriteCache [%s] %s was %s\n",
+	 __func__, __LINE__,
+	 (enabled) ? "enabled" : "disabled",
+	 (zv == NULL) ? "no zv" : zv->zv_bsdname,
+	 (zv == NULL) ? "no zv->zv_flags"
+	 : (zv->zv_flags & ZVOL_WCE) ? "enabled" : "disabled");
+
+	if (zv) {
+	  if (enabled)
+	    zv->zv_flags |= ZVOL_WCE;
+	  else
+	    zv->zv_flags &= ~(ZVOL_WCE);
+	}
 	return (kIOReturnSuccess);
 }
 

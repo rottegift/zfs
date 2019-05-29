@@ -1868,7 +1868,7 @@ zvol_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
  */
 ssize_t zvol_immediate_write_sz = 32768;
 
-static void
+void
 zvol_log_write(zvol_state_t *zv, dmu_tx_t *tx, offset_t off, ssize_t resid,
     boolean_t sync)
 {
