@@ -2437,16 +2437,23 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 		}
 
 
-		uint64_t pre_write_bytes = bytes;
-		uint64_t pre_write_offset = offset;
+		const uint64_t pre_write_offset = offset;
 
 		error = dmu_write_iokit_dbuf(zv->zv_dbuf, &offset,
 		    position, &bytes, iomem, tx);
 
 		if (error == 0) {
+			/* offset will have advanced beyond off
+			 * and bytes will have been reduced */
 			count -= MIN(count,
 			    (DMU_MAX_ACCESS >> 1)) + bytes;
-			zvol_log_write(zv, tx, position + pre_write_offset, pre_write_bytes, sync);
+
+			uint64_t offset_diff =
+			    (pre_write_offset < offset)
+			    ? offset - pre_write_offset
+			    : 0;
+
+			zvol_log_write(zv, tx, position + pre_write_offset, offset_diff, sync);
 		}
 		dmu_tx_commit(tx);
 
