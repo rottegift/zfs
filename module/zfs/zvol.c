@@ -928,8 +928,10 @@ zvol_first_open(zvol_state_t *zv)
 	if (readonly || dmu_objset_is_snapshot(os) ||
 	    !spa_writeable(dmu_objset_spa(os)))
 		zv->zv_flags |= ZVOL_RDONLY;
-	else
+	else {
 		zv->zv_flags &= ~ZVOL_RDONLY;
+		zv->zv_flags |= ZVOL_WCE;
+	}
 
 
   out_owned:
@@ -2434,13 +2436,17 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 			break;
 		}
 
+
+		uint64_t pre_write_bytes = bytes;
+		uint64_t pre_write_offset = offset;
+
 		error = dmu_write_iokit_dbuf(zv->zv_dbuf, &offset,
 		    position, &bytes, iomem, tx);
 
 		if (error == 0) {
 			count -= MIN(count,
 			    (DMU_MAX_ACCESS >> 1)) + bytes;
-			zvol_log_write(zv, tx, off, bytes, sync);
+			zvol_log_write(zv, tx, position + pre_write_offset, pre_write_bytes, sync);
 		}
 		dmu_tx_commit(tx);
 
