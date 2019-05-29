@@ -2453,7 +2453,11 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 			    ? offset - pre_write_offset
 			    : 0;
 
-			zvol_log_write(zv, tx, position + pre_write_offset, offset_diff, sync);
+			///
+			/// BUG zvol_log_write(zv, tx, position + pre_write_offset, offset_diff, sync);
+			/// this can cause a panic in VNOP_IOCTL->deviceSynchronizeCache->zil_commit->zfs_zget_ext
+			///
+			zvol_log_write(zv, tx, off, bytes, sync); // orig, same in master
 		}
 		dmu_tx_commit(tx);
 
