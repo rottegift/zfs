@@ -312,7 +312,9 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    __func__, __LINE__, zp->z_in_pager_op, ubc_getsize(vp),
 			    zp->z_id, fsname, fname);
 		}
-		else if (writable && !zfsvfs->z_is_unmounting) {
+		else if (writable && !zfsvfs->z_is_unmounting
+		    && !waitfor
+		    && zfsvfs->z_os->os_sync != ZFS_SYNC_ALWAYS) {
 			atomic_inc_64(&zfs_vfs_sync_writemap_skip);
 		}
 		else {
