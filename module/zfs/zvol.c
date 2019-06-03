@@ -2439,8 +2439,7 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 			break;
 		}
 
-
-		const uint64_t pre_write_offset = offset;
+		const uint64_t pre_write_off = off;
 		const uint64_t pre_write_bytes = bytes;
 
 		error = dmu_write_iokit_dbuf(zv->zv_dbuf, &offset,
@@ -2462,7 +2461,8 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 			/// this can cause a panic in VNOP_IOCTL->deviceSynchronizeCache->zil_commit->zfs_zget_ext
 			///
 			//zvol_log_write(zv, tx, off, bytes, sync); // orig, same in master
-			zvol_log_write(zv, tx, position + pre_write_offset, pre_write_bytes, sync);
+			sync = true; // test
+			zvol_log_write(zv, tx, position + pre_write_off, pre_write_bytes, sync);
 		}
 		dmu_tx_commit(tx);
 
