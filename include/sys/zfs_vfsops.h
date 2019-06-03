@@ -108,6 +108,7 @@ struct zfsvfs {
 	    uint64_t	    z_freespace_notify_dangerlimit; /* HFSIOC_ - number of free blocks */
 	    uint64_t	    z_freespace_notify_desiredlevel; /* HFSIOC_ - number of free blocks */
 	_Atomic boolean_t   z_is_unmounting;
+	_Atomic hrtime_t    z_oldest_skipped_sync;
 
 #ifdef APPLE_SA_RECOVER
 	    uint64_t        z_recover_parent;/* Temporary holder until SA corruption are gone */

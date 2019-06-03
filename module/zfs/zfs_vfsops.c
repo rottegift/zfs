@@ -206,12 +206,12 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		if (!zp || !POINTER_IS_VALID(zp)) {
 			printf("ZFS: %s:%d: ZTOV(vp) is NULL!\n", __func__, __LINE__);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		if (!zp->z_sa_hdl) {
 			printf("ZFS: %s:%d: vp has no z_sa_hdl! file %s\n", __func__, __LINE__,
 			    zp->z_name_cache);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		if (zfsvfs && zfsvfs->z_unmounted) {
 			printf("ZFS: %s:%d: zfvfs is not mounted file %s (unmounting? %d)\n",
@@ -221,7 +221,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		if (zp->z_in_pager_op > 0) {
 			printf("ZFS: %s:%d: z_in_pager_op %d > 0 for file %s\n", __func__, __LINE__,
 			    zp->z_in_pager_op, zp->z_name_cache);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		ZFS_ENTER_NOERROR(zfsvfs);
 		const char *fname = zp->z_name_cache;
@@ -230,7 +230,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			printf("ZFS: %s:%d: invalid zp or z_sa_hdl null for fs %s file %s (waitfor_arg %d)\n",
 			    __func__, __LINE__, fsname, fname, *waitfor_arg);
 			ZFS_EXIT(zfsvfs);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		if (vfs_isrdonly(zfsvfs->z_vfs) ||
 		    vfs_flags(zfsvfs->z_vfs) & MNT_RDONLY ||
@@ -238,7 +238,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			printf("ZFS: %s:%d: read only filesystem, will return vnode for (dirty!) file %s\n",
 			    __func__, __LINE__, zp->z_name_cache);
 			ZFS_EXIT(zfsvfs);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		ASSERT0(zp->z_pflags & ZFS_IMMUTABLE);
 		if (zp->z_pflags & ZFS_IMMUTABLE) {
@@ -246,7 +246,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    "  file %s\n",
 			    __func__, __LINE__, zp->z_name_cache);
 			ZFS_EXIT(zfsvfs);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
  		}
 		/* take a range lock */
 		off_t resid_off = 0;
@@ -261,7 +261,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			printf("ZFS: %s:%d: could not get range lock [0..%lld] for file %s\n",
 			    __func__, __LINE__, round_page_64(ubcsize), zp->z_name_cache);
 			ZFS_EXIT(zfsvfs);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		tsd_set(rl_key, rl);
 		boolean_t need_release = B_FALSE, need_upgrade = B_FALSE;
@@ -276,7 +276,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			ZFS_EXIT(zfsvfs);
 			tsd_set(rl_key, NULL);
 			zfs_range_unlock(rl);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 
 		/* do the msync */
@@ -305,17 +305,32 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 		/* skip the sync if we are in the pager, or the file
 		 * is has a writable memory mapping (unless we are unmounting)
 		 */
-
+		int return_done = VNODE_RETURNED;
 		if (zp->z_in_pager_op != 0) {
 			printf("ZFS: %s:%d: msync avoided because of z_in_pager_op (%d)"
 			    " (usize %llu) zid %llu fs %s file %s\n",
 			    __func__, __LINE__, zp->z_in_pager_op, ubc_getsize(vp),
 			    zp->z_id, fsname, fname);
+			return_done = VNODE_RETURNED_DONE;
 		}
 		else if (writable && !zfsvfs->z_is_unmounting
 		    && !waitfor
 		    && zfsvfs->z_os->os_sync != ZFS_SYNC_ALWAYS) {
 			atomic_inc_64(&zfs_vfs_sync_writemap_skip);
+			hrtime_t now = gethrtime();
+			if (zfsvfs->z_oldest_skipped_sync == 0) {
+				zfsvfs->z_oldest_skipped_sync = now;
+				return_done = VNODE_RETURNED_DONE;
+			} else if (zfsvfs->z_oldest_skipped_sync + SEC2NSEC(10) <= now) {
+				zfsvfs->z_oldest_skipped_sync = 0;
+				printf("ZFS: %s:%d: syncing because previously skipped filesystem"
+				    " zid %llu fs %s file %s (usize %llu)\n",
+				    __func__, __LINE__,
+				    zp->z_id, fsname, fname, ubc_getsize(vp));
+				ASSERT0(vnode_isrecycled(vp));
+				msync_retval = zfs_msync(zp, rl, (off_t)0, ubcsize, &resid_off, flags);
+			}
+
 		}
 		else {
 			ASSERT0(vnode_isrecycled(vp));
@@ -333,36 +348,38 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d resid_off %lld"
 			    " vs ubcsize %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
 			    msync_retval, resid_off, ubcsize, flags, zp->z_name_cache);
+			return_done = VNODE_RETURNED_DONE;
 		} else if (msync_retval && waitfor) {
 			printf("ZFS: %s:%d: (waitfor %d) ubc_msync returned error %d but ubcsize %lld !="
 			    "resid_off %lld flags %d for file %s\n", __func__, __LINE__, waitfor,
 			    msync_retval, ubcsize, resid_off, flags, zp->z_name_cache);
+			return_done = VNODE_RETURNED_DONE;
 		} else if (waitfor && zfsvfs->z_log) {
 			zil_commit(zfsvfs->z_log, zp->z_id);
 		}
 		ZFS_EXIT(zfsvfs);
-		return (VNODE_RETURNED);
+		return (return_done);
 	} else {
 		if (!vnode_isreg(vp))
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		znode_t *zp = VTOZ(vp);
 		ASSERT3P(zp, !=, NULL);
 		if (!zp)
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		ASSERT3P(zp->z_sa_hdl, !=, NULL);
 		if (zp->z_sa_hdl == NULL) {
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		zfsvfs_t *zfsvfs = zp->z_zfsvfs;
 		ASSERT3P(zfsvfs, !=, NULL);
 		ASSERT0(!POINTER_IS_VALID(zfsvfs));
 		if (zfsvfs == NULL || !POINTER_IS_VALID(zfsvfs))
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		ZFS_ENTER_NOERROR(zfsvfs);
 		ASSERT3P(zfsvfs->z_log, !=, NULL);
 		if (zfsvfs->z_log == NULL) {
 			ZFS_EXIT(zfsvfs);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		const char *fname = zp->z_name_cache;
 		const char *fsname = vfs_statfs(zfsvfs->z_vfs)->f_mntfromname;
@@ -375,7 +392,7 @@ zfs_vfs_umcallback(vnode_t *vp, void * arg)
 			    fsname, fname, waitfor, *waitfor_arg,
 			    zfsvfs->z_is_unmounting, zfsvfs->z_unmounted);
 			ZFS_EXIT(zfsvfs);
-			return (VNODE_RETURNED);
+			return (VNODE_RETURNED_DONE);
 		}
 		zil_commit(zfsvfs->z_log, zp->z_id);
 		ZFS_EXIT(zfsvfs);
