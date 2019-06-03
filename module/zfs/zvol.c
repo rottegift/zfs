@@ -2447,22 +2447,32 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 
 		if (error == 0) {
 			/* offset will have advanced beyond off
-			 * and bytes will have been reduced */
+			 * and bytes will have been reduced, and should be zero */
 			ASSERT3U(bytes, ==, 0);
-			ASSERT3U(count, ==, pre_write_bytes);
+			ASSERT3U(offset, >=, off);
+			VERIFY3U(bytes, <=, pre_write_bytes);
 
-			count -= MIN(count,
-			    (DMU_MAX_ACCESS >> 1)) + bytes;
+			uint64_t count_decrement = count;
+			count_decrement = MIN(count, (DMU_MAX_ACCESS >> 1));
 
-			ASSERT3U(count, ==, 0);
+			if (bytes > 0) {
+				// bytes must not grow !
+				VERIFY3U(count_decrement, >, bytes);
+				// don't decrement by any residual bytes
+				count_decrement -= bytes;
+			}
+
+			VERIFY3U(count_decrement, <=, count);
+			ASSERT3U(position + pre_write_off + count_decrement, ==, position + offset);
+
+			count -= count_decrement;
 
 			///
 			/// BUG zvol_log_write(zv, tx, position + pre_write_offset, offset_diff, sync);
 			/// this can cause a panic in VNOP_IOCTL->deviceSynchronizeCache->zil_commit->zfs_zget_ext
 			///
 			//zvol_log_write(zv, tx, off, bytes, sync); // orig, same in master
-			sync = true; // test
-			zvol_log_write(zv, tx, position + pre_write_off, pre_write_bytes, sync);
+			zvol_log_write(zv, tx, position + pre_write_off, count_decrement, sync);
 		}
 		dmu_tx_commit(tx);
 
