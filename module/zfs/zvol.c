@@ -2429,15 +2429,19 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 		if (bytes > volsize - (position + off))
 			bytes = volsize - (position + off);
 
-		dmu_tx_hold_write(tx, ZVOL_OBJ, off, bytes);
+		dmu_tx_hold_write(tx, ZVOL_OBJ, position + off, bytes);
 		error = dmu_tx_assign(tx, TXG_WAIT);
 		if (error) {
+			printf("ZFS: %s:%d error %d in dmu_tx_hold_write position %llu"
+			    " off %llu bytes %llu\n",
+			    __func__, __LINE__, error, position, off, bytes);
 			dmu_tx_abort(tx);
 			break;
 		}
 
 
 		const uint64_t pre_write_offset = offset;
+		const uint64_t pre_write_bytes = bytes;
 
 		error = dmu_write_iokit_dbuf(zv->zv_dbuf, &offset,
 		    position, &bytes, iomem, tx);
@@ -2445,19 +2449,20 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 		if (error == 0) {
 			/* offset will have advanced beyond off
 			 * and bytes will have been reduced */
+			ASSERT3U(bytes, ==, 0);
+			ASSERT3U(count, ==, pre_write_bytes);
+
 			count -= MIN(count,
 			    (DMU_MAX_ACCESS >> 1)) + bytes;
 
-			uint64_t offset_diff =
-			    (pre_write_offset < offset)
-			    ? offset - pre_write_offset
-			    : 0;
+			ASSERT3U(count, ==, 0);
 
 			///
 			/// BUG zvol_log_write(zv, tx, position + pre_write_offset, offset_diff, sync);
 			/// this can cause a panic in VNOP_IOCTL->deviceSynchronizeCache->zil_commit->zfs_zget_ext
 			///
-			zvol_log_write(zv, tx, off, bytes, sync); // orig, same in master
+			//zvol_log_write(zv, tx, off, bytes, sync); // orig, same in master
+			zvol_log_write(zv, tx, position + pre_write_offset, pre_write_bytes, sync);
 		}
 		dmu_tx_commit(tx);
 
