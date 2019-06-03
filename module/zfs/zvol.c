@@ -2380,7 +2380,7 @@ zvol_read_iokit(zvol_state_t *zv, uint64_t position,
  * IOKit write operations will pass IOMemoryDescriptor along here, so
  * that we can call io->readBytes to write into IOKit zvolumes.
  */
-
+#ifdef SMD_ZVOL_WRITE_IOKIT
 int
 zvol_write_iokit(zvol_state_t *zv, uint64_t position,
     uint64_t count, struct iomem *iomem)
@@ -2486,6 +2486,87 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 
 	return (error);
 }
+#else
+int
+zvol_write_iokit(zvol_state_t *zv, uint64_t position,
+    uint64_t count, struct iomem *iomem)
+{
+        uint64_t volsize;
+        rl_t *rl;
+        int error = 0;
+        boolean_t sync;
+        uint64_t offset = 0;
+        uint64_t bytes;
+        uint64_t off;
+
+        if (zv == NULL)
+                return (ENXIO);
+
+        volsize = zv->zv_volsize;
+        if (count > 0 &&
+            (position >= volsize))
+                return (EIO);
+
+#if 0
+        if (zv->zv_flags & ZVOL_DUMPIFIED) {
+                error = physio(zvol_strategy, NULL, dev, B_WRITE,
+                    zvol_minphys, uio, zv->zv_volblocksize);
+                return (error);
+        }
+#endif
+
+        dprintf("zvol_write_iokit(position %llu offset "
+            "0x%llx bytes 0x%llx)\n", position, offset, count);
+
+        sync = !(zv->zv_flags & ZVOL_WCE) ||
+            (zv->zv_objset->os_sync == ZFS_SYNC_ALWAYS);
+
+	// temp smd
+	sync = true;
+
+        /* Lock the entire range */
+        rl = zfs_range_lock(&zv->zv_znode, position, count,
+            RL_WRITER);
+        /* Iterate over (DMU_MAX_ACCESS/2) segments */
+        while (count > 0 && (position + offset) < volsize) {
+                /* bytes for this segment */
+                bytes = MIN(count, DMU_MAX_ACCESS >> 1);
+                off = offset;
+                dmu_tx_t *tx = dmu_tx_create(zv->zv_objset);
+
+                /* don't write past the end */
+                if (bytes > volsize - (position + off))
+                        bytes = volsize - (position + off);
+
+                dmu_tx_hold_write(tx, ZVOL_OBJ, off, bytes);
+                error = dmu_tx_assign(tx, TXG_WAIT);
+                if (error) {
+                        dmu_tx_abort(tx);
+                        break;
+                }
+
+                error = dmu_write_iokit_dbuf(zv->zv_dbuf, &offset,
+                    position, &bytes, iomem, tx);
+
+                if (error == 0) {
+                        count -= MIN(count,
+                            (DMU_MAX_ACCESS >> 1)) + bytes;
+                        zvol_log_write(zv, tx, off, bytes, sync);
+                }
+                dmu_tx_commit(tx);
+
+                if (error)
+                        break;
+        }
+        zfs_range_unlock(rl);
+
+        if (sync)
+                zil_commit(zv->zv_zilog, ZVOL_OBJ);
+
+        return (error);
+}
+#endif
+
 
 boolean_t zvol_disable_unmap = B_FALSE;
 
