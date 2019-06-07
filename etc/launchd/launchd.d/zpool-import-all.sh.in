@@ -10,7 +10,16 @@ export INVARIANT_DISKS_IDLE_FILE=/var/run/disk/invariant.idle
 export TIMEOUT_SECONDS=60
 export MAXIMUM_SLEEP_ITERATIONS=$((${TIMEOUT_SECONDS} * 10))
 
-/usr/bin/time /usr/sbin/system_profiler SPParallelATADataType SPCardReaderDataType SPFibreChannelDataType SPFireWireDataType SPHardwareRAIDDataType SPNetworkDataType SPPCIDataType SPParallelSCSIDataType SPSASDataType SPSerialATADataType SPStorageDataType SPThunderboltDataType SPUSBDataType SPNetworkVolumeDataType 1>/dev/null
+# 2019-06-07 - temporary hack for new mac mini startup volume
+# stupid kext does not load automagically at boot !
+
+/sbin/kextload /Library/Extensions/SATSMARTDriver.kext
+
+# probe the various devices, this acts as a delay
+
+/usr/bin/time /usr/sbin/system_profiler SPParallelATADataType SPCardReaderDataType SPFibreChannelDataType SPFireWireDataType SPHardwareRAIDDataType SPNetworkDataType SPPCIDataType SPParallelSCSIDataType SPSASDataType SPSerialATADataType SPStorageDataType SPThunderboltDataType SPUSBDataType SPNetworkVolumeDataType SPNVMeDataType 1>/dev/null
+
+# this also acts as a delay
 /bin/sync
 
 if [ ! -f /etc/zfs/noautomount ];
@@ -84,6 +93,9 @@ function docacheimport () (c=/etc/zfs/caches/$1.cache
 			   echo testcacheimport returned OK, importing $1...
 			   testcacheimport $1 && "${ZPOOL}" import -c $c -a
 			   return $?)
+
+# 2019-06 temporary hack for new mac mini temp boot volume
+zpool import ssdpool; zfs mount -av
 
 if ((!ZPOOL_CACHE_DONE))
 then
