@@ -171,6 +171,8 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pagein_pages;
 	kstat_named_t pagein_want_lock;
 	kstat_named_t pagein_w_upl_offset;
+	kstat_named_t no_vnop_fsync_mapped_read;
+	kstat_named_t no_vnop_fsync_mapped_write;
 } vnops_osx_stats_t;
 
 static vnops_osx_stats_t vnops_osx_stats = {
@@ -212,6 +214,8 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 	{ "pagein_want_lock",                  KSTAT_DATA_UINT64 },
 	{ "pagein_w_upl_offset",               KSTAT_DATA_UINT64 },
+	{ "no_vnop_fsync_mapped_write",               KSTAT_DATA_UINT64 },
+	{ "no_vnop_fsync_mapped_read",               KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_OSX_STAT(statname)           (vnops_osx_stats.statname.value.ui64)
@@ -1812,9 +1816,14 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	int err;
 
 	if (ap->a_vp) {
-		bool mmaped = spl_ubc_is_mapped(ap->a_vp, NULL);
-		if (mmaped) {
+		int mmapped_write = 0;
+		bool mmapped = spl_ubc_is_mapped(ap->a_vp, &mmapped_write);
+		if (mmapped) {
 			// ASSERT0(writable_mmap); // make dtraceable noise (very noisy)
+			if (mmapped_write)
+				VNOPS_OSX_STAT_BUMP(no_vnop_fsync_mapped_write);
+			else
+				VNOPS_OSX_STAT_BUMP(no_vnop_fsync_mapped_read);
 			return(EAGAIN);
 		}
 	}
