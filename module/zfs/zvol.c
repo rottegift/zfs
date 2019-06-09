@@ -2522,7 +2522,7 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
             (zv->zv_objset->os_sync == ZFS_SYNC_ALWAYS);
 
 	// temp smd
-	sync = true;
+	sync = B_TRUE;
 
         /* Lock the entire range */
         rl = zfs_range_lock(&zv->zv_znode, position, count,
