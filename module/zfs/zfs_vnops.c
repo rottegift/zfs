@@ -144,6 +144,7 @@ typedef struct vnops_stats {
 	kstat_named_t zfs_fsync_ubc_msync_new;
 	kstat_named_t zfs_fsync_ubc_msync_averted;
 	kstat_named_t zfs_fsync_disabled;
+	kstat_named_t zfs_fsync_mapped_not_done;
 	kstat_named_t zfs_fsync_skipped;
 	kstat_named_t zfs_close;
 } vnops_stats_t;
@@ -174,6 +175,7 @@ static vnops_stats_t vnops_stats = {
 	{ "zfs_fsync_ubc_msync_new",                     KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_ubc_msync_averted",                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_disabled",                          KSTAT_DATA_UINT64 },
+	{ "zfs_fsync_mapped_not_done",	                 KSTAT_DATA_UINT64 },
 	{ "zfs_fsync_skipped",                           KSTAT_DATA_UINT64 },
 	{ "zfs_close", 			                 KSTAT_DATA_UINT64 },
 };
@@ -4867,7 +4869,17 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 		    is_file_clean(vp, ubc_getsize(vp)),
 		    vnode_isrecycled(vp),
 		    zp->z_size, zp->z_name_cache);
-		allow_new_msync = B_TRUE;
+		/* dirty mmapped file should not be synced unless unmounting */
+		if (zfsvfs->z_vfs && vfs_isunmount(zfsvfs->z_vfs)) {
+			printf("ZFS: %s:%d: msync called on mmapped file and vfs_isunmount is true "
+			    " size %lld fn %s -- allowing new msync\n",
+			    __func__, __LINE__, zp->z_size, zp->z_name_cache);
+			allow_new_msync = B_TRUE;
+		} else {
+			ZFS_EXIT(zfsvfs);
+			VNOPS_STAT_BUMP(zfs_fsync_mapped_not_done);
+			return (EAGAIN);
+		}
 	}
 
 	boolean_t do_zil_commit = B_FALSE;
