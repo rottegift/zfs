@@ -3262,6 +3262,24 @@ safe_write_amount(znode_t *zp, off_t offset, off_t length)
 	return (safe_len);
 }
 
+void
+bl1_dmu_tx_hold_write(dmu_tx_t *tx, uint64_t object, uint64_t off, int len)
+{
+	dmu_tx_hold_write(tx, object, off, len);
+}
+
+void
+bl2_dmu_tx_hold_write(dmu_tx_t *tx, uint64_t object, uint64_t off, int len)
+{
+	dmu_tx_hold_write(tx, object, off, len);
+}
+
+void
+pov2h_dmu_tx_hold_write(dmu_tx_t *tx, uint64_t object, uint64_t off, int len)
+{
+	dmu_tx_hold_write(tx, object, off, len);
+}
+
 static int
 bluster_pageout(zfsvfs_t *zfsvfs, znode_t *zp, upl_t upl,
     const upl_offset_t upl_offset, const off_t f_offset, const int size,
@@ -3459,9 +3477,9 @@ start_tx:
 	tx = dmu_tx_create(zfsvfs->z_os);
 	dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 	if (tx_pass == 0 || dmu_write_is_safe(zp, f_offset, write_size)) {
-		dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
+		bl1_dmu_tx_hold_write(tx, zp->z_id, f_offset, write_size);
 	} else {
-		dmu_tx_hold_write(tx, zp->z_id, 0, f_offset + write_size);
+		bl2_dmu_tx_hold_write(tx, zp->z_id, 0, f_offset + write_size);
 	}
 	zfs_sa_upgrade_txholds(tx, zp);
 	error = dmu_tx_assign(tx, TXG_WAIT);
@@ -4695,7 +4713,7 @@ already_acquired_locks:
 			dmu_tx_t *tx = dmu_tx_create(zfsvfs->z_os);
 			dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 			zfs_sa_upgrade_txholds(tx, zp);
-			dmu_tx_hold_write(tx, zp->z_id, 0, ap->a_f_offset + ap->a_size);
+			pov2h_dmu_tx_hold_write(tx, zp->z_id, 0, ap->a_f_offset + ap->a_size);
 			error = dmu_tx_assign(tx, TXG_WAIT);
 			ASSERT3S(error, ==, 0);
 			if (error != 0) {
