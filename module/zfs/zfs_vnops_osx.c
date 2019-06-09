@@ -1811,6 +1811,14 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	DECLARE_CRED_AND_CONTEXT(ap);
 	int err;
 
+	if (ap->a_vp) {
+		bool writable_mmap = spl_ubc_is_mapped_writable(ap->a_vp);
+		if (writable_mmap) {
+			ASSERT0(writable_mmap); // make dtraceable noise
+			return(EAGAIN);
+		}
+	}
+
 	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
 
 	if (err) dprintf("%s err %d\n", __func__, err);
