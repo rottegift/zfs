@@ -1814,7 +1814,7 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	if (ap->a_vp) {
 		bool writable_mmap = spl_ubc_is_mapped_writable(ap->a_vp);
 		if (writable_mmap) {
-			ASSERT0(writable_mmap); // make dtraceable noise
+			// ASSERT0(writable_mmap); // make dtraceable noise (very noisy)
 			return(EAGAIN);
 		}
 	}
