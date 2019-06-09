@@ -13,7 +13,7 @@ export MAXIMUM_SLEEP_ITERATIONS=$((${TIMEOUT_SECONDS} * 10))
 # 2019-06-07 - temporary hack for new mac mini startup volume
 # stupid kext does not load automagically at boot !
 
-/sbin/kextload /Library/Extensions/SATSMARTDriver.kext
+#/sbin/kextload /Library/Extensions/SATSMARTDriver.kext
 
 # probe the various devices, this acts as a delay
 
