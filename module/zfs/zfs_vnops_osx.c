@@ -3262,20 +3262,26 @@ safe_write_amount(znode_t *zp, off_t offset, off_t length)
 	return (safe_len);
 }
 
-void
+noinline void
 bl1_dmu_tx_hold_write(dmu_tx_t *tx, uint64_t object, uint64_t off, int len)
+	__attribute__((noinline))
+	__attribute__((optnone))
 {
 	dmu_tx_hold_write(tx, object, off, len);
 }
 
-void
+noinline void
 bl2_dmu_tx_hold_write(dmu_tx_t *tx, uint64_t object, uint64_t off, int len)
+	__attribute__((noinline))
+	__attribute__((optnone))
 {
 	dmu_tx_hold_write(tx, object, off, len);
 }
 
-void
+noinline void
 pov2h_dmu_tx_hold_write(dmu_tx_t *tx, uint64_t object, uint64_t off, int len)
+	__attribute__((noinline))
+	__attribute__((optnone))
 {
 	dmu_tx_hold_write(tx, object, off, len);
 }
