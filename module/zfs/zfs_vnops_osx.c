@@ -1812,7 +1812,7 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 	int err;
 
 	if (ap->a_vp) {
-		bool mmaped = spl_ubc_is_mapped(ap->a_vp);
+		bool mmaped = spl_ubc_is_mapped(ap->a_vp, NULL);
 		if (mmaped) {
 			// ASSERT0(writable_mmap); // make dtraceable noise (very noisy)
 			return(EAGAIN);
