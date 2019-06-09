@@ -173,6 +173,7 @@ typedef struct vnops_osx_stats {
 	kstat_named_t pagein_w_upl_offset;
 	kstat_named_t no_vnop_fsync_mapped_read;
 	kstat_named_t no_vnop_fsync_mapped_write;
+	kstat_named_t no_vnop_fsync_tsd;
 } vnops_osx_stats_t;
 
 static vnops_osx_stats_t vnops_osx_stats = {
@@ -214,8 +215,9 @@ static vnops_osx_stats_t vnops_osx_stats = {
 	{ "pagein_pages",                      KSTAT_DATA_UINT64 },
 	{ "pagein_want_lock",                  KSTAT_DATA_UINT64 },
 	{ "pagein_w_upl_offset",               KSTAT_DATA_UINT64 },
-	{ "no_vnop_fsync_mapped_write",               KSTAT_DATA_UINT64 },
-	{ "no_vnop_fsync_mapped_read",               KSTAT_DATA_UINT64 },
+	{ "no_vnop_fsync_mapped_write",        KSTAT_DATA_UINT64 },
+	{ "no_vnop_fsync_mapped_read",         KSTAT_DATA_UINT64 },
+	{ "no_vnop_fsync_tsd",                 KSTAT_DATA_UINT64 },
 };
 
 #define VNOPS_OSX_STAT(statname)           (vnops_osx_stats.statname.value.ui64)
@@ -1826,6 +1828,13 @@ zfs_vnop_fsync(struct vnop_fsync_args *ap)
 				VNOPS_OSX_STAT_BUMP(no_vnop_fsync_mapped_read);
 			return(EAGAIN);
 		}
+	}
+
+	if (tsd_get(rl_key) != NULL
+	    || tsd_get(rl_key_zp_key_mismatch_key) != NULL
+	    || tsd_get(rl_key_vp_from_getvnode) != NULL
+	    || tsd_get(pageout_op_key) != NULL) {
+		VNOPS_OSX_STAT_BUMP(no_vnop_fsync_tsd);
 	}
 
 	err = zfs_fsync(ap->a_vp, /* flag */0, cr, ct);
