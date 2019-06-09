@@ -8182,6 +8182,13 @@ zfs_znode_getvnode(znode_t *zp, zfsvfs_t *zfsvfs)
 		tsd_set(rl_key_zp_key_mismatch_key, zp);
 		tsd_set(rl_key_vp_from_getvnode, vp);
 		tsd_set(rl_key, NULL);
+	} else {
+		// no rangelock, but we use rl_key_zp_key_mismatch_key to
+		// prevent zfs_vnop_fsync from doing anything, as we
+		// can deadllock below that in pageoutv2_helper->dmu_tx_hold_write
+		ASSERT3P(zp, !=, NULL);
+		ASSERT3P(tsd_get(rl_key_zp_key_mismatch_key), ==, NULL);
+		tsd_set(rl_key_zp_key_mismatch_key, zp);
 	}
 
 	zp->z_no_fsync = B_TRUE;
