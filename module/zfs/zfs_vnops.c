@@ -1925,9 +1925,10 @@ zfs_write_maybe_extend_file(znode_t *zp, off_t woff, off_t start_resid, rl_t *rl
 	ASSERT3P(tsd_get(rl_key), ==, rl);
 
         if (rl->r_len == UINT64_MAX ||
-            (end > zp->z_blksz &&
-                (!ISP2(zp->z_blksz || zp->z_blksz < zfsvfs->z_max_blksz))) ||
-            (end > zp->z_blksz && !dmu_write_is_safe(zp, woff, end))) {
+            (end > zp->z_blksz
+		&& (!ISP2(zp->z_blksz)
+		    || (zp->z_blksz < zfsvfs->z_max_blksz)
+		    || !dmu_write_is_safe(zp, woff, end)))) {
 
 		uint64_t newblksz = 0;
 		const int max_blksz = zfsvfs->z_max_blksz;
