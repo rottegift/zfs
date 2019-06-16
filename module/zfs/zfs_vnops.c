@@ -3067,6 +3067,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 	ASSERT(zio != NULL);
 	ASSERT(size != 0);
 
+#ifndef __APPLE__
 	/*
 	 * Nothing to do if the file has been removed
 	 */
@@ -3081,6 +3082,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 		zfs_znode_asyncput(zp);
 		return (SET_ERROR(ENOENT));
 	}
+#endif
 
 	zgd = (zgd_t *)kmem_zalloc(sizeof (zgd_t), KM_SLEEP);
 	zgd->zgd_zilog = zfsvfs->z_log;
