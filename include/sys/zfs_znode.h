@@ -256,6 +256,14 @@ typedef struct znode {
 	boolean_t   z_drain;            /* for unlinked_drain */
 #endif
 
+	/*
+	 * With async vnode attachment to the znode, it may need to
+	 * wait for the taskq to complete, so we setup a condvar to
+	 * block on. See zfs_async* calls in zfs_vnop_osx.c
+	 */
+	taskq_ent_t z_attach_taskq;
+	kcondvar_t      z_attach_cv;
+	kmutex_t        z_attach_lock;
 	boolean_t	z_is_stale;	/* are we stale due to rollback? */
 
 } znode_t;
@@ -395,8 +403,7 @@ extern void	zfs_znode_init(void);
 extern void	zfs_znode_fini(void);
 
 #define ZGET_FLAG_UNLINKED          (1<<0) /* Also lookup unlinked */
-#define ZGET_FLAG_WITHOUT_VNODE     (1<<1) /* Don't attach vnode */
-#define ZGET_FLAG_WITHOUT_VNODE_GET (1<<2) /* Don't attach vnode + vnode_get*/
+#define ZGET_FLAG_ASYNC             (1<<3) /* taskq the vnode_create call */
 extern int zfs_zget(zfsvfs_t *zfsvfs, uint64_t obj_num, znode_t **zpp);
 extern int zfs_zget_ext(zfsvfs_t *zfsvfs, uint64_t obj_num, znode_t **zpp, int flags);
 #define zfs_zget(A,B,C) zfs_zget_ext((A),(B),(C),0)

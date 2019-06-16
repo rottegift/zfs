@@ -208,6 +208,9 @@ extern void   getnewvnode_reserve( int num );
 extern void   getnewvnode_drop_reserve( void );
 extern int    zfs_vfsops_init(void);
 extern int    zfs_vfsops_fini(void);
+extern int    zfs_znode_asyncgetvnode(znode_t *zp, zfsvfs_t *zfsvfs);
+extern void   zfs_znode_asyncput(znode_t *zp);
+extern int    zfs_znode_asyncwait(znode_t *zp);
 
 extern uint_t rl_key;
 extern uint_t rl_key_zp_key_mismatch_key;

@@ -1213,7 +1213,7 @@ zil_lwb_commit(zilog_t *zilog, itx_t *itx, lwb_t *lwb)
 			zfsvfs_t *zfsvfs = itx->itx_private;
 
 			error = zfs_zget_ext(zfsvfs, lrw->lr_foid, &zp,
-				ZGET_FLAG_UNLINKED | ZGET_FLAG_WITHOUT_VNODE_GET );
+				ZGET_FLAG_UNLINKED | ZGET_FLAG_ASYNC);
 			if (error == 0) {
 
 				/* Attach vnode in different thread - if one is needed -
