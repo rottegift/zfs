@@ -765,6 +765,8 @@ zfs_rmnode(znode_t *zp)
 	dmu_tx_commit(tx);
 out:
 	if (xzp) {
+		if (ZTOV(xzp) == NULL)
+			zfs_zinactive(xzp);
 		zfs_znode_asyncput(xzp);
 	}
 }
