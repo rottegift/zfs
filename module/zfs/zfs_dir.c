@@ -630,7 +630,7 @@ zfs_purgedir(znode_t *dzp)
 			if (ZTOV(xzp) == NULL) {
 				zfs_zinactive(xzp);
 			} else {
-				VN_RELE_ASYNC(ZTOV(xzp), dsl_pool_vnrele_taskq(dmu_objset_pool(zfsvfs->z_os)));
+				zfs_znode_asyncput(xzp);
 			}
 #else
 			VN_RELE_ASYNC(ZTOV(xzp), dsl_pool_vnrele_taskq(dmu_objset_pool(zfsvfs->z_os)));
@@ -651,7 +651,7 @@ zfs_purgedir(znode_t *dzp)
 		if (ZTOV(xzp) == NULL) {
 			zfs_zinactive(xzp);
 		} else {
-			VN_RELE_ASYNC(ZTOV(xzp), dsl_pool_vnrele_taskq(dmu_objset_pool(zfsvfs->z_os)));
+			zfs_znode_asyncput(xzp);
 		}
 #else
 		VN_RELE_ASYNC(ZTOV(xzp), dsl_pool_vnrele_taskq(dmu_objset_pool(zfsvfs->z_os)));
@@ -787,8 +787,7 @@ out:
 		if (ZTOV(xzp) == NULL)
 			zfs_zinactive(xzp);
 		else
-			VN_RELE_ASYNC(ZTOV(xzp), dsl_pool_vnrele_taskq(
-				dmu_objset_pool(zfsvfs->z_os)));
+			zfs_znode_asyncput(xzp);
 	}
 }
 
