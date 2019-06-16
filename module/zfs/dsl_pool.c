@@ -177,9 +177,14 @@ dsl_pool_open_impl(spa_t *spa, uint64_t txg)
 	mutex_init(&dp->dp_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&dp->dp_spaceavail_cv, NULL, CV_DEFAULT, NULL);
 
+#if 0
 	dp->dp_vnrele_taskq = taskq_create("zfs_vn_rele_taskq", max_ncpus,
 		minclsyspri, max_ncpus * 8, INT_MAX,
 		TASKQ_PREPOPULATE | TASKQ_DYNAMIC);
+#else
+	dp->dp_vnrele_taskq = taskq_create("zfs_vn_rele_taskq", max_ncpus,
+	    maxclsyspri, 0, 0, 0);
+#endif
 
 	// Used with taskq_dispatch_ent()
 	dp->dp_vnget_taskq = taskq_create("zfs_vn_get_taskq", 1,
