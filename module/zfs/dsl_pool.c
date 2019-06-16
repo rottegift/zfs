@@ -183,7 +183,7 @@ dsl_pool_open_impl(spa_t *spa, uint64_t txg)
 
 	// Used with taskq_dispatch_ent()
 	dp->dp_vnget_taskq = taskq_create("zfs_vn_get_taskq", 1,
-	    minclsyspri, 0, 0, 0);
+	    maxclsyspri, 0, 0, 0);
 
 	return (dp);
 }
