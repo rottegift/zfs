@@ -3078,8 +3078,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 		 * Release the vnode asynchronously as we currently have the
 		 * txg stopped from syncing.
 		 */
-		VN_RELE_ASYNC(ZTOV(zp),
-		    dsl_pool_vnrele_taskq(dmu_objset_pool(os)));
+		zfs_znode_asyncput(zp);
 		return (SET_ERROR(ENOENT));
 	}
 
