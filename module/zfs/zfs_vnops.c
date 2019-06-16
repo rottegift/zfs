@@ -3011,7 +3011,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct,
 void
 zfs_get_done(zgd_t *zgd, int error)
 {
-	znode_t *zp = zgd->zgd_private;
+	//znode_t *zp = zgd->zgd_private;
 	//objset_t *os = zp->z_zfsvfs->z_os;
 
 	if (zgd->zgd_db)
@@ -3026,7 +3026,18 @@ zfs_get_done(zgd_t *zgd, int error)
 	 * Release the vnode asynchronously as we currently have the
 	 * txg stopped from syncing.
 	 */
-	zfs_znode_asyncput(zp);
+	/*
+	 * We only need to release the vnode if zget took the path to call
+	 * vnode_get() with already existing vnodes. If zget (would) call to
+	 * allocate new vnode, we don't (ZGET_FLAG_WITHOUT_VNODE), and it is
+	 * attached after zfs_get_data() is finished (and immediately released).
+	 */
+#if 0
+	if (ZTOV(zp)) {
+		printf("vn_rele_async\n");
+		VN_RELE_ASYNC(ZTOV(zp), dsl_pool_vnrele_taskq(dmu_objset_pool(os)));
+	}
+#endif
 	if (error == 0 && zgd->zgd_bp)
 		zil_add_block(zgd->zgd_zilog, zgd->zgd_bp);
 
@@ -3067,7 +3078,8 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio,
 		 * Release the vnode asynchronously as we currently have the
 		 * txg stopped from syncing.
 		 */
-		zfs_znode_asyncput(zp);
+		VN_RELE_ASYNC(ZTOV(zp),
+		    dsl_pool_vnrele_taskq(dmu_objset_pool(os)));
 		return (SET_ERROR(ENOENT));
 	}
 
