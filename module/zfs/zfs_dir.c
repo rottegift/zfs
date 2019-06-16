@@ -625,9 +625,6 @@ zfs_purgedir(znode_t *dzp)
 		error = dmu_tx_assign(tx, TXG_WAIT);
 		if (error) {
 			dmu_tx_abort(tx);
-			if (ZTOV(xzp) == NULL) {
-				zfs_zinactive(xzp);
-			}
 			zfs_znode_asyncput(xzp);
 			skipped += 1;
 			continue;
@@ -640,9 +637,6 @@ zfs_purgedir(znode_t *dzp)
 		if (error)
 			skipped += 1;
 		dmu_tx_commit(tx);
-		if (ZTOV(xzp) == NULL) {
-			zfs_zinactive(xzp);
-		}
 		zfs_znode_asyncput(xzp);
 	}
 	zap_cursor_fini(&zc);
@@ -771,8 +765,6 @@ zfs_rmnode(znode_t *zp)
 	dmu_tx_commit(tx);
 out:
 	if (xzp) {
-		if (ZTOV(xzp) == NULL)
-			zfs_zinactive(xzp);
 		zfs_znode_asyncput(xzp);
 	}
 }
