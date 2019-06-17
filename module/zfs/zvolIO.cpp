@@ -49,12 +49,19 @@
 #ifdef	dprintf
 #undef	dprintf
 #endif
+#ifdef ddprintf
+#undef ddprintf
+#endif
 #define	dprintf(fmt, ...) do {							\
 	IOLog("zvolIO %s " fmt "\n", __func__, ##__VA_ARGS__);	\
 _NOTE(CONSTCOND) } while (0)
+#define ddprintf(fmt, ...) do { } while (0);
 #else
 #ifndef dprintf
 #define	dprintf(fmt, ...)	do { } while (0);
+#endif
+#ifndef ddprintf
+#define ddprintf(fmt, ...)      do { } while (0);
 #endif
 #endif /* if DEBUG or ZFS_DEBUG */
 
@@ -605,9 +612,9 @@ net_lundman_zfs_zvol_device::doAsyncReadWrite(
 		return (kIOReturnBadArgument);
 	}
 
-	//dprintf("%s offset @block %llu numblocks %llu: blksz %u\n",
-	//   direction == kIODirectionIn ? "Read" : "Write",
-	//  block, nblks, (ZVOL_BSIZE));
+	ddprintf("%s offset @block %llu numblocks %llu: blksz %u\n",
+	    direction == kIODirectionIn ? "Read" : "Write",
+	    block, nblks, (ZVOL_BSIZE));
 
 	/* Perform the read or write operation through the transport driver. */
 	actualByteCount = (nblks*(ZVOL_BSIZE));
@@ -804,7 +811,7 @@ net_lundman_zfs_zvol_device::reportPollRequirements(bool *pollRequired,
 IOReturn
 net_lundman_zfs_zvol_device::reportRemovability(bool *isRemovable)
 {
-	dprintf("reportRemova\n");
+	dprintf("reportRemoval\n");
 	if (isRemovable) *isRemovable = false;
 	return (kIOReturnSuccess);
 }
