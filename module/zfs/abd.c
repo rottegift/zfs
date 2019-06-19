@@ -1433,7 +1433,7 @@ abd_raidz_gen_iterate(abd_t **cabds, abd_t *dabd,
 
 		csize -= len;
 
-		// smd: super noisy ASSERT3S(dsize, >=, 0);
+		ASSERT3S(dsize, >=, 0);
 		ASSERT3S(csize, >=, 0);
 	}
 #ifdef linux
