@@ -8407,8 +8407,8 @@ l2arc_read_done(zio_t *zio)
 				abd_copy(hdr->b_crypt_hdr.b_rabd,
 				    cb->l2rcb_abd, arc_hdr_size(hdr));
 			} else {
-				abd_copy(hdr->b_l1hdr.b_pabd,
-				    cb->l2rcb_abd, arc_hdr_size(hdr));
+				abd_copy_off(hdr->b_l1hdr.b_pabd,
+				    cb->l2rcb_abd, 0, 0, arc_hdr_size(hdr));
 			}
 		}
 
