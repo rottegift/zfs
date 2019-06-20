@@ -695,7 +695,7 @@ net_lundman_zfs_zvol_device::doDiscard(UInt64 block, UInt64 nblks)
 	/* Convert block/nblks to offset/bytes */
 	off =	block * ZVOL_BSIZE;
 	bytes =	nblks * ZVOL_BSIZE;
-	dprintf("calling zvol_unmap with offset, bytes (%llu, %llu)\n",
+	ddprintf("calling zvol_unmap with offset, bytes (%llu, %llu)\n",
 	    off, bytes);
 
 	if (zvol_unmap(zv, off, bytes) == 0)
@@ -712,7 +712,7 @@ net_lundman_zfs_zvol_device::doUnmap(IOBlockStorageDeviceExtent *extents,
 	UInt32 i = 0;
 	IOReturn result;
 
-	dprintf("doUnmap called with (%u) extents and options (%u)\n",
+	ddprintf("doUnmap called with (%u) extents and options (%u)\n",
 	    (uint32_t)extentsCount, (uint32_t)options);
 
 	if (options > 0 || !extents) {
