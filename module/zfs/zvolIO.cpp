@@ -687,7 +687,7 @@ net_lundman_zfs_zvol_device::doAsyncReadWrite(
 IOReturn
 net_lundman_zfs_zvol_device::doDiscard(UInt64 block, UInt64 nblks)
 {
-	dprintf("doDiscard called with block, nblks (%llu, %llu)\n",
+	ddprintf("doDiscard called with block, nblks (%llu, %llu)\n",
 	    block, nblks);
 	uint64_t bytes		= 0;
 	uint64_t off		= 0;
