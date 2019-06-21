@@ -8408,7 +8408,9 @@ l2arc_read_done(zio_t *zio)
 				    cb->l2rcb_abd, arc_hdr_size(hdr));
 			} else {
 				ASSERT3U(hdr->b_l1hdr.b_pabd->abd_size, >=,
-				    cb->l2rcb_abd->abd_size);
+				    arc_hdr_size(hdr));
+				ASSERT3U(cb->l2rcb_abd->abd_size, >=,
+				    arc_hdr_size(hdr));
 				abd_copy_off(hdr->b_l1hdr.b_pabd,
 				    cb->l2rcb_abd, 0, 0, arc_hdr_size(hdr));
 			}
