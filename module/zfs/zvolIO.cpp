@@ -846,7 +846,7 @@ net_lundman_zfs_zvol_device::doLockUnlockMedia(bool doLock)
 IOReturn
 net_lundman_zfs_zvol_device::doSynchronizeCache(void)
 {
-	dprintf("doSync\n");
+	ddprintf("doSync\n");
 	if (zv && zv->zv_zilog) {
 		zil_commit(zv->zv_zilog, ZVOL_OBJ);
 	}
