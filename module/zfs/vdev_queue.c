@@ -339,22 +339,30 @@ vdev_queue_max_async_writes(spa_t *spa)
 	ASSERT3S((dirty - min_bytes), >,
 	    (zfs_vdev_async_write_min_active / (uint64_t)(max_bytes - min_bytes)));
 
-	writes = (dirty - min_bytes) *
-		zfs_vdev_async_write_max_active -
-		zfs_vdev_async_write_min_active /
+	writes = ((dirty - min_bytes) *
+	    zfs_vdev_async_write_max_active)
+	    - // minus
+	    (zfs_vdev_async_write_min_active /
 		(uint64_t)(
-		(max_bytes - min_bytes) +
-	    zfs_vdev_async_write_min_active);
+		    (max_bytes - min_bytes) +
+		    zfs_vdev_async_write_min_active));
 	if (writes > zfs_vdev_async_write_max_active) {
+		int writes_a = dirty - min_bytes;
+		int writes_b = writes_a * zfs_vdev_async_write_max_active;
+		int writes_c = max_bytes - min_bytes + zfs_vdev_async_write_min_active;
+		int writes_d = zfs_vdev_async_write_min_active / writes_c;
+		int writes_e = writes_b - writes_d;
 		printf("ZFS: %s:%d: %s() arithmetic error: writes %d,"
 		    " dirty %llu, max_bytes %llu, min_bytes %llu,"
 		    " max_bytes - min_bytes %llu, dirty - min_bytes %llu,"
-		    " zfs...min_active %u, zfs... max_active %u\n",
+		    " zfs...min_active %u, zfs... max_active %u,"
+		    " writes_a %d writes_b %d writes_c %d writes_d %d writes_e %d\n",
 		    __FILE__, __LINE__, __func__, writes,
 		    dirty, max_bytes, min_bytes,
 		    max_bytes - min_bytes, dirty - min_bytes,
 		    zfs_vdev_async_write_min_active,
-		    zfs_vdev_async_write_max_active);
+		    zfs_vdev_async_write_max_active,
+		    writes_a, writes_b, writes_c, writes_d, writes_e);
 		return (zfs_vdev_async_write_max_active);
 	}
 	ASSERT3U(writes, >=, zfs_vdev_async_write_min_active);
