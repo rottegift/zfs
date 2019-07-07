@@ -1,3 +1,19 @@
+unlinked_drain in general:
+
+should not defer all that many unlinks, very space-wasting and slows things
+down when the price is paid at import/shutdown
+
+also:
+
+zfs_dir.c zfs_unlinked_drain_stop_wait 595 : ASSERT3 (zfsvfs->z_unmounted == B_FALSE) failed (1 == 0)
+
+which seems to get followed every time by zfs_os_proxy_get lookup failed and zfs_osx_proxy_remove couldn't get dataset "".
+
+is the ASSERT cosmetic or actual useful debugging?
+are those proxy things (ZFSDatasetScheme) just cosmetic?
+
+- --
+
 Fix this annoying assert spam that arises during either recv or scrub (or both at once)
 
               zfs`vdev_queue_io_to_issue+0x53a
