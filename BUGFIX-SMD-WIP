@@ -1,0 +1,32 @@
+Fix this annoying assert spam that arises during either recv or scrub (or both at once)
+
+              zfs`vdev_queue_io_to_issue+0x53a
+              zfs`vdev_queue_io+0x1b3
+              zfs`zio_vdev_io_start+0x540
+              zfs`zio_nowait+0x2b2
+              zfs`vdev_raidz_io_start+0x658
+              zfs`zio_vdev_io_start+0x755
+              zfs`zio_nowait+0x2b2
+              zfs`vdev_mirror_io_start+0x419
+              zfs`zio_vdev_io_start+0x755
+              zfs`__zio_execute+0x1b2
+              spl`taskq_thread+0x237
+              kernel`call_continuation+0x17
+
+Jul  7 17:54:21 mis kernel[0]: vdev_queue.c vdev_queue_max_async_writes 343 : ASSERT3( writes <= zfs_vdev_async_write_max_active) failed (384575380 <= 20)
+
+commit 7bc1ad90e77dede3e5c433d430c337bd29d8d85b
+Author: Sean Doran <smd@mis.use.net>
+Date:   Sat Sep 9 04:39:26 2017 +0100
+
+    Correct the linear interpolation in vdev_queue_max_async_writes()
+
+    Replace vdev_queue_max_async_writes(), returning a correct
+    value based on the diagram in the large comment at the
+    start of the vdev_queue.c.
+
+diff --git a/module/zfs/vdev_queue.c b/module/zfs/vdev_queue.c
+index 6bec4aa55e..6a4e45077f 100644
+--- a/module/zfs/vdev_queue.c
++++ b/module/zfs/vdev_queue.c
+@@ -265,6 +265,70 @@ vdev_queue_class_min_active(zio_priority_t p)
