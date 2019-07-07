@@ -1,32 +1,38 @@
-Fix this annoying assert spam that arises during either recv or scrub (or both at once)
 
-              zfs`vdev_queue_io_to_issue+0x53a
-              zfs`vdev_queue_io+0x1b3
-              zfs`zio_vdev_io_start+0x540
-              zfs`zio_nowait+0x2b2
-              zfs`vdev_raidz_io_start+0x658
-              zfs`zio_vdev_io_start+0x755
-              zfs`zio_nowait+0x2b2
-              zfs`vdev_mirror_io_start+0x419
-              zfs`zio_vdev_io_start+0x755
-              zfs`__zio_execute+0x1b2
-              spl`taskq_thread+0x237
-              kernel`call_continuation+0x17
+make abdmove runtime-disable/runtime-renable -able
 
-Jul  7 17:54:21 mis kernel[0]: vdev_queue.c vdev_queue_max_async_writes 343 : ASSERT3( writes <= zfs_vdev_async_write_max_active) failed (384575380 <= 20)
+- --
 
-commit 7bc1ad90e77dede3e5c433d430c337bd29d8d85b
-Author: Sean Doran <smd@mis.use.net>
-Date:   Sat Sep 9 04:39:26 2017 +0100
+kmem kernel panics: null derefs?
 
-    Correct the linear interpolation in vdev_queue_max_async_writes()
+1. abd: there are some abd_iter changes and general abd.c variations
+from my taskq fixing branch, examine those, in particular any changes
+to mutexing critical sections
 
-    Replace vdev_queue_max_async_writes(), returning a correct
-    value based on the diagram in the large comment at the
-    start of the vdev_queue.c.
+0xffffff8223987a90 : 0xffffff80218dab52 mach_kernel : _panic + 0xe2
+0xffffff8223987b10 : 0xffffff80219cfdab mach_kernel : _kernel_trap + 0xa5b
+0xffffff8223987cf0 : 0xffffff80219ebc03 mach_kernel : _return_from_trap + 0xe3
+0xffffff8223987d10 : 0xffffff7fa208854a net.lundman.spl : _kmem_findslab + 0x4a
+0xffffff8223987e30 : 0xffffff7fa20828a3 net.lundman.spl : _kmem_error + 0x2e3
+0xffffff8223987ea0 : 0xffffff7fa3289664 net.lundman.zfs : _abd_try_move + 0x4c4
+0xffffff8223987f00 : 0xffffff7fa32a6403 net.lundman.zfs : _arc_abd_move_thread + 0x6a3
+0xffffff8223987fb0 : 0xffffff80219ca3f7 mach_kernel : _call_continuation + 0x17
 
-diff --git a/module/zfs/vdev_queue.c b/module/zfs/vdev_queue.c
-index 6bec4aa55e..6a4e45077f 100644
---- a/module/zfs/vdev_queue.c
-+++ b/module/zfs/vdev_queue.c
-@@ -265,6 +265,70 @@ vdev_queue_class_min_active(zio_priority_t p)
+2. kmem
+
+Backtrace (CPU 2), Frame : Return Address
+0xffffff826b287a90 : 0xffffff8026cdab52 mach_kernel : _panic + 0xe2
+0xffffff826b287b10 : 0xffffff8026dcfdab mach_kernel : _kernel_trap + 0xa5b
+0xffffff826b287cf0 : 0xffffff8026debc03 mach_kernel : _return_from_trap + 0xe3
+0xffffff826b287d10 : 0xffffff7fa748854a net.lundman.spl : _kmem_findslab + 0x4a
+0xffffff826b287e30 : 0xffffff7fa74828a3 net.lundman.spl : _kmem_error + 0x2e3
+0xffffff826b287ea0 : 0xffffff7fa748af8b net.lundman.spl : _kmem_magazine_destroy + 0x15b
+0xffffff826b287ee0 : 0xffffff7fa7482e55 net.lundman.spl : _kmem_depot_ws_reap + 0xa5
+0xffffff826b287f10 : 0xffffff7fa7492fb7 net.lundman.spl : _taskq_thread + 0x237
+0xffffff826b287fb0 : 0xffffff8026dca3f7 mach_kernel : _call_continuation + 0x17
+
+
+
+- --
+
+FIXED: linear interpolation in vdev_queue_max_async_writes
