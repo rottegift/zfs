@@ -322,9 +322,9 @@ vdev_queue_max_async_writes(spa_t *spa)
 		return (zfs_vdev_async_write_max_active);
 
 	dirty = dp->dp_dirty_total;
-	if (dirty < min_bytes)
+	if (dirty <= min_bytes)
 		return (zfs_vdev_async_write_min_active);
-	if (dirty > max_bytes)
+	if (dirty >= max_bytes)
 		return (zfs_vdev_async_write_max_active);
 
 	/*
