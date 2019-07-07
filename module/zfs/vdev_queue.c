@@ -333,7 +333,7 @@ vdev_queue_max_async_writes(spa_t *spa)
 	 * move right by min_bytes
 	 * move up by min_writes
 	 */
-	ASSERT3S((maxbytes - minbytes), !=, 0);
+	ASSERT3S((max_bytes - min_bytes), !=, 0);
 	writes = (dirty - min_bytes) *
 	    (zfs_vdev_async_write_max_active -
 	    zfs_vdev_async_write_min_active) /
