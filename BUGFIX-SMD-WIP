@@ -1,3 +1,29 @@
+holes!
+
+/opt/local/bin/rsync --inplace --no-whole-file -i -x -avh --sparse src/ dst/
+
+especially with vmware vmem files (and vmdk files) where src is not a dataset.
+
+dst/ as dataset: problems with --sparse,
+
+dst/ as non-zfs (including zvol): no problems with --sparse, BUT it may lead to a zfs send | zfs recv checksum mismatch on the partition itself (but not likely the files inside).
+
+
+- --
+
+this KP, turned on kmem debugging to see if it's UAF or free-after-free
+
+*** Panic Report ***
+panic(cpu 2 caller 0xffffff7f82296522): "vmem_hash_delete(0xffffff7f82494000, ffffff822ca77000, 32768): bad free (name: abd_chunk, addr, size)"@spl-vmem.c:785
+Backtrace (CPU 2), Frame : Return Address
+0xffffff8246247de0 : 0xffffff8001adab52 mach_kernel : _panic + 0xe2
+0xffffff8246247e60 : 0xffffff7f82296522 net.lundman.spl : _vmem_xfree + 0xd2
+0xffffff8246247ea0 : 0xffffff7f83489664 net.lundman.zfs : _abd_try_move + 0x4c4
+0xffffff8246247f00 : 0xffffff7f834a6403 net.lundman.zfs : _arc_abd_move_thread + 0x6a3
+0xffffff8246247fb0 : 0xffffff8001bca3f7 mach_kernel : _call_continuation + 0x17
+
+
+- --
 
 make abdmove runtime-disable/runtime-renable -able
 
