@@ -330,7 +330,7 @@ abd_init(void)
 	//int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_AUDIT;
 	///int cache_debug_flags = KMF_BUFTAG | KMF_HASH | KMF_LITE;
 	//int cache_debug_flags = KMF_HASH | KMC_NOTOUCH;
-	int cache_debug_flags = KMF_BUFTAG | KMF_LITE;
+	int cache_debug_flags = KMF_HASH | KMF_LITE;
 	cache_debug_flags |= KMC_ARENA_SLAB; /* use large slabs */
 
 	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, zfs_abd_chunk_size,
