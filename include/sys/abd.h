@@ -41,6 +41,8 @@ typedef struct abd {
 #ifdef DEBUG
 #define ABD_DEBUG_MAGIC 0xf33df0c3d3adb3efULL
 	uint64_t        abd_magic;
+#define ABD_DEBUG_MAGIC2 0xf00fbeefdeadfaceULL
+	uint64_t        abd_magic2;
 #endif
 	abd_flags_t	abd_flags;
 	uint_t		abd_size;	/* excludes scattered abd_offset */

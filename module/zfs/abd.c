@@ -104,21 +104,25 @@
 
 #ifdef DEBUG
 #ifdef _KERNEL
-#define VERIFY_ABD_MAGIC(x) do {	      \
-		const uint64_t y = (x)->abd_magic;	\
-		if (y != ABD_DEBUG_MAGIC) {		\
-			panic("VERIFY_ABD_MAGIC(" #x ") failed (0x%llx != 0x%llx )\n", \
-			    y, ABD_DEBUG_MAGIC);			\
+#define VERIFY_ABD_MAGIC(x) do {					\
+		const uint64_t y = (x)->abd_magic;			\
+		const uint64_t y2 = (x)->abd_magic2;			\
+		if (y != ABD_DEBUG_MAGIC && y2 != ABD_DEBUG_MAGIC2) {	\
+			panic("VERIFY_ABD_MAGIC(" #x ") failed (0x%llx != 0x%llx)" \
+			    "(0x%llx != 0x%llx)\n",			\
+			    y, ABD_DEBUG_MAGIC, y2, ABD_DEBUG_MAGIC2);	\
 		}							\
 	} while (0)
 #else
-#define VERIFY_ABD_MAGIC(x) do {	     \
-	  const uint64_t y = (x)->abd_magic; \
-	  if (y != ABD_DEBUG_MAGIC) {		     \
-		  char * __buf = alloca(256);				\
+#define VERIFY_ABD_MAGIC(x) do {					\
+		const uint64_t y = (x)->abd_magic;			\
+		const uint64_t y2 = (x)->abd_magic2;			\
+		if (y != ABD_DEBUG_MAGIC && y2 != ABD_DEBUG_MAGIC2) {	\
+			char * __buf = alloca(256);			\
 		  (void) snprintf(__buf, 256,				\
-		      "VERIFY_ABD_MAGIC(%s) failed (0x%llx != 0x%llx)", \
-		      #x, y, ABD_DEBUG_MAGIC);				\
+		      "VERIFY_ABD_MAGIC(%s) failed (0x%llx != 0x%llx)"	\
+		      "(0x%llx != 0x%llx)\n",				\
+		      #x, y, ABD_DEBUG_MAGIC, y2, ABD_DEBUG_MAGIC2);	\
 		  __assert_c99(__buf, __FILE__, __LINE__, __func__);	\
 	  }								\
 	} while (0)
@@ -131,18 +135,41 @@
 #ifdef _KERNEL
 #define VERIFY_BUF_NOMAGIC(x, size) do {				\
 		const uint64_t m = ((abd_t *)(x))->abd_magic;		\
-		if ((size) >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
-			panic("VERIFY_BUF_NOMAGIC(" #x ", 0x%lx) failed\n", size); \
+		const uint64_t m2 = ((abd_t *)(x))->abd_magic2;		\
+		if ((size) >= sizeof(abd_t)				\
+		    && m == ABD_DEBUG_MAGIC && m2 == ABD_DEBUG_MAGIC2) { \
+			panic("VERIFY_BUF_NOMAGIC(" #x ", 0x%lx) failed %s:%s:%d\n", size, \
+			    __FILE__, __func__, __LINE__);		\
+		}							\
+		if ((size) >= sizeof(abd_t)				\
+		    && m == ABD_DEBUG_MAGIC) {				\
+			printf("ZFS: %s:%s:%d: suspicious partial magic match (hi)\n", \
+			    __FILE__, __func__, __LINE__);		\
+		}							\
+		if ((size) >= sizeof(abd_t)				\
+		    && m2 == ABD_DEBUG_MAGIC2) {			\
+			printf("ZFS: %s:%s:%d: suspicious partial magic match (lo)\n", \
+			    __FILE__, __func__, __LINE__);		\
 		}							\
 	} while (0)
 #else
 #define VERIFY_BUF_NOMAGIC(x, size) do {				\
 		const uint64_t m = ((abd_t *)(x))->abd_magic;		\
-		if ((size) >= sizeof(abd_t) && m == ABD_DEBUG_MAGIC) {	\
+		const uint64_t m2 = ((abd_t *)(x))->abd_magic2;		\
+		if ((size) >= sizeof(abd_t)				\
+		    && m == ABD_DEBUG_MAGIC && m2 == ABD_DEBUG_MAGIC2) { \
 			char *__buf = alloca(256);			\
 			(void) snprintf(__buf, 256,			\
 			    "VERIFY_BUF_NOMAGIC(%s, 0x%lx)) failed", #x, size); \
 			__assert_c99(__buf, __FILE__, __LINE__, __func__); \
+		} else if ((size) >= sizeof(abd_t)) {			\
+			if (m == ABD_DEBUG_MAGIC) {			\
+				printf("ZFS: %s:%s:%d: suspicious partial abd magic match (hi)\n", \
+				    __FILE__, __func__, __LINE__);	\
+			} if (m2 == ABD_DEBUG_MAGIC2) {			\
+				printf("ZFS: %s:%s:%d: suspicious partial abd magic match (lo)\n", \
+				    __FILE__, __func__, __LINE__);	\
+			}						\
 		}							\
 	} while (0)
 #endif
