@@ -39,8 +39,8 @@ typedef enum abd_flags {
 
 typedef struct abd {
 #ifdef DEBUG
-#define ABD_DEBUG_MAGIC 0xf33df0c3d3adb3efULL
-	uint64_t        abd_magic;
+#define ABD_DEBUG_MAGIC ((__uint128_t)0xf33df0c3d3adb3efULL << 64 | (__uint128_t)0xd3adb33ff00ffaceULL)
+	__uint128_t        abd_magic;
 #endif
 	abd_flags_t	abd_flags;
 	uint_t		abd_size;	/* excludes scattered abd_offset */
