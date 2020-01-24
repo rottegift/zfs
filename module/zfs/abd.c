@@ -1708,11 +1708,13 @@ abd_try_move_impl(abd_t *abd)
 boolean_t
 abd_try_move(abd_t *abd)
 {
+#ifdef _KERNEL
 	extern int spl_vm_pool_low(void);
 	if (!spl_minimal_physmem_p() || spl_vm_pool_low()) {
 		ABDSTAT_BUMP(abdstat_move_skip_lowmem);
 		return(B_FALSE);
 	}
+#endif
 	abd_verify(abd);
 	return(abd_try_move_impl(abd));
 }
