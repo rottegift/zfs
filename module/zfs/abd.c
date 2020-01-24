@@ -197,6 +197,7 @@ typedef struct abd_stats {
 	kstat_named_t abdstat_moved_scattered_filedata;
 	kstat_named_t abdstat_moved_scattered_metadata;
 	kstat_named_t abdstat_move_to_buf_flag_fail;
+	kstat_named_t abdstat_move_skip_lowmem;
 } abd_stats_t;
 
 static abd_stats_t abd_stats = {
@@ -242,6 +243,7 @@ static abd_stats_t abd_stats = {
 	{ "moved_scattered_filedata",           KSTAT_DATA_UINT64 },
 	{ "moved_scattered_metadata",           KSTAT_DATA_UINT64 },
 	{ "move_to_buf_flag_fail",              KSTAT_DATA_UINT64 },
+	{ "move_skipped_lowmem",                KSTAT_DATA_UINT64 },
 };
 
 #define	ABDSTAT(stat)		(abd_stats.stat.value.ui64)
@@ -1706,6 +1708,11 @@ abd_try_move_impl(abd_t *abd)
 boolean_t
 abd_try_move(abd_t *abd)
 {
+	extern int spl_vm_pool_low(void);
+	if (!spl_minimal_physmem_p() || spl_vm_pool_low()) {
+		ABDSTAT_BUMP(abdstat_move_skip_lowmem);
+		return(B_FALSE);
+	}
 	abd_verify(abd);
 	return(abd_try_move_impl(abd));
 }
