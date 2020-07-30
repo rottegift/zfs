@@ -28,6 +28,7 @@
  * Copyright (c) 2018 Datto Inc.
  * Copyright (c) 2017 Open-E, Inc. All Rights Reserved.
  * Copyright (c) 2017, Intel Corporation.
+ * Copyright (c) 2018, loli10K <ezomori.nozomu@gmail.com>
  */
 
 #include <ctype.h>
@@ -567,8 +568,10 @@ zpool_valid_proplist(libzfs_handle_t *hdl, const char *poolname,
 
 			if (intval != 0 && (intval < 9 || intval > 13)) {
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
-				    "property '%s' number %d is invalid."),
-				    propname, intval);
+				    "property '%s' number %d is invalid, only "
+				    "values between %" PRId32 " and "
+				    "%" PRId32 " are allowed."),
+				    propname, intval, 9, 13);
 				(void) zfs_error(hdl, EZFS_BADPROP, errbuf);
 				goto error;
 			}
@@ -730,6 +733,10 @@ zpool_valid_proplist(libzfs_handle_t *hdl, const char *poolname,
 				(void) zfs_error(hdl, EZFS_BADPROP, errbuf);
 				goto error;
 			}
+			break;
+		case ZPOOL_PROP_DEDUPDITTO:
+			printf("Note: property '%s' no longer has "
+			    "any effect\n", propname);
 			break;
 
 		default:

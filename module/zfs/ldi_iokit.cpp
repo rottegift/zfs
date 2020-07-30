@@ -40,6 +40,7 @@
 /*
  * Apple IOKit (c++)
  */
+#include <sys/types.h>
 #include <IOKit/IOLib.h>
 #include <IOKit/IOTypes.h>
 #include <IOKit/IOBSD.h>
@@ -54,7 +55,6 @@
  * ZFS internal
  */
 #include <sys/zfs_context.h>
-#include <sys/spa.h>
 
 /*
  * LDI Includes
@@ -308,7 +308,6 @@ handle_open_iokit(struct ldi_handle *lhp, IOMedia *media)
 		return (ENODEV);
 	}
 #endif /* DEBUG */
-	int locked = 0;
 	/* Retain until open or error */
 	media->retain();
 
@@ -324,22 +323,14 @@ handle_open_iokit(struct ldi_handle *lhp, IOMedia *media)
 	}
 
 	/* Call open with the IOService client handle */
-	if (mutex_owned(&spa_namespace_lock)) {
-		locked=1;
-		mutex_exit(&spa_namespace_lock);
-	}
 	if (media->IOMedia::open(LH_CLIENT(lhp), 0,
 	    (lhp->lh_fmode & FWRITE ?  kIOStorageAccessReaderWriter :
 	    kIOStorageAccessReader)) == false) {
 		dprintf("%s IOMedia->open failed\n", __func__);
-		if (locked)
-			mutex_enter(&spa_namespace_lock);
 		media->release();
 		return (EIO);
 	}
 	media->release();
-	if (locked)
-		mutex_enter(&spa_namespace_lock);
 
 	/* Assign IOMedia device */
 	LH_MEDIA(lhp) = media;

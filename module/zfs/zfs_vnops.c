@@ -2789,7 +2789,7 @@ zfs_readdir(vnode_t *vp, uio_t *uio, cred_t *cr, int *eofp, int flags, int *a_nu
 			eodp = (dirent64_t  *)bufptr;
 			/* NOTE: d_seekoff is the offset for the *next* entry */
 			next = &(eodp->d_seekoff);
-			eodp->d_ino = objnum;
+			eodp->d_ino = INO_ZFSTOXNU(objnum, zfsvfs->z_root);
 			eodp->d_type = dtype;
 
 			/*
@@ -2818,7 +2818,7 @@ zfs_readdir(vnode_t *vp, uio_t *uio, cred_t *cr, int *eofp, int flags, int *a_nu
 
 			odp = (dirent_t  *)bufptr;
 			//odp = (dirent64_t  *)bufptr;
-			odp->d_ino = objnum;
+			odp->d_ino = INO_ZFSTOXNU(objnum, zfsvfs->z_root);
 			odp->d_type = dtype;
 
 			/*
@@ -4343,6 +4343,16 @@ top:
 			error = 0;
 			goto out;
 		}
+
+#if defined (MAC_OS_X_VERSION_10_12) &&        \
+        (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_12)
+		/* If renamex(VFS_RENAME_EXCL) is used, error out */
+		if (flags & VFS_RENAME_EXCL) {
+			error = EEXIST;
+			goto out;
+		}
+#endif
+
 	}
 
 	vnevent_rename_src(ZTOV(szp), sdvp, snm, ct);

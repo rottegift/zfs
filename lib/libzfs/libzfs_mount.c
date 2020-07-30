@@ -668,10 +668,7 @@ zfs_mount_seticon(const char *mountpoint)
 	/* No source icon */
 	if (!srcfp) {
 		free(path);
-		if (hasicon)
-			goto setfinderinfo;
-		else
-			return;
+		return;
 	}
 
 	if (hasicon) {
@@ -680,15 +677,14 @@ zfs_mount_seticon(const char *mountpoint)
 		if (!dstfp) {
 			fclose(srcfp);
 			free(path);
-			goto setfinderinfo;
+			return;
 		}
 		if (should_update_icon(dstfp) == B_FALSE) {
 			fclose(srcfp);
 			fclose(dstfp);
 			free(path);
-			goto setfinderinfo;
+			return;
 		} else {
-			fprintf(stderr, "Updating custom icon of %s\n", mountpoint);
 			doupdatefinder = B_TRUE;
 			fclose(dstfp);
 		}
@@ -699,7 +695,7 @@ zfs_mount_seticon(const char *mountpoint)
 	if (!dstfp) {
 		fclose(srcfp);
 		free(path);
-		goto setfinderinfo;
+		return;
 	}
 
 	/* Copy icon */
@@ -709,18 +705,21 @@ zfs_mount_seticon(const char *mountpoint)
 	fclose(dstfp);
 	fclose(srcfp);
 	free(path);
-setfinderinfo:
-	/* Tag the root directory as having a custom icon. */
-	attrsize = getxattr(mountpoint, XATTR_FINDERINFO_NAME, &finderinfo,
-	    sizeof (finderinfo), 0, 0);
-	if (attrsize != sizeof (finderinfo))
-		(void) memset(&finderinfo, 0, sizeof(finderinfo));
 
-	if ((finderinfo[4] & BE_16(0x0400)) == 0) {
-		finderinfo[4] |= BE_16(0x0400);
-		(void) setxattr(mountpoint, XATTR_FINDERINFO_NAME, &finderinfo,
-		    sizeof (finderinfo), 0, 0);
-		doupdatefinder = B_TRUE;
+	/* Tag the root directory as having a custom icon. */
+	/* Make sure it exists, or Finder can get confused */
+	if ((stat(path, &sbuf) == 0 && sbuf.st_size > 0)) {
+		attrsize = getxattr(mountpoint, XATTR_FINDERINFO_NAME, &finderinfo,
+			sizeof (finderinfo), 0, 0);
+		if (attrsize != sizeof (finderinfo))
+			(void) memset(&finderinfo, 0, sizeof(finderinfo));
+
+		if ((finderinfo[4] & BE_16(0x0400)) == 0) {
+			finderinfo[4] |= BE_16(0x0400);
+			(void) setxattr(mountpoint, XATTR_FINDERINFO_NAME, &finderinfo,
+				sizeof (finderinfo), 0, 0);
+			doupdatefinder = B_TRUE;
+		}
 	}
 
 	/* Need to touch a visible file to get Finder to update */
@@ -730,8 +729,7 @@ setfinderinfo:
 		if ((fd = mkstemp(template)) != -1) {
 			unlink(template); // Just delete it right away
 			close(fd);
-		} else
-			fprintf(stderr, "Failed to create temp file.\n");
+		}
 	}
 }
 #endif
@@ -956,45 +954,6 @@ zfs_mount(zfs_handle_t *zhp, const char *options, int flags)
 	if (!(flags & MS_RDONLY)) {
 
 		zfs_mount_seticon(mountpoint);
-
-		/*
-		 * We automatically created root ".metadate_index_never" files while
-		 * spotlight support was broken, we will be nice and try to clean
-		 * those up here, if the file date is older than before the release
-		 * with spotlight support. (So if users create newer, they want
-		 * spotlist disabled)
-		 * This should probably be removed after next release. (1.4.0?)
-		 */
-		char *path;
-		if (asprintf(&path, "%s/.metadata_never_index", mountpoint) > 0) {
-			struct stat stsb;
-			/* UTC: Fri, 01 May 2015 00:00:00 +0000 */
-			if (!stat(path, &stsb) && (stsb.st_mtime < 1430438400)) {
-				unlink(path);
-				osx_start_spotlight(mountpoint);
-			}
-			free(path);
-		}
-
-		/* If we mount without DA, it fails to create .Trashes folder, so
-		 * we manually attempt to create it here until proper integration
-		 * is complete
-		 */
-			{
-				char *path;
-				struct stat stsb;
-				if (asprintf(&path,
-							 "%s/.Trashes", mountpoint) > 0) {
-
-					if (lstat(path, &stsb) != 0) { /* Not there */
-						if (!mkdir(path, (mode_t)0333))
-							(void)chmod(path, (mode_t)01333);
-					}
-					free(path);
-				}
-			}
-
-
 
 	}
 #endif
