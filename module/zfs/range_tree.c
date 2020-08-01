@@ -253,11 +253,27 @@ range_tree_add_impl(void *arg, uint64_t start, uint64_t size, uint64_t fill)
 
 	if (gap == 0 && rs != NULL &&
 	    rs->rs_start <= start && rs->rs_end >= end) {
-		zfs_panic_recover("zfs: allocating allocated segment"
-		    "(offset=%llu size=%llu) of (offset=%llu size=%llu)\n",
-		    (longlong_t)start, (longlong_t)size,
-		    (longlong_t)rs->rs_start,
-		    (longlong_t)rs->rs_end - rs->rs_start);
+		// borked space_map on Quarto, should probably check the spa,
+		// but a collision chance is quite small
+		if (start == 2960778193920
+		    || rs->rs_start == 2960778035712) {
+			printf("SPL: Warning: zfs: (smd) allocating allocated segment"
+			    "(offset=%llu size=%llu) of (offset=%llu size=%llu)\n",
+			    (longlong_t)start, (longlong_t)size,
+			    (longlong_t)rs->rs_start,
+			    (longlong_t)rs->rs_end - rs->rs_start);
+			const longlong_t rsz = rs->rs_end - rs->rs_start;
+			if (size != 5632 || rsz != 399360) {
+				printf("SPL: Warning: zfs: allocating allocated segment"
+				    "rsz or size not the usual suspects of 5632 resp. 399360\n");
+			}
+		} else {
+			zfs_panic_recover("zfs: allocating allocated segment"
+			    "(offset=%llu size=%llu) of (offset=%llu size=%llu)\n",
+			    (longlong_t)start, (longlong_t)size,
+			    (longlong_t)rs->rs_start,
+			    (longlong_t)rs->rs_end - rs->rs_start);
+		}
 		return;
 	}
 
@@ -389,9 +405,15 @@ range_tree_remove_impl(range_tree_t *rt, uint64_t start, uint64_t size,
 
 	/* Make sure we completely overlap with someone */
 	if (rs == NULL) {
-		zfs_panic_recover("zfs: freeing free segment "
-		    "(offset=%llu size=%llu)",
-		    (longlong_t)start, (longlong_t)size);
+		if (start == 2960778193920) {
+			printf("SPL: Warning: zfs: (smd) freeing free segment"
+			    "(offset=%llu size=%llu)",
+			    (longlong_t)start, (longlong_t)size);
+		} else {
+			zfs_panic_recover("zfs: freeing free segment "
+			    "(offset=%llu size=%llu)",
+			    (longlong_t)start, (longlong_t)size);
+		}
 		return;
 	}
 
