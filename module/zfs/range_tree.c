@@ -405,6 +405,7 @@ range_tree_remove_impl(range_tree_t *rt, uint64_t start, uint64_t size,
 
 	/* Make sure we completely overlap with someone */
 	if (rs == NULL) {
+		// don't panic if this is the borked space_map on Quarto
 		if (start == 2960778193920) {
 			printf("SPL: Warning: zfs: (smd) freeing free segment"
 			    "(offset=%llu size=%llu)",
