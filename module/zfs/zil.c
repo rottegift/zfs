@@ -429,17 +429,25 @@ done:
 
 #ifdef DEBUG
 
-	if (!claimed)
-		printf("zfs: smd: zil_parse !claimed\n");
-	if (!(zh->zh_flags & ZIL_CLAIM_LR_SEQ_VALID))
-		printf("zfs: smd: zil_parse !(zh->zh_flags & ZIL_CLAIM_LR_SEQ_VALID) (zh->zh_flags == 0x%llx)\n",
-		    zh->zh_flags);
-	if (max_blk_seq == claim_blk_seq && max_lr_seq == claim_lr_seq)
-		printf("zfs: smd: zil_parse max_blk_seq == claim_blk_seq (0x%llx) && max_lr_seq == claim_lr_seq (0x%llx)\n",
-		    max_blk_seq, max_lr_seq);
-	if (decrypt && error == EIO)
-		printf("zfs: smd: zil_parse decrypt && error == EIO\n");
-
+	if (!
+	    (!claimed || !(zh->zh_flags & ZIL_CLAIM_LR_SEQ_VALID) ||
+	    (max_blk_seq == claim_blk_seq && max_lr_seq == claim_lr_seq) ||
+		(decrypt && error == EIO))
+	    ) {
+		printf("zfs: smd: zil_parse ASSERT condition: "
+		    "claimed (bool) == 0x%x, "
+		    "zh->zh_flags == 0x%llx, ZIL_CLAIM_LR_SEQ_VALID == 0x%x, "
+		    "zh->zh_flags & ZIL_CLAIM_LR_SEQ_VALID (bool) == 0x%llx, "
+		    "max_blk_seq (0x%llx) == claim_blk_seq (0x%llx) && "
+		    "max_lr_seq (0x%llx) == claim_lr_seq(0x%llx), "
+		    "decrypt (0x%x) && error (0x%x) == EIO (0x%x)\n",
+		    claimed,
+		    zh->zh_flags, ZIL_CLAIM_LR_SEQ_VALID,
+		    zh->zh_flags & ZIL_CLAIM_LR_SEQ_VALID,
+		    max_blk_seq, claim_blk_seq,
+		    max_lr_seq, claim_lr_seq,
+		    decrypt, error, EIO);
+	}
 #endif
 
 	zil_bp_tree_fini(zilog);
