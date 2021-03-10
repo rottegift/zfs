@@ -74,6 +74,8 @@
 
 #include "statcommon.h"
 
+libzfs_handle_t *g_zfs;
+
 #define ZPOOL_DISPLAY_FLAG_PRINT_GUID		(1<<0)
 #define ZPOOL_DISPLAY_FLAG_FOLLOW_LINKS		(1<<1)
 
