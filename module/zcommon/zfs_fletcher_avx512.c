@@ -32,7 +32,9 @@
 #include <strings.h>
 #endif
 
+#ifdef __linux__
 #define	__asm __asm__ __volatile__
+#endif
 
 #define STACK_FRAME_NON_STANDARD(func)
 
