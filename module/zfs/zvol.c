@@ -2558,12 +2558,15 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 		if (bytes > volsize - (position + off))
 			bytes = volsize - (position + off);
 
-		dmu_tx_hold_write(tx, ZVOL_OBJ, off, bytes);
+		dmu_tx_hold_write(tx, ZVOL_OBJ, position+off, bytes);
 		error = dmu_tx_assign(tx, TXG_WAIT);
 		if (error) {
 			dmu_tx_abort(tx);
 			break;
 		}
+
+		/* save across call, for zvol_log_write purposes */
+		uint64_t save_bytes = bytes;
 
 		error = dmu_write_iokit_dbuf(zv->zv_dbuf, &offset,
 		    position, &bytes, iomem, tx);
@@ -2571,7 +2574,7 @@ zvol_write_iokit(zvol_state_t *zv, uint64_t position,
 		if (error == 0) {
 			count -= MIN(count,
 			    (DMU_MAX_ACCESS >> 1)) + bytes;
-			zvol_log_write(zv, tx, off, bytes, sync);
+			zvol_log_write(zv, tx, position+off, save_bytes, sync);
 		}
 		dmu_tx_commit(tx);
 
