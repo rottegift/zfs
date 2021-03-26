@@ -151,15 +151,15 @@ typedef struct xuio {
 static inline int uiocopy(const unsigned char *p, uint32_t n, \
 	enum uio_rw rw, struct uio *uio, uint64_t *cbytes)					\
 {                                                                       \
-	int result;                                                         \
-	struct uio *nuio = uio_duplicate(uio);                              \
-	unsigned long long x = uio_resid(uio);                              \
-	if (!nuio) return ENOMEM;                                           \
-	uio_setrw(nuio, rw);												\
-	result = spllib_uiomove(p, n, nuio);								\
-	*cbytes = (x - uio_resid(nuio));									\
-	uio_free(nuio);                                                     \
-	return result;                                                      \
+	int result;							\
+	struct uio *nuio = uio_duplicate(uio);				\
+	unsigned long long x = uio_resid(uio);				\
+	if (!nuio) return ENOMEM;					\
+	uio_setrw(nuio, rw);						\
+	result = spllib_uiomove(p, n, nuio);				\
+	*cbytes = (x - uio_resid(nuio));				\
+	uio_free(nuio);							\
+	return result;							\
 }
 
 // Apple's uiomove puts the uio_rw in uio_create
