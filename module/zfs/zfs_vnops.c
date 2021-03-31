@@ -4368,7 +4368,12 @@ top:
 	}
 
 	tx = dmu_tx_create(zfsvfs->z_os);
+#ifdef __APPLE__
+	/* ADDTIME might grow SA */
+	dmu_tx_hold_sa(tx, szp->z_sa_hdl, B_TRUE);
+#else
 	dmu_tx_hold_sa(tx, szp->z_sa_hdl, B_FALSE);
+#endif
 	dmu_tx_hold_sa(tx, sdzp->z_sa_hdl, B_FALSE);
 	dmu_tx_hold_zap(tx, sdzp->z_id, FALSE, snm);
 	dmu_tx_hold_zap(tx, tdzp->z_id, TRUE, tnm);
